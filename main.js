@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v24';
+const ASSET_VERSION = 'v25';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -351,13 +351,13 @@ function makePageTexture(repo) {
     ctx.fillStyle = '#fff8e8';
     ctx.font = `600 40px ${FONT}`;
     ctx.textAlign = 'center';
-    ctx.fillText(live ? 'visit live site  →' : 'private project', rx + btnW/2, btnY + 62);
+    ctx.fillText(live ? 'visit live site  →' : 'not deployed yet', rx + btnW/2, btnY + 62);
     ctx.textAlign = 'left';
 
     // secondary line
     ctx.fillStyle = '#8a7660';
     ctx.font = `500 26px ${FONT}`;
-    ctx.fillText(live ? 'opens the deployed app' : 'not publicly deployed', rx, btnY + btnH + 52);
+    ctx.fillText(live ? 'opens the deployed app' : 'no public deployment', rx, btnY + btnH + 52);
 
     ctx.fillStyle = '#a89880';
     ctx.font = `500 24px ${FONT}`;

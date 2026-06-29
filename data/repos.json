@@ -5,7 +5,7 @@
     "url": "https://ghanemja.github.io",
     "repo": "https://github.com/ghanemja/ghanemja.github.io",
     "tag": "site",
-    "screenshot": null,
+    "screenshot": "ghanemja.github.io.png",
     "description": "Static project index \u2014 grid of every site I run, with live screenshots embedded as thumbnails.",
     "howItWorks": "Single index.html + screenshots dir; cards link out to deployed apps.",
     "moat": "Zero-build, refreshes automatically. No CMS to maintain.",
@@ -123,7 +123,7 @@
     "future": "Multi-color layered stencils, AI-guided detail simplification.",
     "era": "paired",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/stencil/"
+    "screenshot": null
   },
   {
     "name": "caddy",
@@ -228,7 +228,8 @@
     "future": "Add modern PPO/SAC, 3b1b-style intuition diagrams.",
     "era": "paired",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/RL_Tutorial/"
+    "url": "https://ghanemja.github.io/RL_Tutorial/",
+    "screenshot": "RL_Tutorial.png"
   },
   {
     "name": "maze",
@@ -255,7 +256,8 @@
     "future": "Promote standouts into proper repos.",
     "era": "paired",
     "dayNight": "all",
-    "url": "https://ghanemja.github.io/html/"
+    "url": "https://ghanemja.github.io/html/",
+    "screenshot": "html.png"
   },
   {
     "name": "ros2_depth_camera_tutorial",
@@ -269,7 +271,8 @@
     "future": "Add Intel RealSense + Orbbec variants, AI-stitch tutorial.",
     "era": "paired",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/ros2_depth_camera_tutorial/"
+    "url": "https://ghanemja.github.io/ros2_depth_camera_tutorial/",
+    "screenshot": "ros2_depth_camera_tutorial.png"
   },
   {
     "name": "jobapp",
@@ -296,7 +299,8 @@
     "future": "Add automotive ECU-targeted examples, real-time scheduling deep-dives.",
     "era": "paired",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/qnx_materials/"
+    "url": "https://ghanemja.github.io/qnx_materials/",
+    "screenshot": "qnx_materials.png"
   },
   {
     "name": "project",
@@ -336,7 +340,7 @@
     "future": "Region/habitat metadata, citizen-science data export.",
     "era": "paired",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/AnimalFinder/"
+    "screenshot": null
   },
   {
     "name": "computer_vision",
@@ -350,7 +354,7 @@
     "future": "Add depth-estimation, 3D-reconstruction notebooks.",
     "era": "paired",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/computer_vision/"
+    "screenshot": null
   },
   {
     "name": "autonomy",
@@ -364,7 +368,7 @@
     "future": "Swap simulator for hardware, add learned-policy planner.",
     "era": "solo",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/autonomy/"
+    "screenshot": null
   },
   {
     "name": "autonomous_machines",
@@ -378,7 +382,7 @@
     "future": "Add modern learning-based controllers.",
     "era": "solo",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/autonomous_machines/"
+    "screenshot": null
   },
   {
     "name": "role-radar",
@@ -419,7 +423,7 @@
     "future": "Extract reusable bits into community-friendly plugin.",
     "era": "solo",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/neovert/"
+    "screenshot": null
   },
   {
     "name": "deepracer-analysis",
@@ -433,7 +437,7 @@
     "future": "Compare across cars, suggest reward-fn tweaks.",
     "era": "solo",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/deepracer-analysis/"
+    "screenshot": null
   },
   {
     "name": "hackathon2022",
@@ -447,7 +451,7 @@
     "future": "Archive.",
     "era": "solo",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/hackathon2022/"
+    "screenshot": null
   },
   {
     "name": "neo4j_hack",
@@ -461,7 +465,7 @@
     "future": "Archive.",
     "era": "solo",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/neo4j_hack/"
+    "screenshot": null
   },
   {
     "name": "processchamp",
@@ -475,7 +479,7 @@
     "future": "TUI dashboard, remote-host support.",
     "era": "solo",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/processchamp/"
+    "screenshot": null
   },
   {
     "name": "OSDC22-XGBoost",
@@ -489,7 +493,7 @@
     "future": "Update with newer GBT comparison (LightGBM, CatBoost).",
     "era": "solo",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/OSDC22-XGBoost/"
+    "screenshot": null
   },
   {
     "name": "senior-design",
@@ -503,7 +507,7 @@
     "future": "Archive.",
     "era": "solo",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/senior-design/"
+    "screenshot": null
   },
   {
     "name": "Half-life-3",
@@ -517,7 +521,7 @@
     "future": "Awaiting greenlight from Valve.",
     "era": "solo",
     "dayNight": "night",
-    "url": "https://ghanemja.github.io/Half-life-3/"
+    "screenshot": null
   },
   {
     "name": "hashigo",
@@ -531,6 +535,6 @@
     "future": "TBD \u2014 fill in.",
     "era": "solo",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/hashigo/"
+    "screenshot": null
   }
 ]
