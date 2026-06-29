@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v14';
+const ASSET_VERSION = 'v17';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 // cinematic tone mapping for realism
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 0.82;
 app.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -123,20 +123,20 @@ function toonMat(color, opts = {}) {
 }
 
 // ─── lights ──────────────────────────────────────────────────────────────────
-// warm golden-hour ambient + raking sun through left window + cool fill from right
-scene.add(new THREE.HemisphereLight(0xffe2b5, 0x6b4a30, 0.55));
+// softer, balanced — avoids blown-out cream walls. Intensities tuned down.
+scene.add(new THREE.HemisphereLight(0xffe2b5, 0x6b4a30, 0.35));
 
-const sun = new THREE.DirectionalLight(0xffd095, 2.0);
+const sun = new THREE.DirectionalLight(0xffd095, 1.1);
 sun.position.set(-18, 14, 8);   // from left window angle
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -18; sun.shadow.camera.right = 18;
-sun.shadow.camera.top = 16; sun.shadow.camera.bottom = -4;
-sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 60;
+sun.shadow.camera.left = -24; sun.shadow.camera.right = 24;
+sun.shadow.camera.top = 18; sun.shadow.camera.bottom = -6;
+sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 70;
 sun.shadow.bias = -0.0008;
 scene.add(sun);
 
-const fillRight = new THREE.DirectionalLight(0x9fc4f0, 0.35);
+const fillRight = new THREE.DirectionalLight(0x9fc4f0, 0.18);
 fillRight.position.set(12, 9, 4);
 scene.add(fillRight);
 
@@ -746,6 +746,7 @@ async function tryLoadCustomShelf() {
           oldMat.map.colorSpace = THREE.SRGBColorSpace;
           oldMat.roughness = 0.85;
           oldMat.metalness = 0.0;
+          oldMat.side = THREE.DoubleSide;   // painting planes show regardless of normal
           oldMat.needsUpdate = true;
           // keep oldMat as-is (textured)
         } else {
@@ -813,11 +814,9 @@ function addGalleryHitbox(pos, size, rot = [0, 0, 0]) {
   return m;
 }
 
-// AboutPod art cluster (real easel + dresser + your paintings) at Blender (9, -9)
-// → three.js (9, ~2.5, 9). Big hitbox covering the whole creative corner.
-addGalleryHitbox([18, 4, 7], [9, 8]);
-// back-wall painting cluster above shelf, Blender z~12 → three.js (0, 12, ~0.9)
-addGalleryHitbox([0, 12, 1.0], [14, 4]);
+// art corner (easel + dresser + your paintings) against right wall, Blender ~(16,-9)
+// → three.js (16, ~3, 9). Hitbox over the creative corner.
+addGalleryHitbox([16, 3, 9], [10, 8]);
 // the DOORWAY itself — Blender (x=13, back wall y≈1.35, h 0..8) → three.js (13, 4, -1.35)
 // faces +Z toward the viewer; clicking it walks you into the hall
 addGalleryHitbox([13, 4, -1.3], [5, 8]);
@@ -1411,14 +1410,14 @@ scene.add(skyPlane);
 
 // ─── phase definitions ──────────────────────────────────────────────────────
 const PHASES = [
-  { start: 0,  end: 5,  name: 'deep night',  top:'#080820', bot:'#1a1a4a', sunY:0.35, sunSize:0.05, sunCol:'#e8eaf6', sunHex:0x9fa8da, sunInt:0.25, ambHex:0x1a237e, bgHex:0x0e0f23 },
-  { start: 5,  end: 7,  name: 'dawn',        top:'#7e5a8e', bot:'#ffb285', sunY:0.92, sunSize:0.08, sunCol:'#ffd180', sunHex:0xff9966, sunInt:0.9,  ambHex:0xff8a65, bgHex:0xffb285 },
-  { start: 7,  end: 10, name: 'morning',     top:'#87ceeb', bot:'#fff3b0', sunY:0.75, sunSize:0.08, sunCol:'#fff3a3', sunHex:0xffe082, sunInt:1.8,  ambHex:0xbbdefb, bgHex:0xe3f2fd },
-  { start: 10, end: 16, name: 'midday',      top:'#4fc3f7', bot:'#e1f5fe', sunY:0.92, sunSize:0.08, sunCol:'#ffffff', sunHex:0xfff0d6, sunInt:2.2,  ambHex:0xe1f5fe, bgHex:0xffffff },
-  { start: 16, end: 18, name: 'golden hour', top:'#ffa726', bot:'#ffeb3b', sunY:0.45, sunSize:0.11, sunCol:'#ffb74d', sunHex:0xffd095, sunInt:2.2,  ambHex:0xffe0b2, bgHex:0xfff3e0 },
-  { start: 18, end: 20, name: 'sunset',      top:'#7e2c5a', bot:'#ff7043', sunY:0.20, sunSize:0.14, sunCol:'#ff5722', sunHex:0xff6a3d, sunInt:1.5,  ambHex:0xff8a65, bgHex:0xffccbc },
-  { start: 20, end: 22, name: 'dusk',        top:'#311b92', bot:'#7e2c5a', sunY:0.08, sunSize:0.08, sunCol:'#ff7043', sunHex:0x7e57c2, sunInt:0.55, ambHex:0x5e35b1, bgHex:0x3949ab },
-  { start: 22, end: 24, name: 'night',       top:'#0a0a2e', bot:'#1a1a4a', sunY:0.70, sunSize:0.05, sunCol:'#e8eaf6', sunHex:0x9fa8da, sunInt:0.30, ambHex:0x1a237e, bgHex:0x121530 },
+  { start: 0,  end: 5,  name: 'deep night',  top:'#080820', bot:'#1a1a4a', sunY:0.35, sunSize:0.05, sunCol:'#e8eaf6', sunHex:0x9fa8da, sunInt:0.18, ambHex:0x1a237e, bgHex:0x0e0f23 },
+  { start: 5,  end: 7,  name: 'dawn',        top:'#7e5a8e', bot:'#ffb285', sunY:0.92, sunSize:0.08, sunCol:'#ffd180', sunHex:0xff9966, sunInt:0.6,  ambHex:0xff8a65, bgHex:0xffb285 },
+  { start: 7,  end: 10, name: 'morning',     top:'#87ceeb', bot:'#fff3b0', sunY:0.75, sunSize:0.08, sunCol:'#fff3a3', sunHex:0xffe082, sunInt:1.1,  ambHex:0xbbdefb, bgHex:0xe3f2fd },
+  { start: 10, end: 16, name: 'midday',      top:'#4fc3f7', bot:'#cfe7f5', sunY:0.92, sunSize:0.08, sunCol:'#fffaf0', sunHex:0xfff0d6, sunInt:1.35, ambHex:0xd6eef7, bgHex:0xeaf4fb },
+  { start: 16, end: 18, name: 'golden hour', top:'#ffa726', bot:'#ffeb3b', sunY:0.45, sunSize:0.11, sunCol:'#ffb74d', sunHex:0xffd095, sunInt:1.3,  ambHex:0xffe0b2, bgHex:0xfff3e0 },
+  { start: 18, end: 20, name: 'sunset',      top:'#7e2c5a', bot:'#ff7043', sunY:0.20, sunSize:0.14, sunCol:'#ff5722', sunHex:0xff6a3d, sunInt:0.95, ambHex:0xff8a65, bgHex:0xffccbc },
+  { start: 20, end: 22, name: 'dusk',        top:'#311b92', bot:'#7e2c5a', sunY:0.08, sunSize:0.08, sunCol:'#ff7043', sunHex:0x7e57c2, sunInt:0.4,  ambHex:0x5e35b1, bgHex:0x3949ab },
+  { start: 22, end: 24, name: 'night',       top:'#0a0a2e', bot:'#1a1a4a', sunY:0.70, sunSize:0.05, sunCol:'#e8eaf6', sunHex:0x9fa8da, sunInt:0.22, ambHex:0x1a237e, bgHex:0x121530 },
 ];
 
 function getCurrentESTHour() {
