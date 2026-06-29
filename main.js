@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v22';
+const ASSET_VERSION = 'v23';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -169,6 +169,17 @@ const pendantGlow = new THREE.Mesh(
 );
 pendantGlow.position.copy(pendantLight.position);
 scene.add(pendantGlow);
+
+// floor lamp next to the easel — Blender bulb (20.6,-3.5,7.4) → three.js (20.6, 7.4, 3.5)
+const easelLamp = new THREE.PointLight(0xffd9a0, 1.6, 22, 1.5);
+easelLamp.position.set(20.6, 7.4, 3.5);
+scene.add(easelLamp);
+const easelLampGlow = new THREE.Mesh(
+  new THREE.SphereGeometry(0.32, 14, 10),
+  new THREE.MeshBasicMaterial({ color: 0xfff0c8 })
+);
+easelLampGlow.position.copy(easelLamp.position);
+scene.add(easelLampGlow);
 
 // floor + walls live in the GLB room model — no procedural floor here
 
@@ -872,6 +883,9 @@ async function loadArtworks() {
     const res = await fetch(bust('./data/artworks.json'));
     artworks = await res.json();
   } catch { artworks = []; }
+  // build the gallery hall NOW (in the shared scene) so it's visible through
+  // the doorway from the start — not black until the first time you enter it.
+  buildGallery();
 }
 loadArtworks();
 
@@ -892,9 +906,9 @@ function addGalleryHitbox(pos, size, rot = [0, 0, 0]) {
   return m;
 }
 
-// art corner (easel + dresser + your paintings) against right wall, Blender ~(16,-9)
-// → three.js (16, ~3, 9). Hitbox over the creative corner.
-addGalleryHitbox([16, 3, 9], [10, 8]);
+// easel by the gallery door, Blender (18,-3,5.2) → three.js (18, 5.2, 3).
+// faces the room (+Z); clicking it enters the gallery.
+addGalleryHitbox([18, 5, 3], [6, 7]);
 // the DOORWAY itself — Blender (x=13, back wall y≈1.35, h 0..8) → three.js (13, 4, -1.35)
 // faces +Z toward the viewer; clicking it walks you into the hall
 addGalleryHitbox([13, 4, -1.3], [5, 8]);
@@ -1618,10 +1632,12 @@ function updateTimeOfDay() {
   // scene background tint subtle
   scene.background.setHex(blendCol(current.bgHex, next.bgHex, progress).getHex());
 
-  // pendant lamp: bright pool at night, dim by day; glow tracks it
+  // lamps: bright pool at night, dim by day; glows track them
   const isNight = isCurrentlyNight();
   pendantLight.intensity = isNight ? 5.5 : 0.8;
   pendantGlow.material.color.setHex(isNight ? 0xfff0c8 : 0xddd4c0);
+  easelLamp.intensity = isNight ? 4.0 : 0.6;
+  easelLampGlow.material.color.setHex(isNight ? 0xfff0c8 : 0xddd4c0);
 
   // HUD
   const h12 = Math.floor(hour);
