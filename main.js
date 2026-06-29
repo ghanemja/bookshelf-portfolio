@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v25';
+const ASSET_VERSION = 'v26';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -278,7 +278,7 @@ function makePageTexture(repo) {
     ctx.fillStyle = '#2d2118';
     ctx.font = `700 80px ${FONT}`;
     y += 40;
-    y = wrapText(ctx, repo.name, lx, y, lw, 84) + 30;
+    y = wrapText(ctx, repo.displayName || repo.name, lx, y, lw, 84) + 30;
 
     // era badge
     const isPaired = repo.era === 'paired';
@@ -444,7 +444,7 @@ function makeBookGroup(repo, thickness, height, depth) {
 
   const coverMat = toonMat(baseHex);
   const pagesMat = toonMat(0xfff1d0);
-  const spineMat = toonMat(0xffffff, { map: makeSpineTexture(repo.name, baseHex, repo.era) });
+  const spineMat = toonMat(0xffffff, { map: makeSpineTexture(repo.displayName || repo.name, baseHex, repo.era) });
 
   const W = depth;        // book's local X span (width when laid flat)
   const H = height;       // local Y

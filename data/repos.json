@@ -40,7 +40,8 @@
     "future": "Per-niche hobbymaxxing platform \u2014 DJ/music, knitting, brewing, etc.",
     "era": "paired",
     "dayNight": "night",
-    "url": "https://ghanemja.github.io/crochet/"
+    "url": "https://ghanemja.github.io/crochet/",
+    "displayName": "YarnFlow"
   },
   {
     "name": "pptgpt",
@@ -53,7 +54,8 @@
     "whenToUse": "Drafting decks from prompts; iterating on existing slide content.",
     "future": "Split-screen design/result view, 3blue1brown-style math visuals, interactive plot manipulation.",
     "era": "paired",
-    "dayNight": "day"
+    "dayNight": "day",
+    "displayName": "DeckGPT"
   },
   {
     "name": "inbox-zero-board",
@@ -68,7 +70,8 @@
     "future": "LLM auto-categorization, snooze suggestions, shared team boards.",
     "era": "paired",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/inbox-zero-board/"
+    "url": "https://ghanemja.github.io/inbox-zero-board/",
+    "displayName": "Inbox Zero"
   },
   {
     "name": "charterscope",
@@ -83,7 +86,8 @@
     "future": "Multi-language, broker-network integration, redline suggestions.",
     "era": "paired",
     "dayNight": "day",
-    "url": "https://ghanemja.github.io/charterscope/"
+    "url": "https://ghanemja.github.io/charterscope/",
+    "displayName": "CharterScope"
   },
   {
     "name": "agentsannonymous",
@@ -96,7 +100,8 @@
     "whenToUse": "Open-ended domain problems where expert oversight matters.",
     "future": "Brainchamp pivot to healthcare/legal verticals; citation-penalty agent; agent-lifespan RL.",
     "era": "paired",
-    "dayNight": "day"
+    "dayNight": "day",
+    "displayName": "The Council"
   },
   {
     "name": "cadme",
@@ -162,7 +167,8 @@
     "whenToUse": "Onboarding into a new technical domain or paper cluster.",
     "future": "3blue1brown-style visuals, plain-English Hebbian/RL metric overlays, NotebookLM-style podcasts, MathMotion videos.",
     "era": "paired",
-    "dayNight": "day"
+    "dayNight": "day",
+    "displayName": "Brain U"
   },
   {
     "name": "caddy-query",
@@ -257,7 +263,8 @@
     "era": "paired",
     "dayNight": "all",
     "url": "https://ghanemja.github.io/html/",
-    "screenshot": "html.png"
+    "screenshot": "html.png",
+    "displayName": "Pixels \u2192 Params"
   },
   {
     "name": "ros2_depth_camera_tutorial",
@@ -409,7 +416,8 @@
     "future": "Archive; bookshelf-portfolio is the new home.",
     "era": "solo",
     "dayNight": "all",
-    "url": "https://janelle-ghanem.netlify.app"
+    "url": "https://janelle-ghanem.netlify.app",
+    "displayName": "The Dome"
   },
   {
     "name": "neovert",
