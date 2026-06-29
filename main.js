@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v19';
+const ASSET_VERSION = 'v20';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -52,7 +52,8 @@ const OUTLINE_SCALE = 1.025;
 const app = document.getElementById('app');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xf2e6cf);
-scene.fog = new THREE.Fog(0xf2e6cf, 30, 60);
+// no fog — it washed the mid-room to a cream haze (esp. at night). Room is
+// enclosed; depth cueing comes from lighting, not fog.
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200);
 
@@ -121,7 +122,8 @@ function toonMat(color, opts = {}) {
 
 // ─── lights ──────────────────────────────────────────────────────────────────
 // softer, balanced — avoids blown-out cream walls. Intensities tuned down.
-scene.add(new THREE.HemisphereLight(0xffe2b5, 0x6b4a30, 0.35));
+const hemi = new THREE.HemisphereLight(0xffe2b5, 0x6b4a30, 0.45);
+scene.add(hemi);
 
 const sun = new THREE.DirectionalLight(0xffd095, 1.1);
 sun.position.set(-18, 14, 8);   // from left window angle
@@ -138,10 +140,18 @@ fillRight.position.set(12, 9, 4);
 scene.add(fillRight);
 
 // pendant lamp pool — over reading chair, Blender (-10.5, -17, 10) → three.js (-10.5, 10, 17)
-const pendantLight = new THREE.PointLight(0xffc885, 2.0, 18, 1.6);
-pendantLight.position.set(-13.4, 9, 22);
+// pendant over the reading chair — Blender bulb (-14.4,-22,8.7) → three.js (-14.4, 8.7, 22)
+const pendantLight = new THREE.PointLight(0xffce93, 2.0, 26, 1.4);
+pendantLight.position.set(-14.4, 8.7, 22);
 pendantLight.castShadow = false;
 scene.add(pendantLight);
+// glowing bulb so the lamp visibly emits
+const pendantGlow = new THREE.Mesh(
+  new THREE.SphereGeometry(0.45, 16, 12),
+  new THREE.MeshBasicMaterial({ color: 0xfff0c8 })
+);
+pendantGlow.position.copy(pendantLight.position);
+scene.add(pendantGlow);
 
 // floor + walls live in the GLB room model — no procedural floor here
 
@@ -1398,9 +1408,10 @@ const skyPlane = new THREE.Mesh(
   new THREE.PlaneGeometry(SKY_W, SKY_H),
   new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.DoubleSide })
 );
-// Blender left wall at X=-17, window at Y=-2 → three.js (-17, 8.5, 2)
-// place sky plane FURTHER out (-18.5) and rotate to face into room (+X)
-skyPlane.position.set(-18.5, 8.5, 2);
+// OUTSIDE the left wall (wall inner ≈ -22.7), behind the window cutout, so it
+// shows through the window instead of floating inside the room over the piano.
+// Window center (Blender y=-7,z=8) → three.js (-22.7, 8, 7).
+skyPlane.position.set(-23.4, 8, 7);
 skyPlane.rotation.y = Math.PI / 2;
 scene.add(skyPlane);
 
@@ -1484,18 +1495,26 @@ todHUD.innerHTML = `
   </div>`;
 document.body.appendChild(todHUD);
 
-// surface mode state
+// surface mode state — also FORCES the scene lighting/sky for day/night
 let surfaceMode = 'auto';   // 'auto' | 'all' | 'day' | 'night'
 todHUD.querySelectorAll('.tod-toggle button').forEach(btn => {
   btn.addEventListener('click', () => {
     surfaceMode = btn.dataset.mode;
     todHUD.querySelectorAll('.tod-toggle button').forEach(b => b.classList.toggle('active', b === btn));
+    updateTimeOfDay();        // day/night visibly relights the whole room
     updateBookSurfacing();
   });
 });
 
+// 'day' pins to bright midday, 'night' to deep night; otherwise real EST time.
+function getEffectiveHour() {
+  if (surfaceMode === 'day') return 13;
+  if (surfaceMode === 'night') return 23;
+  return getCurrentESTHour();
+}
+
 function updateTimeOfDay() {
-  const hour = getCurrentESTHour();
+  const hour = getEffectiveHour();
   const { current, next, progress } = getPhase(hour);
 
   const topCol = '#' + blendCol(current.top, next.top, progress).getHexString();
@@ -1513,9 +1532,10 @@ function updateTimeOfDay() {
   // scene background tint subtle
   scene.background.setHex(blendCol(current.bgHex, next.bgHex, progress).getHex());
 
-  // pendant lamp brighter at night
-  const isNight = hour < 7 || hour >= 18;
-  pendantLight.intensity = isNight ? 3.2 : 0.5;
+  // pendant lamp: bright pool at night, dim by day; glow tracks it
+  const isNight = isCurrentlyNight();
+  pendantLight.intensity = isNight ? 5.5 : 0.8;
+  pendantGlow.material.color.setHex(isNight ? 0xfff0c8 : 0xddd4c0);
 
   // HUD
   const h12 = Math.floor(hour);
@@ -1534,6 +1554,8 @@ updateTimeOfDay();
 // ─── day/night book surfacing ───────────────────────────────────────────────
 // books matching current mode scale up + drift forward; others recede slightly
 function isCurrentlyNight() {
+  if (surfaceMode === 'day') return false;
+  if (surfaceMode === 'night') return true;
   const h = getCurrentESTHour();
   return h < 7 || h >= 18;
 }
