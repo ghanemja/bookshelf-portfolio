@@ -266,6 +266,38 @@
     color: var(--accent); text-decoration: none; font-weight: 700; }
   #gallery .g-link:hover { text-decoration: underline; }
 
+  /* ── landing: browse tech vs art ── */
+  #landing {
+    position: fixed; inset: 0; z-index: 40; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 30px; text-align: center;
+    background: radial-gradient(ellipse at center, rgba(20,17,13,0.18), rgba(20,17,13,0.55));
+    backdrop-filter: blur(2px);
+    font-family: "Fredoka", system-ui, sans-serif;
+  }
+  body.landing #landing { display: flex; }
+  /* hide studio HUD chrome behind the landing */
+  body.landing #hud, body.landing #tod-hud, body.landing #caveat,
+  body.landing #legend, body.landing #open-gallery { opacity: 0; pointer-events: none; }
+  #landing .l-title { color: #fff8e8; font-size: 44px; font-weight: 700;
+    letter-spacing: -0.01em; text-shadow: 0 3px 18px rgba(0,0,0,0.5); }
+  #landing .l-sub { color: rgba(255,248,232,0.85); font-size: 17px; margin-top: -16px;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+  #landing .l-choices { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
+  #landing .l-btn {
+    cursor: pointer; border: none; width: 230px; padding: 26px 22px;
+    border-radius: 20px; font-family: inherit; font-weight: 700; font-size: 22px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    transition: transform 0.14s ease, box-shadow 0.14s ease;
+  }
+  #landing .l-btn .l-emoji { font-size: 44px; }
+  #landing .l-btn .l-note { font-size: 13px; font-weight: 500; opacity: 0.85; }
+  #landing .l-btn.tech { background: #ff6b2e; color: #fff8e8; box-shadow: 0 8px 0 #c14d1a; }
+  #landing .l-btn.art  { background: #4e63c8; color: #fff8e8; box-shadow: 0 8px 0 #36499b; }
+  #landing .l-btn:hover { transform: translateY(3px); }
+  #landing .l-btn.tech:hover { box-shadow: 0 5px 0 #c14d1a; }
+  #landing .l-btn.art:hover  { box-shadow: 0 5px 0 #36499b; }
+
   #tooltip {
     position: fixed; pointer-events: none; z-index: 15;
     background: var(--ink); color: var(--panel);
@@ -339,6 +371,23 @@
 
   <div id="loading">loading shelf…</div>
 
+  <div id="landing">
+    <div class="l-title">ghanemja's studio</div>
+    <div class="l-sub">a room of projects &amp; paintings — pick where to start</div>
+    <div class="l-choices">
+      <button id="btn-tech" class="l-btn tech">
+        <span class="l-emoji">📚</span>
+        browse tech
+        <span class="l-note">zoom into the bookshelf</span>
+      </button>
+      <button id="btn-art" class="l-btn art">
+        <span class="l-emoji">🎨</span>
+        browse art
+        <span class="l-note">walk the gallery</span>
+      </button>
+    </div>
+  </div>
+
   <script type="importmap">
   {
     "imports": {
@@ -347,6 +396,6 @@
     }
   }
   </script>
-  <script type="module" src="./main.js?cb=v20"></script>
+  <script type="module" src="./main.js?cb=v21"></script>
 </body>
 </html>

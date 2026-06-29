@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v20';
+const ASSET_VERSION = 'v21';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -38,11 +38,19 @@ const TAG_PALETTE = {
   misc:      0x9ca3af,
 };
 
-// row 0 = bottom shelf, row 2 = top shelf — 3 Dewey-style sections
-const TAG_ROW_PLAN = [
-  { label: 'research & ML',  code: '000', tags: ['edu', 'robotics', 'ml', 'hackathon'] },          // bottom (~12)
-  { label: 'products',       code: '500', tags: ['cad', 'ai', 'game'] },                            // middle (~12)
-  { label: 'tools & web',    code: '900', tags: ['tool', 'site', 'hobby', 'profile', 'misc'] },     // top (~15)
+// row 0 = bottom, row 2 = top. Books assigned to shelves by explicit name.
+const SHELF_PLAN = [
+  { label: 'research & ML', code: '000', names: [
+    'senior-design','RL_Tutorial','ros2_depth_camera_tutorial','qnx_materials',
+    'autonomy','autonomous_machines','AnimalFinder','computer_vision',
+    'deepracer-analysis','OSDC22-XGBoost','hackathon2022','neo4j_hack' ] },
+  { label: 'product demos', code: '500', names: [
+    'inbox-zero-board','charterscope','html','portfolio','crochet',
+    'pptgpt','agentsannonymous','brain-university' ] },
+  { label: 'experiments', code: '900', names: [
+    'cadme','caddy','cadme-10k','caddy-query','sketchy','cq_dataset','beanbots',
+    'maze','Half-life-3','stencil','jobapp','fitter','role-radar','neovert',
+    'processchamp','hashigo','ghanemja.github.io','ghanemja','project' ] },
 ];
 
 const OUTLINE_COLOR = 0x1a1410;
@@ -93,11 +101,19 @@ controls.target.set(0, ROOM_CENTER_Y, 0);
 controls.enableRotate = true;
 controls.enablePan = false;
 controls.minDistance = 8;
-controls.maxDistance = 50;
+controls.maxDistance = 55;
 controls.minPolarAngle = Math.PI * 0.30;
 controls.maxPolarAngle = Math.PI * 0.55;
 controls.minAzimuthAngle = -Math.PI * 0.30;
 controls.maxAzimuthAngle =  Math.PI * 0.30;
+
+// named camera framings
+const VIEW_LANDING = { pos: new THREE.Vector3(0, 8.5, 42), tgt: new THREE.Vector3(0, 6, -1) };
+const VIEW_SHELF   = { pos: new THREE.Vector3(0, 6.6, 17), tgt: new THREE.Vector3(0, 6.6, -1) };
+// start on the wide landing view (whole room)
+camera.position.copy(VIEW_LANDING.pos);
+controls.target.copy(VIEW_LANDING.tgt);
+camera.lookAt(controls.target);
 
 // ─── toon gradient ───────────────────────────────────────────────────────────
 function makeToonGradient() {
@@ -157,7 +173,7 @@ scene.add(pendantGlow);
 
 // ─── spine texture ───────────────────────────────────────────────────────────
 function makeSpineTexture(name, baseColor, era = 'paired') {
-  const w = 256, h = 1024;
+  const w = 512, h = 2048;                 // hi-res for crisp, big spine text
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const ctx = c.getContext('2d');
@@ -174,31 +190,32 @@ function makeSpineTexture(name, baseColor, era = 'paired') {
   ctx.fillRect(0, 0, w, h);
 
   // era stripe at very top — solo = black, paired = orange
-  const eraColor = era === 'paired' ? '#ff6b2e' : '#1a1410';
-  ctx.fillStyle = eraColor;
-  ctx.fillRect(0, 0, w, 36);
+  ctx.fillStyle = era === 'paired' ? '#ff6b2e' : '#1a1410';
+  ctx.fillRect(0, 0, w, 72);
 
   // gold bands
   ctx.fillStyle = '#ffd966';
-  ctx.fillRect(0, 70, w, 8);
-  ctx.fillRect(0, h - 78, w, 8);
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx.fillRect(0, 78, w, 2);
-  ctx.fillRect(0, h - 80, w, 2);
+  ctx.fillRect(0, 150, w, 14);
+  ctx.fillRect(0, h - 160, w, 14);
 
-  // title rotated vertically
+  // title rotated vertically — BIG, fits the wide spine; auto-shrink to fit length
   ctx.save();
   ctx.translate(w / 2, h / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.font = '500 72px "Fredoka", "Trebuchet MS", system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = 7;
-  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  let fontPx = 210;
+  const maxLen = h - 420;                   // available length along the spine
+  ctx.font = `600 ${fontPx}px "Fredoka", "Trebuchet MS", system-ui, sans-serif`;
+  while (ctx.measureText(name).width > maxLen && fontPx > 90) {
+    fontPx -= 8;
+    ctx.font = `600 ${fontPx}px "Fredoka", "Trebuchet MS", system-ui, sans-serif`;
+  }
+  ctx.lineWidth = 12;
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
   ctx.fillStyle = '#fff8e6';
-  const display = name.length > 17 ? name.slice(0, 16) + '…' : name;
-  ctx.strokeText(display, 0, 0);
-  ctx.fillText(display, 0, 0);
+  ctx.strokeText(name, 0, 0);
+  ctx.fillText(name, 0, 0);
   ctx.restore();
 
   const tex = new THREE.CanvasTexture(c);
@@ -552,36 +569,36 @@ async function loadRepos() {
   return res.json();
 }
 
-// Dewey-style label sitting on front edge of plank ABOVE this row
+// BIG label card leaning on the front edge of the plank above this row
 function addShelfLabel(rowDef, rowIdx, shelfTopY) {
-  const W = 1.8, H = 0.30;          // wider, shorter — fits on plank front strip
-  const cw = 768, ch = 130;
+  const W = 4.4, H = 1.0;
+  const cw = 1100, ch = 250;
 
   const canvas = document.createElement('canvas');
   canvas.width = cw; canvas.height = ch;
   const ctx = canvas.getContext('2d');
 
-  // cream label
+  // rounded cream card
   ctx.fillStyle = '#fff8e8';
   ctx.fillRect(0, 0, cw, ch);
   ctx.strokeStyle = '#3d2f1f';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(6, 6, cw - 12, ch - 12);
+  ctx.lineWidth = 8;
+  ctx.strokeRect(8, 8, cw - 16, ch - 16);
 
-  // Dewey code in tag-color box
+  // Dewey code in accent box
   ctx.fillStyle = '#c14d1a';
-  ctx.fillRect(20, 20, 130, ch - 40);
+  ctx.fillRect(28, 28, 200, ch - 56);
   ctx.fillStyle = '#fff8e8';
-  ctx.font = '600 56px "Fredoka", system-ui, sans-serif';
+  ctx.font = '700 110px "Fredoka", system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(rowDef.code, 85, ch / 2);
+  ctx.fillText(rowDef.code, 128, ch / 2);
 
-  // category label
-  ctx.fillStyle = '#3d2f1f';
-  ctx.font = '700 40px "Fredoka", system-ui, sans-serif';
+  // category label — BIG
+  ctx.fillStyle = '#2d2118';
+  ctx.font = '700 92px "Fredoka", system-ui, sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(rowDef.label, 180, ch / 2);
+  ctx.fillText(rowDef.label, 270, ch / 2 + 4);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -591,34 +608,84 @@ function addShelfLabel(rowDef, rowIdx, shelfTopY) {
     new THREE.PlaneGeometry(W, H),
     new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, transparent: true })
   );
-  // position: on the FRONT FACE of the plank ABOVE this row
-  // plank N+1 center y = (rowIdx + 1) * ROW_HEIGHT + SHELF_THICKNESS/2
+  // sit just above the plank's front edge, leaning out a touch toward viewer
   plaque.position.set(
-    -SHELF_WIDTH/2 + W/2 + 0.2,
-    (rowIdx + 1) * ROW_HEIGHT + SHELF_THICKNESS / 2,
-    SHELF_DEPTH / 2 + 0.02
+    -SHELF_WIDTH/2 + W/2 + 0.3,
+    (rowIdx + 1) * ROW_HEIGHT + SHELF_THICKNESS / 2 + 0.35,
+    SHELF_DEPTH / 2 + 0.06
   );
+  plaque.rotation.x = -0.12;
   scene.add(plaque);
 }
 
-function layoutBooks(repos) {
-  // group by tag
-  const byTag = {};
-  for (const r of repos) {
-    (byTag[r.tag] || (byTag[r.tag] = [])).push(r);
-  }
+// framed "color key" painting on the back wall, left of the shelf
+function addColorLegend() {
+  const entries = [
+    ['site', 'websites'], ['ai', 'AI / agents'], ['cad', 'CAD'],
+    ['ml', 'machine learning'], ['robotics', 'robotics'], ['tool', 'tools'],
+    ['edu', 'coursework'], ['hackathon', 'hackathons'], ['game', 'games'],
+    ['hobby', 'hobby'], ['profile', 'profile'], ['misc', 'misc'],
+  ];
+  const cw = 640, ch = 920;
+  const canvas = document.createElement('canvas');
+  canvas.width = cw; canvas.height = ch;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff8e8'; ctx.fillRect(0, 0, cw, ch);
 
-  TAG_ROW_PLAN.forEach((rowDef, rowIdx) => {
+  ctx.fillStyle = '#2d2118';
+  ctx.font = '700 64px "Fredoka", system-ui, sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText('colour key', 48, 80);
+  ctx.fillStyle = '#7a6850';
+  ctx.font = '500 28px "Fredoka", system-ui, sans-serif';
+  ctx.fillText('what the spine colours mean', 48, 134);
+
+  const y0 = 200, rowH = (ch - y0 - 40) / entries.length;
+  entries.forEach(([tag, meaning], i) => {
+    const y = y0 + i * rowH + rowH / 2;
+    const col = TAG_PALETTE[tag] || TAG_PALETTE.misc;
+    ctx.fillStyle = '#' + col.toString(16).padStart(6, '0');
+    ctx.fillRect(48, y - 26, 70, 52);
+    ctx.strokeStyle = '#2d2118'; ctx.lineWidth = 3; ctx.strokeRect(48, y - 26, 70, 52);
+    ctx.fillStyle = '#2d2118';
+    ctx.font = '600 40px "Fredoka", system-ui, sans-serif';
+    ctx.fillText(meaning, 150, y);
+  });
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+  const W = 4.6, H = W * ch / cw;          // ~4.6 × 6.6
+  // frame + canvas on the back wall, left of the shelf, facing the viewer (+Z)
+  const frame = new THREE.Mesh(
+    new THREE.PlaneGeometry(W + 0.4, H + 0.4),
+    new THREE.MeshStandardMaterial({ color: 0x4a341a, roughness: 0.8 })
+  );
+  frame.position.set(-13.5, 6.6, -1.18);
+  scene.add(frame);
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(W, H),
+    new THREE.MeshBasicMaterial({ map: tex })
+  );
+  plane.position.set(-13.5, 6.6, -1.16);
+  scene.add(plane);
+}
+
+function layoutBooks(repos) {
+  // lookup by name
+  const byName = {};
+  for (const r of repos) byName[r.name] = r;
+
+  SHELF_PLAN.forEach((rowDef, rowIdx) => {
     const shelfTopY = rowIdx * ROW_HEIGHT + SHELF_THICKNESS;
     const usable = SHELF_WIDTH - 0.5;
 
-    // add Dewey-style label plaque for this row (left side of shelf)
     addShelfLabel(rowDef, rowIdx, shelfTopY);
 
-    const tagsInRow = rowDef.tags;
-    const clusters = tagsInRow
-      .map(t => ({ tag: t, repos: byTag[t] || [] }))
-      .filter(c => c.repos.length > 0);
+    // this shelf's books, in listed order, as a single cluster
+    const shelfRepos = rowDef.names.map(n => byName[n]).filter(Boolean);
+    const clusters = shelfRepos.length ? [{ tag: rowDef.label, repos: shelfRepos }] : [];
     if (clusters.length === 0) return;
 
     // assign realistic widths per book
@@ -1380,6 +1447,13 @@ function animate() {
   // ── one scene; gallery drives the same camera when active ──
   if (galleryState !== 'off') {
     updateGalleryCamera();
+  } else if (camAnim) {
+    const raw = Math.min(1, (performance.now() - camAnim.start) / camAnim.dur);
+    const e = raw < 0.5 ? 2*raw*raw : 1 - Math.pow(-2*raw + 2, 2) / 2;  // easeInOutQuad
+    camera.position.lerpVectors(camAnim.p0, camAnim.p1, e);
+    controls.target.lerpVectors(camAnim.t0, camAnim.t1, e);
+    camera.lookAt(controls.target);
+    if (raw >= 1) camAnim = null;
   } else {
     controls.update();
   }
@@ -1390,8 +1464,18 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  if (galleryState === 'off') fitCameraToShelf();
+  // don't reset the camera on resize — that would yank the user's view
 });
+
+// ─── camera fly tween (landing → shelf) ──────────────────────────────────────
+let camAnim = null;
+function flyCameraTo(pos, target, dur = 1.5) {
+  camAnim = {
+    p0: camera.position.clone(), p1: pos.clone(),
+    t0: controls.target.clone(), t1: target.clone(),
+    start: performance.now(), dur: dur * 1000,
+  };
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TIME-OF-DAY SYSTEM — outside-window sky + scene lighting tracks real EST
@@ -1614,9 +1698,22 @@ renderer.domElement.addEventListener('dblclick', () => {
     }
   } catch (e) { return showBootError('procedural shelf', e); }
 
-  try { layoutBooks(repos); }
+  try { layoutBooks(repos); addColorLegend(); }
   catch (e) { return showBootError('layoutBooks', e); }
 
   document.getElementById('loading').classList.add('hide');
+  document.body.classList.add('landing');     // show the browse-choice overlay
   animate();
 })();
+
+// ─── landing: browse tech vs browse art ──────────────────────────────────────
+const landingEl = document.getElementById('landing');
+function leaveLanding() { document.body.classList.remove('landing'); }
+document.getElementById('btn-tech')?.addEventListener('click', () => {
+  leaveLanding();
+  flyCameraTo(VIEW_SHELF.pos, VIEW_SHELF.tgt, 1.6);
+});
+document.getElementById('btn-art')?.addEventListener('click', () => {
+  leaveLanding();
+  enterGallery();
+});
