@@ -25,8 +25,7 @@
     "whenToUse": "What people see before clicking into any repo.",
     "future": "Recent-activity feed, animated stats, pinned demos.",
     "era": "paired",
-    "dayNight": "night",
-    "url": "https://github.com/ghanemja"
+    "dayNight": "night"
   },
   {
     "name": "crochet",

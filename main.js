@@ -4,24 +4,24 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v18';
+const ASSET_VERSION = 'v19';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
 const SHELF_WIDTH = 16;
 const SHELF_DEPTH = 1.6;
 const SHELF_THICKNESS = 0.34;       // matches Blender shelf plank thickness
-const ROW_HEIGHT = 2.2;
-const NUM_ROWS = 5;
+const ROW_HEIGHT = 3.83;            // 3 tall rows fill the ~11.8m shelf
+const NUM_ROWS = 3;
 
-// realistic book proportions (meters in scene scale)
-const BOOK_DEPTH = 1.2;            // how far book sticks into shelf
-const BOOK_THK_MIN = 0.18;         // spine thickness (narrow)
-const BOOK_THK_MAX = 0.38;
-const BOOK_HEIGHT_MIN = 1.55;
-const BOOK_HEIGHT_MAX = 1.92;
-const BOOK_GAP = 0.04;
-const SECTION_GAP = 0.5;           // gap between tag clusters in same row
+// chunky, easy-to-click book proportions (meters in scene scale)
+const BOOK_DEPTH = 1.3;            // how far book sticks into shelf
+const BOOK_THK_MIN = 0.5;          // spine thickness — wide = big click target
+const BOOK_THK_MAX = 0.95;
+const BOOK_HEIGHT_MIN = 2.7;
+const BOOK_HEIGHT_MAX = 3.3;
+const BOOK_GAP = 0.08;
+const SECTION_GAP = 0.6;           // gap between tag clusters in same row
 
 const TAG_PALETTE = {
   site:      0x4e8eff,
@@ -38,14 +38,11 @@ const TAG_PALETTE = {
   misc:      0x9ca3af,
 };
 
-// row 0 = bottom shelf, row 4 = top shelf
-// Dewey-style category sections — each shelf has a category label
+// row 0 = bottom shelf, row 2 = top shelf — 3 Dewey-style sections
 const TAG_ROW_PLAN = [
-  { label: 'MIT · academic',         code: '000',   tags: ['edu'] },                                  // row 0 bottom
-  { label: 'MIT · robotics + ML',    code: '100',   tags: ['robotics', 'ml'] },                       // row 1
-  { label: 'Products · CAD',         code: '500',   tags: ['cad'] },                                  // row 2
-  { label: 'Products · AI',          code: '600',   tags: ['ai'] },                                   // row 3
-  { label: 'Hobbies + tools',        code: '900',   tags: ['hobby', 'game', 'hackathon', 'tool', 'site', 'profile', 'misc'] },   // row 4 top
+  { label: 'research & ML',  code: '000', tags: ['edu', 'robotics', 'ml', 'hackathon'] },          // bottom (~12)
+  { label: 'products',       code: '500', tags: ['cad', 'ai', 'game'] },                            // middle (~12)
+  { label: 'tools & web',    code: '900', tags: ['tool', 'site', 'hobby', 'profile', 'misc'] },     // top (~15)
 ];
 
 const OUTLINE_COLOR = 0x1a1410;
@@ -183,7 +180,7 @@ function makeSpineTexture(name, baseColor, era = 'paired') {
   ctx.save();
   ctx.translate(w / 2, h / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.font = '800 78px "Fredoka", "Trebuchet MS", system-ui, sans-serif';
+  ctx.font = '500 72px "Fredoka", "Trebuchet MS", system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 7;
@@ -308,20 +305,20 @@ function makePageTexture(repo) {
     ctx.fillText(live ? live.replace(/^https?:\/\//, '').replace(/\/$/, '') : 'not deployed yet',
                  rx, shotY + shotH + 56);
 
-    // CTA button — big
+    // CTA button — big, always the LIVE site
     const btnY = h - 320, btnH = 96, btnW = rw;
     ctx.fillStyle = tagHex;
     roundRect(ctx, rx, btnY, btnW, btnH, 18); ctx.fill();
     ctx.fillStyle = '#fff8e8';
-    ctx.font = `700 40px ${FONT}`;
+    ctx.font = `600 40px ${FONT}`;
     ctx.textAlign = 'center';
-    ctx.fillText(live ? 'visit live site  →' : 'view the code  →', rx + btnW/2, btnY + 62);
+    ctx.fillText(live ? 'visit live site  →' : 'private project', rx + btnW/2, btnY + 62);
     ctx.textAlign = 'left';
 
     // secondary line
     ctx.fillStyle = '#8a7660';
     ctx.font = `500 26px ${FONT}`;
-    ctx.fillText(live ? 'click below for source code →' : 'private — source on request', rx, btnY + btnH + 52);
+    ctx.fillText(live ? 'opens the deployed app' : 'not publicly deployed', rx, btnY + btnH + 52);
 
     ctx.fillStyle = '#a89880';
     ctx.font = `500 24px ${FONT}`;
@@ -455,12 +452,15 @@ function makeBookGroup(repo, thickness, height, depth) {
   front.castShadow = true; front.receiveShadow = true;
   coverPivot.add(front);
 
-  // raycast hitbox — opacity 0 (NOT visible:false, which skips raycasts)
-  const hitGeom = new THREE.BoxGeometry(W, H, T);
+  // raycast hitbox — generous (wider thickness + taller + bulges toward camera)
+  // so thin spines are still an easy click target. opacity 0 (not visible:false,
+  // which would skip raycasts).
+  const hitGeom = new THREE.BoxGeometry(W, H * 1.06, T + 0.3);
   const hitMat = new THREE.MeshBasicMaterial({
     transparent: true, opacity: 0, depthWrite: false,
   });
   const hitbox = new THREE.Mesh(hitGeom, hitMat);
+  hitbox.position.z = 0.15;   // bulge forward toward the viewer
   hitbox.userData.bookGroup = group;
   group.add(hitbox);
   group.userData.hitbox = hitbox;
@@ -562,7 +562,7 @@ function addShelfLabel(rowDef, rowIdx, shelfTopY) {
   ctx.fillStyle = '#c14d1a';
   ctx.fillRect(20, 20, 130, ch - 40);
   ctx.fillStyle = '#fff8e8';
-  ctx.font = '800 56px "Fredoka", system-ui, sans-serif';
+  ctx.font = '600 56px "Fredoka", system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(rowDef.code, 85, ch / 2);
@@ -1233,17 +1233,13 @@ renderer.domElement.addEventListener('pointerup', e => {
   if (openBook) {
     setPointer(e);
     raycaster.setFromCamera(pointer, camera);
-    // primary CTA button → live URL if present, else repo
+    // any CTA area → LIVE site (falls back to repo only when there is no
+    // deployed site, e.g. private projects). Never an explicit code-only link.
+    const r = openBook.userData.repo;
     const visitHit = raycaster.intersectObject(overlayLinkVisit, false)[0];
-    if (visitHit) {
-      const r = openBook.userData.repo;
-      window.open(r.url || r.repo, '_blank', 'noopener');
-      return;
-    }
-    // secondary repo link
     const repoHit = raycaster.intersectObject(overlayLinkRepo, false)[0];
-    if (repoHit) {
-      window.open(openBook.userData.repo.repo, '_blank', 'noopener');
+    if (visitHit || repoHit) {
+      window.open(r.url || r.repo, '_blank', 'noopener');
       return;
     }
     // click on overlay body itself does nothing; click outside → close
