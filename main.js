@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v27';
+const ASSET_VERSION = 'v28';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -45,8 +45,8 @@ const SHELF_PLAN = [
     'autonomy','autonomous_machines','AnimalFinder','computer_vision',
     'deepracer-analysis','OSDC22-XGBoost','hackathon2022','neo4j_hack' ] },
   { label: 'product demos', code: '500', names: [
-    'inbox-zero-board','charterscope','html','portfolio','crochet',
-    'pptgpt','agentsannonymous','brain-university' ] },
+    'inbox-zero-board','charterscope','yeganeh-formula-studio','html','portfolio',
+    'crochet','pptgpt','agentsannonymous','brain-university' ] },
   { label: 'experiments', code: '900', names: [
     'cadme','caddy','cadme-10k','caddy-query','sketchy','cq_dataset','beanbots',
     'maze','Half-life-3','stencil','jobapp','fitter','role-radar','neovert',
@@ -159,7 +159,7 @@ scene.add(fillRight);
 // pendant lamp pool — over reading chair, Blender (-10.5, -17, 10) → three.js (-10.5, 10, 17)
 // pendant over the reading chair — hangs lower now (Blender bulb z≈5.8)
 const pendantLight = new THREE.PointLight(0xffce93, 2.0, 26, 1.4);
-pendantLight.position.set(-14.4, 5.8, 22);
+pendantLight.position.set(-18.4, 5.8, 13);   // over the chair, now back by the left wall
 pendantLight.castShadow = false;
 scene.add(pendantLight);
 // glowing bulb so the lamp visibly emits
@@ -371,11 +371,31 @@ function makePageTexture(repo) {
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
   if (repo.screenshot) {
-    const img = new Image();
-    img.onload = () => { redraw(img); tex.needsUpdate = true; };
-    img.src = `./screenshots/${repo.screenshot}`;
+    const cached = screenshotCache[repo.screenshot];
+    if (cached && cached.complete && cached.naturalWidth > 0) {
+      redraw(cached);                 // already preloaded → draw immediately
+      tex.needsUpdate = true;
+    } else {
+      const img = cached || new Image();
+      img.onload = () => { redraw(img); tex.needsUpdate = true; };
+      img.onerror = () => console.warn('[preview] failed to load', repo.screenshot);
+      if (!cached) img.src = bust(`./screenshots/${repo.screenshot}`);
+    }
   }
   return tex;
+}
+
+// preload every screenshot up front so book previews appear instantly
+const screenshotCache = {};
+function preloadScreenshots(repos) {
+  for (const r of repos) {
+    if (r.screenshot && !screenshotCache[r.screenshot]) {
+      const img = new Image();
+      img.onerror = () => console.warn('[preview] preload failed', r.screenshot);
+      img.src = bust(`./screenshots/${r.screenshot}`);
+      screenshotCache[r.screenshot] = img;
+    }
+  }
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -1705,6 +1725,7 @@ renderer.domElement.addEventListener('dblclick', () => {
   let repos;
   try { repos = await loadRepos(); }
   catch (e) { return showBootError('loadRepos', e); }
+  preloadScreenshots(repos);
 
   let usedGlb = false;
   try { usedGlb = await tryLoadCustomShelf(); }

@@ -544,5 +544,21 @@
     "era": "solo",
     "dayNight": "day",
     "screenshot": null
+  },
+  {
+    "name": "yeganeh-formula-studio",
+    "displayName": "Sinescape",
+    "visibility": "PUBLIC",
+    "url": "https://yeganeh-formula-studio.netlify.app",
+    "repo": "https://yeganeh-formula-studio.netlify.app",
+    "tag": "ml",
+    "screenshot": "yeganeh-formula-studio.png",
+    "description": "Rebuilds an image from a few hundred bytes of trig math \u2014 no pixels stored, just sine/cosine terms evaluated on a grid.",
+    "howItWorks": "Each shape is a sum of sine/cosine terms; drag constants or toggle a term off and watch which strokes vanish.",
+    "moat": "Formula-as-image compression + live ablation \u2014 see exactly which math term draws which stroke. Inspired by Hamid Naderi Yeganeh's art.",
+    "whenToUse": "Exploring parametric/mathematical art, or teaching how trig builds curves.",
+    "future": "More primitives, share-a-formula links, animation morphing between shapes.",
+    "era": "paired",
+    "dayNight": "all"
   }
 ]
