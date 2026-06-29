@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v21';
+const ASSET_VERSION = 'v22';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -102,14 +102,15 @@ controls.enableRotate = true;
 controls.enablePan = false;
 controls.minDistance = 8;
 controls.maxDistance = 55;
-controls.minPolarAngle = Math.PI * 0.30;
-controls.maxPolarAngle = Math.PI * 0.55;
-controls.minAzimuthAngle = -Math.PI * 0.30;
-controls.maxAzimuthAngle =  Math.PI * 0.30;
+controls.minPolarAngle = Math.PI * 0.26;
+controls.maxPolarAngle = Math.PI * 0.56;
+// wide swing so the user can look around the whole room
+controls.minAzimuthAngle = -Math.PI * 0.55;
+controls.maxAzimuthAngle =  Math.PI * 0.55;
 
 // named camera framings
 const VIEW_LANDING = { pos: new THREE.Vector3(0, 8.5, 42), tgt: new THREE.Vector3(0, 6, -1) };
-const VIEW_SHELF   = { pos: new THREE.Vector3(0, 6.6, 17), tgt: new THREE.Vector3(0, 6.6, -1) };
+const VIEW_SHELF   = { pos: new THREE.Vector3(0, 6.6, 21), tgt: new THREE.Vector3(0, 6.6, -1) };
 // start on the wide landing view (whole room)
 camera.position.copy(VIEW_LANDING.pos);
 controls.target.copy(VIEW_LANDING.tgt);
@@ -156,9 +157,9 @@ fillRight.position.set(12, 9, 4);
 scene.add(fillRight);
 
 // pendant lamp pool — over reading chair, Blender (-10.5, -17, 10) → three.js (-10.5, 10, 17)
-// pendant over the reading chair — Blender bulb (-14.4,-22,8.7) → three.js (-14.4, 8.7, 22)
+// pendant over the reading chair — hangs lower now (Blender bulb z≈5.8)
 const pendantLight = new THREE.PointLight(0xffce93, 2.0, 26, 1.4);
-pendantLight.position.set(-14.4, 8.7, 22);
+pendantLight.position.set(-14.4, 5.8, 22);
 pendantLight.castShadow = false;
 scene.add(pendantLight);
 // glowing bulb so the lamp visibly emits
@@ -1482,8 +1483,9 @@ function flyCameraTo(pos, target, dur = 1.5) {
 // + day/night book surfacing
 // ═══════════════════════════════════════════════════════════════════════════
 
-// outside-window sky plane (positioned just outside the LEFT wall, facing into window)
-const SKY_W = 16, SKY_H = 14;
+// outside-window sky plane — sized just larger than the window hole so it
+// doesn't poke above the wall.
+const SKY_W = 9, SKY_H = 8;
 const skyCanvas = document.createElement('canvas');
 skyCanvas.width = 512; skyCanvas.height = 768;
 const skyTex = new THREE.CanvasTexture(skyCanvas);
@@ -1494,8 +1496,8 @@ const skyPlane = new THREE.Mesh(
 );
 // OUTSIDE the left wall (wall inner ≈ -22.7), behind the window cutout, so it
 // shows through the window instead of floating inside the room over the piano.
-// Window center (Blender y=-7,z=8) → three.js (-22.7, 8, 7).
-skyPlane.position.set(-23.4, 8, 7);
+// Window center lowered (Blender y=-7,z=6) → three.js (-22.7, 6, 7).
+skyPlane.position.set(-23.4, 6, 7);
 skyPlane.rotation.y = Math.PI / 2;
 scene.add(skyPlane);
 
