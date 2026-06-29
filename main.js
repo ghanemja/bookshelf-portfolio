@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v17';
+const ASSET_VERSION = 'v18';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -892,8 +892,8 @@ function buildGallery() {
   ceil.position.set(DOOR_X, HALL_H, midZ);
   g.add(ceil);
 
-  // walls
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0xece9e1, roughness: 0.97 });
+  // walls — soft warm gallery grey (not near-white, so it doesn't clip to a void)
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xb3a593, roughness: 0.97 });
   const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(L + 6, HALL_H), wallMat);
   leftWall.rotation.y = Math.PI / 2;
   leftWall.position.set(DOOR_X - HALL_HALF, HALL_H / 2, midZ);
@@ -925,7 +925,7 @@ function buildGallery() {
   const nLights = Math.max(3, Math.round(L / 13));
   for (let i = 0; i < nLights; i++) {
     const lz = DOOR_Z - 2 - (i + 0.5) * (L / nLights);
-    const pl = new THREE.PointLight(0xfff0d8, 0.7, 22, 1.5);
+    const pl = new THREE.PointLight(0xfff0d8, 0.32, 20, 1.8);
     pl.position.set(DOOR_X, HALL_H - 0.8, lz);
     g.add(pl);
     const fix = new THREE.Mesh(
@@ -937,7 +937,7 @@ function buildGallery() {
     g.add(fix);
   }
   // gentle ambient fill just for the hall
-  const hallAmbient = new THREE.PointLight(0xede8df, 0.5, 60, 0.6);
+  const hallAmbient = new THREE.PointLight(0xede8df, 0.22, 70, 0.6);
   hallAmbient.position.set(DOOR_X, HALL_H - 2, midZ);
   g.add(hallAmbient);
 

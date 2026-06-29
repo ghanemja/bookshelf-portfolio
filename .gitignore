@@ -4,3 +4,6 @@ node_modules/
 .vscode/
 .idea/
 .claude/
+
+# Local Netlify folder
+.netlify
