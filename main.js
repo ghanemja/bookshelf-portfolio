@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v28';
+const ASSET_VERSION = 'v29';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -170,9 +170,9 @@ const pendantGlow = new THREE.Mesh(
 pendantGlow.position.copy(pendantLight.position);
 scene.add(pendantGlow);
 
-// floor lamp next to the easel — Blender bulb (20.6,-3.5,7.4) → three.js (20.6, 7.4, 3.5)
+// floor lamp next to the easel — Blender bulb (21.1,-3.8,7.4) → three.js (21.1, 7.4, 3.8)
 const easelLamp = new THREE.PointLight(0xffd9a0, 1.6, 22, 1.5);
-easelLamp.position.set(20.6, 7.4, 3.5);
+easelLamp.position.set(21.1, 7.4, 3.8);
 scene.add(easelLamp);
 const easelLampGlow = new THREE.Mesh(
   new THREE.SphereGeometry(0.32, 14, 10),
@@ -926,12 +926,10 @@ function addGalleryHitbox(pos, size, rot = [0, 0, 0]) {
   return m;
 }
 
-// easel by the gallery door, Blender (18,-3,5.2) → three.js (18, 5.2, 3).
-// faces the room (+Z); clicking it enters the gallery.
-addGalleryHitbox([18, 5, 3], [6, 7]);
-// the DOORWAY itself — Blender (x=13, back wall y≈1.35, h 0..8) → three.js (13, 4, -1.35)
-// faces +Z toward the viewer; clicking it walks you into the hall
-addGalleryHitbox([13, 4, -1.3], [5, 8]);
+// easel by the gallery door, Blender (19.5,-3,5.2) → three.js (19.5, 5.2, 3).
+addGalleryHitbox([19.5, 5, 3], [6, 7]);
+// the DOORWAY itself — Blender (x=15.5, back wall) → three.js (15.5, 4, -1.35)
+addGalleryHitbox([15.5, 4, -1.3], [5, 8]);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // WALKABLE 3D ART GALLERY — built INTO the main scene behind the back-wall
@@ -942,7 +940,7 @@ const texLoader = new THREE.TextureLoader();
 
 // hall geometry placed behind the Blender back-wall doorway.
 // Blender doorway: x=13, back wall y≈1.35, h=8  →  three.js x=13, z≈-1.35, y 0..8
-const DOOR_X = 13;
+const DOOR_X = 15.5;
 const DOOR_Z = -1.35;          // back-wall plane in three.js
 const HALL_HALF = 6;           // hall half-width (walls at x=7 and x=19)
 const HALL_H = 11;
