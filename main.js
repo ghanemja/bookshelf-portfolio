@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // cache-buster — bump on every asset change so the browser never serves a stale
 // GLB / JSON / image. (.glb especially caches hard across normal refreshes.)
-const ASSET_VERSION = 'v23';
+const ASSET_VERSION = 'v24';
 const bust = (url) => url + (url.includes('?') ? '&' : '?') + 'cb=' + ASSET_VERSION;
 
 // ─── config ──────────────────────────────────────────────────────────────────
@@ -1504,6 +1504,7 @@ const skyCanvas = document.createElement('canvas');
 skyCanvas.width = 512; skyCanvas.height = 768;
 const skyTex = new THREE.CanvasTexture(skyCanvas);
 skyTex.colorSpace = THREE.SRGBColorSpace;
+skyTex.flipY = false;   // plane is rotated 90° — un-flip so the moon sits up high
 const skyPlane = new THREE.Mesh(
   new THREE.PlaneGeometry(SKY_W, SKY_H),
   new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.DoubleSide })
