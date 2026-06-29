@@ -46,7 +46,7 @@
   {
     "name": "pptgpt",
     "visibility": "PRIVATE",
-    "repo": "https://github.com/ghanemja/pptgpt",
+    "repo": "https://pptgpt.netlify.app",
     "tag": "ai",
     "description": "Prompt-to-PowerPoint generator with template-aware styling.",
     "howItWorks": "Prompt \u2192 LLM outline \u2192 pptx-template-styler renders branded slides.",
@@ -55,7 +55,9 @@
     "future": "Split-screen design/result view, 3blue1brown-style math visuals, interactive plot manipulation.",
     "era": "paired",
     "dayNight": "day",
-    "displayName": "DeckGPT"
+    "displayName": "DeckGPT",
+    "url": "https://pptgpt.netlify.app",
+    "screenshot": "pptgpt.png"
   },
   {
     "name": "inbox-zero-board",
