@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ghanemja — bookshelf</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f2e6cf;
+    --panel: #fff8e8;
+    --panel-edge: #e5d3aa;
+    --ink: #2d2118;
+    --ink-dim: #7a6850;
+    --accent: #ff6b2e;
+    --accent-fg: #fff8e8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--ink);
+    font-family: "Fredoka", "Nunito", -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  #hud {
+    position: fixed; top: 20px; left: 24px; z-index: 10;
+    pointer-events: none;
+  }
+  #hud h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  #hud p { color: var(--ink-dim); font-size: 13px; margin-top: 4px; }
+
+  #legend {
+    position: fixed; bottom: 18px; left: 24px; z-index: 10;
+    color: var(--ink-dim); font-size: 12px;
+    background: rgba(255, 248, 232, 0.85); padding: 8px 14px; border-radius: 999px;
+    backdrop-filter: blur(6px); border: 2px solid var(--panel-edge);
+  }
+  #legend kbd { background: var(--panel-edge); color: var(--ink); padding: 1px 7px;
+    border-radius: 999px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+
+  #panel {
+    position: fixed; top: 0; right: 0; height: 100%; width: 380px;
+    background: var(--panel); border-left: 1px solid var(--panel-edge);
+    transform: translateX(100%); transition: transform 0.28s ease;
+    padding: 40px 28px 28px; z-index: 20; overflow-y: auto;
+  }
+  #panel.open { transform: translateX(0); }
+  #panel .close { position: absolute; top: 14px; right: 16px; background: none; border: none;
+    color: var(--ink-dim); font-size: 22px; cursor: pointer; line-height: 1; }
+  #panel .close:hover { color: var(--ink); }
+  #panel .tag { display: inline-block; padding: 4px 12px; background: var(--panel-edge);
+    color: var(--accent); border-radius: 999px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 14px; font-weight: 700; }
+  #panel h2 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; word-break: break-word; }
+  #panel .vis { font-size: 12px; color: var(--ink-dim); margin-top: 4px; font-family: ui-monospace, Menlo, monospace; }
+  #panel .blurb { color: var(--ink-dim); font-size: 14px; line-height: 1.6; margin-top: 18px; }
+  #panel .actions { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
+  #panel a.btn { display: inline-flex; align-items: center; justify-content: center;
+    padding: 11px 14px; border-radius: 8px; text-decoration: none; font-size: 14px;
+    font-weight: 600; transition: filter 0.15s ease; }
+  #panel a.btn.primary { background: var(--accent); color: var(--accent-fg);
+    box-shadow: 0 3px 0 #c14d1a; }
+  #panel a.btn.secondary { background: var(--panel-edge); color: var(--ink);
+    box-shadow: 0 3px 0 #c5b389; }
+  #panel a.btn:hover { filter: brightness(1.05); transform: translateY(1px);
+    box-shadow: 0 2px 0 currentColor; }
+
+  #caveat {
+    position: fixed; top: 20px; right: 24px; z-index: 12;
+    max-width: 360px; font-size: 12px; color: var(--ink-dim);
+    background: rgba(255, 248, 232, 0.85); padding: 8px 14px;
+    border-radius: 14px; backdrop-filter: blur(6px);
+    border: 2px solid var(--panel-edge);
+  }
+  #caveat summary { cursor: pointer; font-weight: 700; color: var(--ink);
+    list-style: none; padding: 2px 0; }
+  #caveat summary::-webkit-details-marker { display: none; }
+  #caveat[open] summary { margin-bottom: 8px; }
+  #caveat p { line-height: 1.5; margin: 6px 0; }
+  #caveat .legend { font-size: 11px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px;
+    font-weight: 700; font-size: 10px; letter-spacing: 0.04em;
+    text-transform: uppercase; margin: 0 2px; }
+  .badge-solo   { background: #2d2118; color: #fff8e8; }
+  .badge-paired { background: var(--accent); color: var(--accent-fg); }
+
+  /* ── walkable 3D gallery chrome ── */
+  #gallery-3d-hud {
+    position: fixed; top: 26px; left: 50%; transform: translateX(-50%);
+    z-index: 30; text-align: center; pointer-events: none;
+    opacity: 0; transition: opacity 0.5s ease; color: #f4f1ea;
+    font-family: "Fredoka", system-ui, sans-serif;
+  }
+  #gallery-3d-hud.show { opacity: 1; }
+  #gallery-3d-hud .g3-title { font-size: 22px; font-weight: 700; letter-spacing: 0.04em; }
+  #gallery-3d-hud .g3-hint { font-size: 13px; color: #b9b3a6; margin-top: 4px; }
+
+  #gallery-exit {
+    position: fixed; top: 24px; left: 24px; z-index: 31;
+    display: none; cursor: pointer;
+    padding: 11px 18px; border-radius: 999px; border: none;
+    background: rgba(255,255,255,0.10); color: #f4f1ea;
+    border: 1px solid rgba(255,255,255,0.25);
+    font-family: "Fredoka", system-ui, sans-serif; font-size: 14px; font-weight: 600;
+    backdrop-filter: blur(8px); transition: background 0.2s ease;
+  }
+  #gallery-exit:hover { background: rgba(255,255,255,0.2); }
+  body.in-gallery #gallery-exit { display: block; }
+
+  /* hide ALL studio HUD while in gallery */
+  body.in-gallery #hud,
+  body.in-gallery #legend,
+  body.in-gallery #tod-hud,
+  body.in-gallery #caveat,
+  body.in-gallery #open-gallery,
+  body.in-gallery #tooltip { opacity: 0 !important; pointer-events: none !important; }
+
+  #gallery-info {
+    position: fixed; right: 0; top: 0; height: 100%; width: 340px; z-index: 31;
+    background: linear-gradient(180deg, rgba(18,18,22,0.0), rgba(18,18,22,0.92) 22%);
+    color: #f4f1ea; padding: 80px 30px 30px;
+    transform: translateX(100%); transition: transform 0.35s cubic-bezier(0.22,1,0.36,1);
+    font-family: "Fredoka", system-ui, sans-serif; pointer-events: none;
+  }
+  #gallery-info.show { transform: translateX(0); pointer-events: auto; }
+  #gallery-info .gi-title { font-size: 30px; font-weight: 700; line-height: 1.1; }
+  #gallery-info .gi-meta { color: #b9b3a6; font-size: 15px; margin-top: 8px; letter-spacing: 0.03em; }
+  #gallery-info .gi-desc { color: #d8d3c8; font-size: 16px; line-height: 1.6; margin-top: 18px; }
+  #gallery-info .gi-link { display: inline-block; margin-top: 22px; color: #ffd28a;
+    text-decoration: none; font-weight: 600; font-size: 15px; }
+  #gallery-info .gi-link:hover { text-decoration: underline; }
+
+  #tod-hud {
+    position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 12; padding: 10px 22px; border-radius: 999px;
+    background: rgba(255, 248, 232, 0.85); backdrop-filter: blur(6px);
+    border: 2px solid var(--panel-edge);
+    display: flex; gap: 18px; align-items: center;
+    font-family: "Fredoka", system-ui, sans-serif;
+    transition: background 0.6s ease, color 0.6s ease;
+  }
+  #tod-hud .tod-toggle { display: inline-flex; gap: 4px;
+    background: rgba(0,0,0,0.06); padding: 3px; border-radius: 999px; }
+  #tod-hud .tod-toggle button {
+    border: none; background: transparent; cursor: pointer;
+    padding: 4px 10px; border-radius: 999px;
+    font-family: inherit; font-size: 11px; font-weight: 700;
+    color: var(--ink-dim);
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+  #tod-hud .tod-toggle button.active {
+    background: var(--accent); color: var(--accent-fg);
+  }
+  #tod-hud.night .tod-toggle { background: rgba(255,255,255,0.10); }
+  #tod-hud.night .tod-toggle button { color: rgba(244, 232, 208, 0.65); }
+  #tod-hud.night .tod-toggle button.active {
+    background: #b3a8ff; color: #1a1530;
+  }
+  #tod-hud.night {
+    background: rgba(40, 35, 60, 0.85);
+    border-color: rgba(160, 130, 200, 0.45);
+    color: #f4e8d0;
+  }
+  #tod-hud .tod-time { font-weight: 700; font-size: 18px; color: var(--ink); }
+  #tod-hud.night .tod-time { color: #f4e8d0; }
+  #tod-hud .tod-phase {
+    text-transform: uppercase; letter-spacing: 0.08em;
+    font-size: 11px; color: var(--ink-dim); font-weight: 700;
+  }
+  #tod-hud.night .tod-phase { color: #c8a8e8; }
+  #tod-hud .tod-mode {
+    font-size: 12px; font-weight: 600; color: var(--accent);
+    padding: 3px 10px; border-radius: 999px;
+    background: rgba(255, 107, 46, 0.15);
+  }
+  #tod-hud.night .tod-mode {
+    color: #b3a8ff;
+    background: rgba(120, 100, 200, 0.25);
+  }
+
+  #close-book {
+    position: fixed; top: 24px; right: 24px; z-index: 25;
+    width: 56px; height: 56px; border-radius: 50%;
+    border: none; cursor: pointer;
+    background: var(--accent); color: var(--accent-fg);
+    font-size: 32px; font-weight: 700; line-height: 1;
+    box-shadow: 0 4px 0 #c14d1a, 0 8px 24px rgba(0,0,0,0.18);
+    display: none;
+    transition: transform 0.1s ease;
+  }
+  #close-book:hover { transform: translateY(2px); box-shadow: 0 2px 0 #c14d1a, 0 4px 12px rgba(0,0,0,0.18); }
+  #close-book.show { display: block; }
+
+  /* when a book is open, hide all other HUD chrome so nothing overlaps it */
+  body.book-open #tod-hud,
+  body.book-open #caveat,
+  body.book-open #hud,
+  body.book-open #legend,
+  body.book-open #open-gallery { opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
+
+  #open-gallery {
+    position: fixed; bottom: 22px; right: 24px; z-index: 12;
+    padding: 12px 20px; border-radius: 999px;
+    background: var(--accent); color: var(--accent-fg);
+    border: none; cursor: pointer;
+    font-family: "Fredoka", system-ui, sans-serif;
+    font-size: 15px; font-weight: 700;
+    box-shadow: 0 4px 0 #c14d1a, 0 8px 20px rgba(0,0,0,0.15);
+    transition: transform 0.1s ease;
+  }
+  #open-gallery:hover { transform: translateY(2px);
+    box-shadow: 0 2px 0 #c14d1a, 0 4px 10px rgba(0,0,0,0.15); }
+
+  #gallery {
+    position: fixed; inset: 0; z-index: 30;
+    background: rgba(20, 17, 13, 0.92); backdrop-filter: blur(8px);
+    display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 24px; padding: 56px 24px 32px;
+  }
+  #gallery.open { display: flex; }
+  #gallery .g-close {
+    position: absolute; top: 22px; right: 26px;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-fg);
+    border: none; font-size: 28px; font-weight: 700; cursor: pointer;
+    box-shadow: 0 4px 0 #c14d1a;
+  }
+  #gallery .g-nav {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--panel); color: var(--ink);
+    border: 2px solid var(--panel-edge);
+    font-size: 32px; cursor: pointer; line-height: 1;
+  }
+  #gallery .g-prev { left: 24px; }
+  #gallery .g-next { right: 24px; }
+  #gallery .g-stage { flex: 1; display: flex; align-items: center;
+    justify-content: center; min-height: 0; max-width: 100%; }
+  #gallery .g-frame {
+    background: var(--panel); padding: 16px;
+    border: 8px solid var(--panel-edge);
+    box-shadow: 0 18px 42px rgba(0,0,0,0.55);
+    max-height: 100%; display: flex; align-items: center;
+    justify-content: center; position: relative;
+    min-width: 320px; min-height: 220px;
+  }
+  #gallery #g-img { max-width: min(70vw, 900px); max-height: 60vh;
+    display: block; object-fit: contain; }
+  #gallery #g-img:not([src]), #gallery #g-img[src=""] { display: none; }
+  #gallery .g-placeholder {
+    color: var(--ink-dim); font-size: 13px; padding: 32px;
+    max-width: 420px; text-align: center; line-height: 1.6;
+  }
+  #gallery #g-img[src]:not([src=""]) ~ .g-placeholder,
+  #gallery #g-img:not([src=""]) ~ .g-placeholder { display: none; }
+  #gallery .g-info { color: var(--panel); text-align: center; max-width: 700px; }
+  #gallery .g-collection { color: var(--accent); font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; margin-bottom: 4px; }
+  #gallery .g-title { font-size: 28px; font-weight: 700; }
+  #gallery .g-desc { color: rgba(255,248,232,0.75); margin-top: 10px;
+    line-height: 1.5; font-size: 14px; }
+  #gallery .g-meta { color: rgba(255,248,232,0.55); margin-top: 8px;
+    font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+  #gallery .g-link { display: inline-block; margin-top: 16px;
+    color: var(--accent); text-decoration: none; font-weight: 700; }
+  #gallery .g-link:hover { text-decoration: underline; }
+
+  /* ── landing: browse tech vs art ── */
+  #landing {
+    position: fixed; inset: 0; z-index: 40; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    gap: 30px; text-align: center;
+    background: radial-gradient(ellipse at center, rgba(20,17,13,0.18), rgba(20,17,13,0.55));
+    backdrop-filter: blur(2px);
+    font-family: "Fredoka", system-ui, sans-serif;
+  }
+  body.landing #landing { display: flex; }
+  /* hide studio HUD chrome behind the landing */
+  body.landing #hud, body.landing #tod-hud, body.landing #caveat,
+  body.landing #legend, body.landing #open-gallery { opacity: 0; pointer-events: none; }
+  #landing .l-title { color: #fff8e8; font-size: 44px; font-weight: 700;
+    letter-spacing: -0.01em; text-shadow: 0 3px 18px rgba(0,0,0,0.5); }
+  #landing .l-sub { color: rgba(255,248,232,0.85); font-size: 17px; margin-top: -16px;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+  #landing .l-choices { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
+  #landing .l-btn {
+    cursor: pointer; border: none; width: 230px; padding: 26px 22px;
+    border-radius: 20px; font-family: inherit; font-weight: 700; font-size: 22px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    transition: transform 0.14s ease, box-shadow 0.14s ease;
+  }
+  #landing .l-btn .l-emoji { font-size: 44px; }
+  #landing .l-btn .l-note { font-size: 13px; font-weight: 500; opacity: 0.85; }
+  #landing .l-btn.tech { background: #ff6b2e; color: #fff8e8; box-shadow: 0 8px 0 #c14d1a; }
+  #landing .l-btn.art  { background: #4e63c8; color: #fff8e8; box-shadow: 0 8px 0 #36499b; }
+  #landing .l-btn:hover { transform: translateY(3px); }
+  #landing .l-btn.tech:hover { box-shadow: 0 5px 0 #c14d1a; }
+  #landing .l-btn.art:hover  { box-shadow: 0 5px 0 #36499b; }
+
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 15;
+    background: var(--ink); color: var(--panel);
+    padding: 6px 12px; border-radius: 999px; font-size: 13px;
+    font-family: "Fredoka", system-ui, sans-serif; font-weight: 600;
+    transform: translate(-50%, -130%); white-space: nowrap;
+    opacity: 0; transition: opacity 0.12s ease;
+  }
+  #tooltip.show { opacity: 1; }
+
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--ink-dim); font-size: 14px; z-index: 100; background: var(--bg);
+    transition: opacity 0.4s ease;
+  }
+  #loading.hide { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="hud">
+    <h1>ghanemja — bookshelf</h1>
+    <p>click a book · scroll to zoom</p>
+    <a id="to-planet" href="/" style="pointer-events:auto; display:inline-block; margin-top:10px;
+       padding:7px 14px; border-radius:999px; background:var(--panel); border:2px solid var(--panel-edge);
+       color:var(--ink); text-decoration:none; font-weight:700; font-size:13px;">🪐 back to the planet</a>
+  </div>
+
+  <details id="caveat">
+    <summary>about the work →</summary>
+    <p>
+      These projects span two eras. <strong>Before 2025</strong>: every line written by hand.
+      <strong>From 2025 onward</strong>: I work alongside Claude — I drive the design,
+      scoping, and trade-offs; Claude is my pair-programmer. The interesting work in
+      both eras is the same — picking what to build and recognizing when the answer is wrong.
+    </p>
+    <p class="legend">
+      <span class="badge badge-solo">solo</span> hand-coded ·
+      <span class="badge badge-paired">paired</span> Claude-paired
+    </p>
+  </details>
+
+  <div id="legend">
+    <kbd>drag</kbd> orbit &nbsp; <kbd>scroll</kbd> zoom &nbsp; <kbd>esc</kbd> close
+  </div>
+
+  <div id="tooltip"></div>
+
+  <button id="open-gallery" aria-label="browse artwork">🎨  browse artwork</button>
+
+  <button id="close-book" aria-label="close book">×</button>
+
+  <!-- legacy 2D overlay elements kept hidden (referenced by const decls) -->
+  <div id="gallery" aria-hidden="true" style="display:none">
+    <span id="g-collection"></span><span id="g-title"></span><span id="g-desc"></span>
+    <span id="g-medium"></span><span id="g-year"></span><span id="g-counter"></span>
+    <img id="g-img" alt="" />
+  </div>
+
+  <!-- walkable 3D gallery chrome -->
+  <div id="gallery-3d-hud">
+    <div class="g3-title">jangogh · gallery</div>
+    <div class="g3-hint">scroll to walk · drag to look · click a piece</div>
+  </div>
+  <button id="gallery-exit">← back to studio</button>
+  <aside id="gallery-info">
+    <h2 class="gi-title"></h2>
+    <div class="gi-meta"></div>
+    <p class="gi-desc"></p>
+    <a class="gi-link" href="https://jangoghart.godaddysites.com/portfolio" target="_blank" rel="noopener">full portfolio →</a>
+  </aside>
+
+
+  <div id="loading">loading shelf…</div>
+
+  <div id="landing">
+    <div class="l-title">ghanemja's studio</div>
+    <div class="l-sub">a room of projects &amp; paintings — pick where to start</div>
+    <div class="l-choices">
+      <button id="btn-tech" class="l-btn tech">
+        <span class="l-emoji">📚</span>
+        browse tech
+        <span class="l-note">zoom into the bookshelf</span>
+      </button>
+      <button id="btn-art" class="l-btn art">
+        <span class="l-emoji">🎨</span>
+        browse art
+        <span class="l-note">walk the gallery</span>
+      </button>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="./main.js?cb=v30"></script>
+</body>
+</html>
