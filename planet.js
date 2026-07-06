@@ -14,7 +14,34 @@ const R = 30;
 const H_AMP = 1.15;
 const SEA_H = -0.304;                 // sea level in surfH units (≈ R − 0.35)
 const SEA_R = R + SEA_H * H_AMP;
-const HOVER = 1.15;
+const HOVER = 0.36;                   // jeep wheels on the ground
+
+// ─── vibes: barbie (strawberry-lemonade world) ↔ bratz (the classic palette) ─
+const VIBES = {
+  barbie: {
+    label: '💖 barbie',
+    skyDay: [0xffe9a8, 0xffb3d1, 0xf48fc0], skyNight: [0x4a1e42, 0x2e1435, 0x180f26],
+    fogDay: 0xffd6e5, fogNight: 0x33162e,
+    sunDay: 0xffe0ec, sunDusk: 0xff7fa8,
+    hemiSky: 0xfff0f6, hemiGround: 0xc07898,
+    terr: { deep: 0xd9a1b8, sand: 0xffe9b3, mid: 0xff9fc2, high: 0xf2c9e0, snow: 0xfff6fa },
+    water: 0xff9fc0, leafA: 0xff8ab5, leafB: 0xffc2d8, wood: 0xf2e0d0, rock: 0xf4d9e8,
+    cloud: 0xffe4ef, trail: 0xffc2d8,
+  },
+  bratz: {
+    label: '😎 bratz',
+    skyDay: [0xffd9b8, 0xd9c4f2, 0x9fc0ee], skyNight: [0x3a2f5e, 0x241f47, 0x121430],
+    fogDay: 0xe3cfe8, fogNight: 0x241f47,
+    sunDay: 0xffe0b8, sunDusk: 0xff9a66,
+    hemiSky: 0xfff2dd, hemiGround: 0x8a76b8,
+    terr: { deep: 0xc9b287, sand: 0xefdca6, mid: 0x93ce9d, high: 0xbfaee0, snow: 0xf7f4fb },
+    water: 0x6cbcdf, leafA: 0x7fbf8b, leafB: 0xa8d8a0, wood: 0x9a6b4f, rock: 0xcdc3dd,
+    cloud: 0xffffff, trail: 0xffbe96,
+  },
+};
+let vibe = (new URLSearchParams(location.search).get('vibe'))
+  ?? localStorage.getItem('planet-vibe') ?? 'barbie';
+if (!VIBES[vibe]) vibe = 'barbie';
 const MAX_SPEED = 7.2;
 const ACCEL = 13;
 const DAMP = 4.5;
@@ -364,13 +391,28 @@ const planet = (() => {
     const r = radiusAt(v);
     p.setXYZ(i, v.x * r, v.y * r, v.z * r);
   }
-  const cDeep = new THREE.Color(0xc9b287);   // sea floor
-  const cSand = new THREE.Color(0xefdca6);   // beach
-  const cMid = new THREE.Color(0x93ce9d);    // mint grass
-  const cHigh = new THREE.Color(0xbfaee0);   // lavender rock
-  const cSnow = new THREE.Color(0xf7f4fb);
-  const colors = new Float32Array(p.count * 3);
-  const c = new THREE.Color();
+  g.computeVertexNormals();
+  const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+    vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0,
+  }));
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  return mesh;
+})();
+
+// paint (or repaint) the terrain colors for the active vibe
+function paintTerrain(T) {
+  const g = planet.geometry;
+  const p = g.attributes.position;
+  let colAttr = g.getAttribute('color');
+  if (!colAttr) {
+    colAttr = new THREE.BufferAttribute(new Float32Array(p.count * 3), 3);
+    g.setAttribute('color', colAttr);
+  }
+  const jr = mulberry32(7);   // stable jitter across repaints
+  const cDeep = new THREE.Color(T.deep), cSand = new THREE.Color(T.sand);
+  const cMid = new THREE.Color(T.mid), cHigh = new THREE.Color(T.high), cSnow = new THREE.Color(T.snow);
+  const c = new THREE.Color(), v = new THREE.Vector3();
   for (let f = 0; f < p.count; f += 3) {
     let h = 0;
     for (let k = 0; k < 3; k++) { v.fromBufferAttribute(p, f + k); h += v.length() - R; }
@@ -380,18 +422,12 @@ const planet = (() => {
     else if (h < 0.45) c.copy(cSand).lerp(cMid, Math.min(1, (h - SEA_H - 0.10) / 0.35));
     else if (h < 1.15) c.copy(cMid).lerp(cHigh, (h - 0.45) / 0.7);
     else c.copy(cHigh).lerp(cSnow, Math.min(1, (h - 1.15) / 0.8));
-    const jitter = 0.965 + rand() * 0.07;
-    for (let k = 0; k < 3; k++) colors.set([c.r * jitter, c.g * jitter, c.b * jitter], (f + k) * 3);
+    const jit = 0.965 + jr() * 0.07;
+    for (let k = 0; k < 3; k++) colAttr.setXYZ(f + k, c.r * jit, c.g * jit, c.b * jit);
   }
-  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  g.computeVertexNormals();
-  const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-    vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0,
-  }));
-  mesh.receiveShadow = true;
-  scene.add(mesh);
-  return mesh;
-})();
+  colAttr.needsUpdate = true;
+}
+paintTerrain(VIBES[vibe].terr);
 
 // ocean — faceted translucent sphere at sea level
 const ocean = new THREE.Mesh(
@@ -696,8 +732,9 @@ const station = (() => {
 
 // clouds
 const cloudPivots = [];
+let cloudMat;
 {
-  const cloudM = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, transparent: true, opacity: 0.92, roughness: 1 });
+  const cloudM = cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, transparent: true, opacity: 0.92, roughness: 1 });
   for (let i = 0; i < 9; i++) {
     const pivot = new THREE.Group();
     pivot.quaternion.setFromUnitVectors(UP_Y, randomDir());
@@ -739,33 +776,79 @@ const starItems = [];
 function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...collectedStars])); }
 
 // ─── the courier ─────────────────────────────────────────────────────────────
+// the Tuscadero jeep — hot pink, doors off, parcel in the back. local +Z = forward
 const courier = new THREE.Group();
 const courierBody = (() => {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 10), M(0xff8a5c, { roughness: 0.6 }));
-  body.scale.set(1, 0.8, 1.15); g.add(body);
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.4, 10, 8), M(0xfff4e0));
-  belly.position.set(0, -0.18, 0.15); belly.scale.set(0.95, 0.6, 1); g.add(belly);
-  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8),
-    new THREE.MeshStandardMaterial({ color: 0x2d2138, roughness: 0.25 }));
-  visor.position.set(0, 0.12, 0.42); g.add(visor);
+  const PINK = M(0xff2e88, { roughness: 0.45 });      // tuscadero
+  const PINK_D = M(0xe0176f, { roughness: 0.5 });
+  const DARK = M(0x2d2138, { roughness: 0.7 });
+  const SILVER = M(0xe8e2ea, { roughness: 0.35 });
+
+  // tub + hood
+  const tub = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 2.35), PINK);
+  tub.position.y = 0.62; g.add(tub);
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.16, 0.8), PINK_D);
+  hood.position.set(0, 0.95, 0.75); g.add(hood);
+  // side fender flares
   for (const s of [-1, 1]) {
-    const wing = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.3), M(0xffb28a));
-    wing.position.set(s * 0.62, 0, -0.05); wing.rotation.z = s * -0.25; g.add(wing);
+    const flare = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 2.3), PINK_D);
+    flare.position.set(s * 0.8, 0.5, 0); g.add(flare);
   }
-  // the parcel! strapped on the back
-  const parcel = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.34, 0.42), M(0xc9944a));
-  parcel.position.set(0, 0.28, -0.42); parcel.rotation.y = 0.2; g.add(parcel);
-  const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.08, 0.1), M(0xff4d6e));
-  ribbon.position.set(0, 0.28, -0.42); ribbon.rotation.y = 0.2; g.add(ribbon);
-  const rotor = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.05, 0.16), M(0x5d5375));
-  rotor.position.y = 0.72; g.add(rotor);
-  g.userData.rotor = rotor;
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.35, 4), M(0x5d5375));
-  antenna.position.set(0.2, 0.55, -0.25); g.add(antenna);
-  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5),
-    new THREE.MeshStandardMaterial({ color: 0xff4d6e, emissive: 0xff4d6e, emissiveIntensity: 1 }));
-  tip.position.set(0.2, 0.75, -0.25); g.add(tip);
+  // windshield
+  const wsFrame = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.55, 0.08), DARK);
+  wsFrame.position.set(0, 1.22, 0.42); wsFrame.rotation.x = -0.14; g.add(wsFrame);
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.4, 0.03),
+    new THREE.MeshStandardMaterial({ color: 0xcfeef8, roughness: 0.15, transparent: true, opacity: 0.55 }));
+  glass.position.set(0, 1.22, 0.46); glass.rotation.x = -0.14; g.add(glass);
+  // grille + headlights + bumpers
+  const grille = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.34, 0.08), SILVER);
+  grille.position.set(0, 0.66, 1.2); g.add(grille);
+  for (const s of [-1, 1]) {
+    const hl = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0xffedb0, emissiveIntensity: 0.9 }));
+    hl.position.set(s * 0.45, 0.72, 1.24); g.add(hl);
+  }
+  for (const zz of [1.26, -1.26]) {
+    const bumper = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.14, 0.12), SILVER);
+    bumper.position.set(0, 0.36, zz); g.add(bumper);
+  }
+  // roll bar
+  for (const s of [-1, 1]) {
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.7, 6), DARK);
+    bar.position.set(s * 0.6, 1.25, -0.42); g.add(bar);
+  }
+  const cross = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.28, 6), DARK);
+  cross.rotation.z = Math.PI / 2; cross.position.set(0, 1.58, -0.42); g.add(cross);
+  // seats
+  for (const s of [-1, 1]) {
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.5), M(0xfff4e0));
+    seat.position.set(s * 0.36, 1.0, -0.05); g.add(seat);
+  }
+  // the parcel rides in the back
+  const parcel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.5), M(0xc9944a));
+  parcel.position.set(0, 1.05, -0.85); parcel.rotation.y = 0.25; g.add(parcel);
+  const ribbon = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.09, 0.12), M(0xff4d6e));
+  ribbon.position.set(0, 1.05, -0.85); ribbon.rotation.y = 0.25; g.add(ribbon);
+  // wheels (axis along X) + white hubs; spare on the tailgate
+  const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.22, 10);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const hubGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.24, 8);
+  hubGeo.rotateZ(Math.PI / 2);
+  const wheels = [];
+  for (const [wx, wz] of [[-0.78, 0.78], [0.78, 0.78], [-0.78, -0.78], [0.78, -0.78]]) {
+    const w = new THREE.Mesh(wheelGeo, DARK);
+    w.position.set(wx, 0.34, wz);
+    const hub = new THREE.Mesh(hubGeo, SILVER);
+    w.add(hub);
+    g.add(w);
+    wheels.push(w);
+  }
+  const spare = new THREE.Mesh(wheelGeo, DARK);
+  spare.rotation.y = Math.PI / 2;   // face rearward
+  spare.position.set(0, 0.78, -1.32);
+  g.add(spare);
+  g.userData.wheels = wheels;
   g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
   return g;
 })();
@@ -855,6 +938,29 @@ function updatePool(pool, dt) {
 }
 
 progress(0.82, 'loading the parcels…');
+
+// ─── vibes toggle: repaint the whole world ───────────────────────────────────
+const vibeBtn = document.getElementById('vibe-toggle');
+function applyVibe() {
+  const P = VIBES[vibe];
+  vibeBtn.textContent = P.label;
+  SKY.day.forEach((c, i) => c.setHex(P.skyDay[i]));
+  SKY.night.forEach((c, i) => c.setHex(P.skyNight[i]));
+  _fogDay.setHex(P.fogDay); _fogNight.setHex(P.fogNight);
+  _sunDay.setHex(P.sunDay); _sunDusk.setHex(P.sunDusk);
+  hemi.color.setHex(P.hemiSky); hemi.groundColor.setHex(P.hemiGround);
+  ocean.material.color.setHex(P.water);
+  LEAF_A.color.setHex(P.leafA); LEAF_B.color.setHex(P.leafB);
+  WOOD.color.setHex(P.wood); ROCK.color.setHex(P.rock);
+  cloudMat.color.setHex(P.cloud);
+  for (const p of trailPool) p.sp.material.color.setHex(P.trail);
+  paintTerrain(P.terr);
+}
+vibeBtn.addEventListener('click', () => {
+  vibe = vibe === 'barbie' ? 'bratz' : 'barbie';
+  localStorage.setItem('planet-vibe', vibe);
+  applyVibe();
+});
 
 // ─── delivery quests ─────────────────────────────────────────────────────────
 const QUEST_ORDER = ['library', 'yarnflow', 'inbox', 'charterscope', 'deckgpt',
@@ -1132,17 +1238,18 @@ function animate() {
     heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
   }
 
-  const bob = Math.sin(t * 3.1) * 0.12;
-  // hover above whichever is higher: terrain or the sea
+  // suspension jiggle scales with speed (it's a jeep now, not a drone)
+  const bob = Math.sin(t * 8.5) * 0.03 * (0.3 + speed / MAX_SPEED);
+  // drive on whichever is higher: terrain or the sea surface (magic jeep)
   const groundR = Math.max(radiusAt(dir), SEA_R);
   courier.position.copy(dir.clone().multiplyScalar(groundR + HOVER + bob));
   _right.crossVectors(dir, heading);
   _m.makeBasis(_right, dir, heading);
   _q.setFromRotationMatrix(_m);
   courier.quaternion.slerp(_q, 1 - Math.pow(0.001, dt));
-  courierBody.rotation.z = THREE.MathUtils.lerp(courierBody.rotation.z, -ix * 0.25, 0.09);
-  courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.14 * (speed / MAX_SPEED), 0.09);
-  courierBody.userData.rotor.rotation.y += dt * (12 + speed * 2);
+  courierBody.rotation.z = THREE.MathUtils.lerp(courierBody.rotation.z, -ix * 0.12, 0.09);
+  courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.07 * (speed / MAX_SPEED), 0.09);
+  for (const w of courierBody.userData.wheels) w.rotation.x += dt * speed / 0.34;
 
   // engine particles + hum
   if (speed > 1.4) {
@@ -1303,6 +1410,7 @@ window.addEventListener('resize', () => {
 
 // ─── go ──────────────────────────────────────────────────────────────────────
 applyGfx();
+applyVibe();
 updateQuestHUD();
 progress(1, 'ready!');
 animate();
