@@ -7,10 +7,7 @@
 //     Garden showing real paintings.
 // ═══════════════════════════════════════════════════════════════════════════
 import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 // ─── tunables ────────────────────────────────────────────────────────────────
 const R = 30;
@@ -66,27 +63,126 @@ scene.fog = new THREE.Fog(0xe3cfe8, 55, 190);
 const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 600);
 camera.position.set(0, 26, 95);
 
-// graphics modes — composer built lazily so classic never compiles bloom
-let composer = null, bloom = null;
-function ensureComposer() {
-  if (composer) return;
-  composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
-  bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.38, 0.75, 0.82);
-  composer.addPass(bloom);
-  composer.addPass(new OutputPass());
+// ─── "inked" mode: anime cel look — ink outlines from depth+normal edges ────
+// 3-pass pipeline, built lazily: (1) color+depth → RT, (2) flat normals → RT,
+// (3) fullscreen composite that draws sketchy ink lines on depth/normal
+// discontinuities and posterizes the colors. Classic stays single-pass.
+let inkReady = false;
+let rtColor, rtNormal, normalOverride, inkQuad;
+function ensureInk() {
+  if (inkReady) return;
+  const w = window.innerWidth, h = window.innerHeight;
+  const dpr = renderer.getPixelRatio();
+  rtColor = new THREE.WebGLRenderTarget(w * dpr, h * dpr, {
+    depthTexture: new THREE.DepthTexture(w * dpr, h * dpr),
+  });
+  rtNormal = new THREE.WebGLRenderTarget(w * dpr, h * dpr, {
+    minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
+  });
+  normalOverride = new THREE.MeshNormalMaterial({ flatShading: true });
+  inkQuad = new FullScreenQuad(new THREE.ShaderMaterial({
+    uniforms: {
+      tColor: { value: rtColor.texture },
+      tDepth: { value: rtColor.depthTexture },
+      tNormal: { value: rtNormal.texture },
+      res: { value: new THREE.Vector2(w * dpr, h * dpr) },
+      camNear: { value: camera.near },
+      camFar: { value: camera.far },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+    fragmentShader: `
+      varying vec2 vUv;
+      uniform sampler2D tColor, tDepth, tNormal;
+      uniform vec2 res;
+      uniform float camNear, camFar;
+
+      float readDepth(vec2 uv) {
+        float z = texture2D(tDepth, uv).x;
+        float ndc = z * 2.0 - 1.0;
+        return (2.0 * camNear * camFar) / (camFar + camNear - ndc * (camFar - camNear));
+      }
+      vec2 hash22(vec2 p) {
+        p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+        return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
+      }
+      void main() {
+        vec2 px = 1.0 / res;
+        // subtle hand-drawn wobble (kept small so lines stay solid, not specks)
+        vec2 wob = hash22(floor(vUv * res / 6.0)) * px * 0.55;
+        vec2 uv = vUv + wob;
+        float o = 2.0;   // line thickness in pixels
+
+        float d0 = readDepth(uv);
+        float dN = readDepth(uv + vec2(0.0,  px.y * o));
+        float dS = readDepth(uv - vec2(0.0,  px.y * o));
+        float dE = readDepth(uv + vec2(px.x * o, 0.0));
+        float dW = readDepth(uv - vec2(px.x * o, 0.0));
+        float edgeD = abs(dN - dS) + abs(dE - dW);
+
+        vec3 nN = texture2D(tNormal, uv + vec2(0.0,  px.y * o)).xyz;
+        vec3 nS = texture2D(tNormal, uv - vec2(0.0,  px.y * o)).xyz;
+        vec3 nE = texture2D(tNormal, uv + vec2(px.x * o, 0.0)).xyz;
+        vec3 nW = texture2D(tNormal, uv - vec2(px.x * o, 0.0)).xyz;
+        float edgeN = length(nN - nS) + length(nE - nW);
+
+        float skyMask = 1.0 - step(camFar * 0.55, d0);   // no ink on the sky
+        // depth threshold scales with distance so far hills don't fill solid
+        float eD = smoothstep(0.3, 1.0, edgeD / (0.02 * d0 + 0.18));
+        float eN = smoothstep(0.55, 1.15, edgeN);        // creases only, not facets
+        float edge = clamp(eD + eN, 0.0, 1.0) * skyMask;
+
+        vec3 col = texture2D(tColor, vUv).rgb;
+        // cel posterize (soft) — skip the sky so gradients stay smooth
+        vec3 post = floor(col * 6.0 + 0.5) / 6.0;
+        col = mix(col, post, 0.5 * skyMask);
+        // anime pop: gentle saturation + ink lines
+        float lum = dot(col, vec3(0.299, 0.587, 0.114));
+        col = mix(vec3(lum), col, 1.18);
+        vec3 ink = vec3(0.09, 0.10, 0.14);
+        col = mix(col, ink, edge * 0.85);
+        // proper linear → sRGB (RT holds tone-mapped linear)
+        vec3 lo = col * 12.92;
+        vec3 hi = 1.055 * pow(max(col, 0.0), vec3(1.0 / 2.4)) - 0.055;
+        col = mix(lo, hi, step(0.0031308, col));
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  }));
+  inkReady = true;
+}
+function renderInked() {
+  ensureInk();
+  // pass 1: color + depth
+  renderer.setRenderTarget(rtColor);
+  renderer.render(scene, camera);
+  // pass 2: flat normals (hide sky/sprites/particles so they don't get lines)
+  const hidden = [];
+  scene.traverse(o => {
+    if ((o.isSprite || o === sky || o === skyStars) && o.visible) { o.visible = false; hidden.push(o); }
+  });
+  scene.overrideMaterial = normalOverride;
+  renderer.setRenderTarget(rtNormal);
+  renderer.render(scene, camera);
+  scene.overrideMaterial = null;
+  for (const o of hidden) o.visible = true;
+  // pass 3: composite with ink lines
+  renderer.setRenderTarget(null);
+  inkQuad.render(renderer);
 }
 const gfxParam = new URLSearchParams(location.search).get('gfx');
-let gfxDreamy = (gfxParam ?? localStorage.getItem('planet-gfx') ?? (IS_TOUCH ? 'classic' : 'dreamy')) === 'dreamy';
+let stored = gfxParam ?? localStorage.getItem('planet-gfx') ?? (IS_TOUCH ? 'classic' : 'inked');
+if (stored === 'dreamy') stored = 'inked';   // migrate old setting
+let gfxInked = stored === 'inked';
 const gfxBtn = document.getElementById('gfx-toggle');
 function applyGfx() {
-  gfxBtn.textContent = gfxDreamy ? '✨ dreamy' : '🧊 classic';
-  scene.fog.near = gfxDreamy ? 48 : 55;
-  scene.fog.far = gfxDreamy ? 165 : 190;
+  gfxBtn.textContent = gfxInked ? '🖌 inked' : '🧊 classic';
+  scene.fog.near = gfxInked ? 50 : 55;
+  scene.fog.far = gfxInked ? 175 : 190;
 }
 gfxBtn.addEventListener('click', () => {
-  gfxDreamy = !gfxDreamy;
-  localStorage.setItem('planet-gfx', gfxDreamy ? 'dreamy' : 'classic');
+  gfxInked = !gfxInked;
+  localStorage.setItem('planet-gfx', gfxInked ? 'inked' : 'classic');
   applyGfx();
 });
 
@@ -97,7 +193,11 @@ function estHourNow() {
     return (parseInt(p, 10) % 24) / 24;
   } catch { return 0.5; }
 }
-const dayPhase0 = estHourNow();
+const todParam = new URLSearchParams(location.search).get('tod');   // ?tod=day|night|golden
+const dayPhase0 = todParam === 'day' ? 0.5
+  : todParam === 'night' ? 0.0
+  : todParam === 'golden' ? 0.72
+  : estHourNow();
 let dayK = 1;
 
 // ─── sky + stars ─────────────────────────────────────────────────────────────
@@ -1181,10 +1281,8 @@ function animate() {
   ocean.rotation.y += dt * 0.004;
   sky.position.copy(camera.position);
 
-  if (gfxDreamy) {
-    ensureComposer();
-    bloom.strength = 0.3 + (1 - dayK) * 0.35;
-    composer.render();
+  if (gfxInked) {
+    renderInked();
   } else {
     renderer.render(scene, camera);
   }
@@ -1194,7 +1292,13 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  if (composer) composer.setSize(window.innerWidth, window.innerHeight);
+  if (inkReady) {
+    const dpr = renderer.getPixelRatio();
+    const w = window.innerWidth * dpr, h = window.innerHeight * dpr;
+    rtColor.setSize(w, h);
+    rtNormal.setSize(w, h);
+    inkQuad.material.uniforms.res.value.set(w, h);
+  }
 });
 
 // ─── go ──────────────────────────────────────────────────────────────────────
