@@ -1,23 +1,29 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// janelle's tiny planet — a low-poly world you fly around.
-// Every project is a building on the surface; the bookshelf room is the
-// Library; the old portfolio's space station orbits overhead.
-// Spherical gravity: "up" is always away from the planet's center.
+// janelle's tiny planet — v2
+// low-poly world you fly around. Projects are buildings; the bookshelf room is
+// the Library; the old portfolio's space station orbits overhead.
+// v2: gentler steering, dreamy/classic graphics toggle (bloom), lake + snowy
+// mountain, ambient WebAudio loop + engine hum, slow day/night cycle seeded
+// from EST, engine trail particles.
 // ═══════════════════════════════════════════════════════════════════════════
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 // ─── tunables ────────────────────────────────────────────────────────────────
-const R = 30;                    // planet radius
-const H_AMP = 1.15;              // terrain displacement amplitude
-const HOVER = 1.15;              // courier hover height above ground
-const MAX_SPEED = 9;             // surface units / s
-const ACCEL = 26;
-const DAMP = 6;
-const CAM_H = 3.6, CAM_D = 8.2;  // chase camera offsets
-const NEAR_ARC = 0.115;          // radians — arrive at a landmark
-const FAR_ARC = 0.165;           // radians — leave a landmark
+const R = 30;
+const H_AMP = 1.15;
+const HOVER = 1.15;
+const MAX_SPEED = 7.2;           // gentler than v1
+const ACCEL = 13;
+const DAMP = 4.5;
+const TURN = 0.05;               // heading smoothing base (lower = smoother)
+const CAM_H = 3.6, CAM_D = 8.6;
+const NEAR_ARC = 0.115, FAR_ARC = 0.165;
+const DAY_PERIOD = 240;          // seconds per full day/night cycle
 
-// deterministic PRNG so the world is identical every visit
 function mulberry32(a) {
   return function () {
     a |= 0; a = (a + 0x6D2B79F5) | 0;
@@ -28,7 +34,7 @@ function mulberry32(a) {
 }
 const rand = mulberry32(20260705);
 
-// ─── loader plumbing ─────────────────────────────────────────────────────────
+// ─── loader ──────────────────────────────────────────────────────────────────
 const loaderEl = document.getElementById('loader');
 const loaderBar = document.getElementById('loader-bar');
 const loaderMsg = document.getElementById('loader-msg');
@@ -46,7 +52,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 const IS_TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-renderer.shadowMap.enabled = !IS_TOUCH;         // shadows on desktop only
+renderer.shadowMap.enabled = !IS_TOUCH;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
 if (IS_TOUCH) document.body.classList.add('touch');
@@ -55,51 +61,89 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xe3cfe8, 55, 190);
 
 const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 600);
-camera.position.set(0, 26, 95);   // intro: far out; chase cam eases in
+camera.position.set(0, 26, 95);
 
-// ─── pastel sky + stars ──────────────────────────────────────────────────────
+// ─── graphics modes: dreamy (bloom) ↔ classic ───────────────────────────────
+// composer is built lazily the first time dreamy mode is used — classic mode
+// never pays for bloom shader compilation.
+let composer = null, bloom = null;
+function ensureComposer() {
+  if (composer) return;
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.38, 0.75, 0.82);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+}
+const gfxParam = new URLSearchParams(location.search).get('gfx');   // ?gfx=classic|dreamy override
+let gfxDreamy = (gfxParam ?? localStorage.getItem('planet-gfx') ?? (IS_TOUCH ? 'classic' : 'dreamy')) === 'dreamy';
+const gfxBtn = document.getElementById('gfx-toggle');
+function applyGfx() {
+  gfxBtn.textContent = gfxDreamy ? '✨ dreamy' : '🧊 classic';
+  scene.fog.near = gfxDreamy ? 48 : 55;
+  scene.fog.far = gfxDreamy ? 165 : 190;
+}
+gfxBtn.addEventListener('click', () => {
+  gfxDreamy = !gfxDreamy;
+  localStorage.setItem('planet-gfx', gfxDreamy ? 'dreamy' : 'classic');
+  applyGfx();
+});
+
+// ─── day/night state (seeded from real EST, then drifts slowly) ─────────────
+function estHourNow() {
+  try {
+    const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(new Date());
+    return (parseInt(p, 10) % 24) / 24;
+  } catch { return 0.5; }
+}
+const dayPhase0 = estHourNow();   // 0=midnight … 0.5=noon
+let dayK = 1;                     // 0=night … 1=day (computed per frame)
+
+// ─── sky + stars ─────────────────────────────────────────────────────────────
+const SKY = {
+  day:   [new THREE.Color(0xffd9b8), new THREE.Color(0xd9c4f2), new THREE.Color(0x9fc0ee)],
+  night: [new THREE.Color(0x3a2f5e), new THREE.Color(0x241f47), new THREE.Color(0x121430)],
+};
+const skyU = {
+  cA: { value: SKY.day[0].clone() },
+  cB: { value: SKY.day[1].clone() },
+  cC: { value: SKY.day[2].clone() },
+};
 const sky = new THREE.Mesh(
   new THREE.SphereGeometry(420, 24, 16),
   new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    depthWrite: false,
-    uniforms: {
-      cPeach: { value: new THREE.Color(0xffd9b8) },
-      cLav:   { value: new THREE.Color(0xd9c4f2) },
-      cBlue:  { value: new THREE.Color(0x9fc0ee) },
-    },
-    vertexShader: `
-      varying vec3 vP;
-      void main() { vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    side: THREE.BackSide, depthWrite: false, uniforms: skyU,
+    vertexShader: `varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
     fragmentShader: `
-      varying vec3 vP;
-      uniform vec3 cPeach, cLav, cBlue;
-      void main() {
-        float h = normalize(vP).y * 0.5 + 0.5;
-        vec3 c = mix(cPeach, cLav, smoothstep(0.05, 0.52, h));
-        c = mix(c, cBlue, smoothstep(0.5, 0.95, h));
-        gl_FragColor = vec4(c, 1.0);
+      varying vec3 vP; uniform vec3 cA,cB,cC;
+      void main(){
+        float h = normalize(vP).y*0.5+0.5;
+        vec3 c = mix(cA, cB, smoothstep(0.05,0.52,h));
+        c = mix(c, cC, smoothstep(0.5,0.95,h));
+        gl_FragColor = vec4(c,1.0);
       }`,
   })
 );
 scene.add(sky);
 
-{ // faint drifting stars
-  const n = 700, pos = new Float32Array(n * 3);
+let stars;
+{
+  const n = 800, pos = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
     const v = new THREE.Vector3(rand() * 2 - 1, rand() * 2 - 1, rand() * 2 - 1).normalize().multiplyScalar(320 + rand() * 60);
     pos.set([v.x, v.y, v.z], i * 3);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const stars = new THREE.Points(g, new THREE.PointsMaterial({
-    color: 0xfff6e8, size: 1.6, sizeAttenuation: true, transparent: true, opacity: 0.6,
+  stars = new THREE.Points(g, new THREE.PointsMaterial({
+    color: 0xfff6e8, size: 1.7, sizeAttenuation: true, transparent: true, opacity: 0.2, depthWrite: false,
   }));
   scene.add(stars);
 }
 
 // ─── lights ──────────────────────────────────────────────────────────────────
-scene.add(new THREE.HemisphereLight(0xfff2dd, 0x8a76b8, 0.75));
+const hemi = new THREE.HemisphereLight(0xfff2dd, 0x8a76b8, 0.75);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffe0b8, 1.5);
 sun.position.set(60, 45, 30);
 if (!IS_TOUCH) {
@@ -108,24 +152,34 @@ if (!IS_TOUCH) {
   const s = 44;
   sun.shadow.camera.left = -s; sun.shadow.camera.right = s;
   sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
-  sun.shadow.camera.near = 10; sun.shadow.camera.far = 200;
+  sun.shadow.camera.near = 10; sun.shadow.camera.far = 220;
   sun.shadow.bias = -0.001;
 }
 scene.add(sun);
-const rim = new THREE.DirectionalLight(0xa8c8f0, 0.35);
-rim.position.set(-50, -20, -40);
-scene.add(rim);
+const moon = new THREE.DirectionalLight(0xa8c8f0, 0.35);   // doubles as rim light
+moon.position.set(-50, -20, -40);
+scene.add(moon);
 
 progress(0.15, 'raising mountains…');
 
-// ─── terrain ─────────────────────────────────────────────────────────────────
-// deterministic height field on the unit sphere (sum of sines — cheap + smooth)
+// ─── terrain (with a lake bowl + a big mountain) ─────────────────────────────
+function ll(latDeg, lonDeg) {
+  const lat = latDeg * Math.PI / 180, lon = lonDeg * Math.PI / 180;
+  return new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)).normalize();
+}
+const LAKE = ll(-15, 75);
+const MTN = ll(58, -95);
+
 function surfH(d) {
-  return (
+  let h =
     Math.sin(d.x * 3.1 + 1.3) * Math.sin(d.y * 2.7 + 2.1) * Math.sin(d.z * 3.7 + 0.5) * 0.62 +
     Math.sin(d.x * 6.4 + 4.2) * Math.sin(d.z * 5.2 + 1.1) * 0.28 +
-    Math.sin(d.y * 7.3 + 0.7) * 0.10
-  );
+    Math.sin(d.y * 7.3 + 0.7) * 0.10;
+  const aL = Math.acos(THREE.MathUtils.clamp(d.dot(LAKE), -1, 1));
+  h -= 1.7 * Math.exp(-(aL * aL) / (0.16 * 0.16));           // lake bowl
+  const aM = Math.acos(THREE.MathUtils.clamp(d.dot(MTN), -1, 1));
+  h += 2.7 * Math.exp(-(aM * aM) / (0.15 * 0.15));           // mountain
+  return h;
 }
 const radiusAt = (d) => R + surfH(d) * H_AMP;
 const posOn = (d, extra = 0) => d.clone().multiplyScalar(radiusAt(d) + extra);
@@ -146,20 +200,20 @@ const planet = (() => {
     const r = radiusAt(v);
     p.setXYZ(i, v.x * r, v.y * r, v.z * r);
   }
-  // per-face pastel colors by average height
-  const cLow = new THREE.Color(0xefdca6);   // sand
-  const cMid = new THREE.Color(0x93ce9d);   // mint grass
-  const cHigh = new THREE.Color(0xbfaee0);  // lavender rock
+  const cLow = new THREE.Color(0xefdca6);    // sand
+  const cMid = new THREE.Color(0x93ce9d);    // mint grass
+  const cHigh = new THREE.Color(0xbfaee0);   // lavender rock
+  const cSnow = new THREE.Color(0xf7f4fb);   // mountain cap
   const colors = new Float32Array(p.count * 3);
   const c = new THREE.Color();
   for (let f = 0; f < p.count; f += 3) {
     let h = 0;
     for (let k = 0; k < 3; k++) { v.fromBufferAttribute(p, f + k); h += v.length() - R; }
-    h /= 3 * H_AMP;                          // ≈ -1 .. 1
+    h /= 3 * H_AMP;
     if (h < -0.18) c.copy(cLow).lerp(cMid, (h + 1) / 0.82 * 0.5);
     else if (h < 0.42) c.copy(cMid);
-    else c.copy(cMid).lerp(cHigh, Math.min(1, (h - 0.42) / 0.5));
-    // tiny per-face variation for the faceted look
+    else if (h < 1.1) c.copy(cMid).lerp(cHigh, (h - 0.42) / 0.68);
+    else c.copy(cHigh).lerp(cSnow, Math.min(1, (h - 1.1) / 0.8));
     const jitter = 0.965 + rand() * 0.07;
     for (let k = 0; k < 3; k++) colors.set([c.r * jitter, c.g * jitter, c.b * jitter], (f + k) * 3);
   }
@@ -171,6 +225,23 @@ const planet = (() => {
   mesh.receiveShadow = true;
   scene.add(mesh);
   return mesh;
+})();
+
+// lake water — chord disc across the bowl, gently breathing
+const water = (() => {
+  const discR = 5.2;
+  const h = Math.sqrt((R - 0.55) * (R - 0.55) - discR * discR);
+  const m = new THREE.Mesh(
+    new THREE.CircleGeometry(discR, 28),
+    new THREE.MeshStandardMaterial({
+      color: 0x7fc4e8, transparent: true, opacity: 0.8, roughness: 0.25, metalness: 0.1,
+      flatShading: true, side: THREE.DoubleSide,
+    })
+  );
+  m.position.copy(LAKE.clone().multiplyScalar(h));
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), LAKE);
+  scene.add(m);
+  return m;
 })();
 
 progress(0.3, 'planting trees…');
@@ -188,11 +259,15 @@ function scatter(make, count, minArcFromLandmarks = 0.14) {
   for (let i = 0; i < count; i++) {
     let d, tries = 0;
     do { d = randomDir(); tries++; }
-    while (tries < 20 && LANDMARKS.some(l => l.dir.angleTo(d) < minArcFromLandmarks));
+    while (tries < 24 && (
+      LANDMARKS.some(l => l.dir.angleTo(d) < minArcFromLandmarks) ||
+      d.angleTo(LAKE) < 0.20 ||          // keep the lake shore clear
+      d.angleTo(MTN) < 0.085             // nothing on the summit
+    ));
     const o = make();
     o.position.copy(posOn(d, -0.06));
     alignToSurface(o, d, rand() * Math.PI * 2);
-    o.traverse(m => { if (m.isMesh && !IS_TOUCH) { m.castShadow = true; } });
+    o.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
     deco.add(o);
   }
 }
@@ -220,12 +295,21 @@ function rock() {
   m.scale.set(1, 0.7 + rand() * 0.5, 1);
   return m;
 }
-
-// ─── landmarks (projects) ────────────────────────────────────────────────────
-function ll(latDeg, lonDeg) {
-  const lat = latDeg * Math.PI / 180, lon = lonDeg * Math.PI / 180;
-  return new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)).normalize();
+function cattail() {   // little reeds for the lake shore
+  const g = new THREE.Group(), s = 0.5 + rand() * 0.4;
+  for (let i = 0; i < 3; i++) {
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 1.1 * s, 4), LEAF_A);
+    stem.position.set((rand() - 0.5) * 0.4, 0.55 * s, (rand() - 0.5) * 0.4);
+    stem.rotation.z = (rand() - 0.5) * 0.3;
+    g.add(stem);
+    const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.25 * s, 5), WOOD);
+    tip.position.copy(stem.position).y += 0.55 * s;
+    g.add(tip);
+  }
+  return g;
 }
+
+// ─── landmarks ───────────────────────────────────────────────────────────────
 const LANDMARKS = [
   { key: 'library', name: 'The Library', tag: 'the bookshelf', style: 'library', color: 0xe8a350,
     desc: 'A cozy room holding all 39 of my repos as books on a shelf — plus a walkable gallery of my paintings.',
@@ -263,13 +347,12 @@ progress(0.45, 'building the villages…');
 
 const landmarkGroup = new THREE.Group();
 scene.add(landmarkGroup);
-const clickables = [];   // meshes → userData.landmark
+const clickables = [];
 
 function makeBuilding(lm) {
   const g = new THREE.Group();
   const body = M(lm.color);
   const trim = M(0xfff4e0);
-  // platform disc seats the building into the terrain
   const plat = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.4, 0.5, 10), M(0xd8cbb2));
   plat.position.y = 0.1; g.add(plat);
 
@@ -278,7 +361,6 @@ function makeBuilding(lm) {
     main.position.y = 1.35; g.add(main);
     const roof = new THREE.Mesh(new THREE.ConeGeometry(2.35, 1.3, 4), M(0xc7572a));
     roof.position.y = 3.1; roof.rotation.y = Math.PI / 4; g.add(roof);
-    // shelf stripes on the facade
     for (let i = 0; i < 3; i++) {
       const shelf = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.12, 0.1), trim);
       shelf.position.set(0, 0.9 + i * 0.6, 1.16); g.add(shelf);
@@ -312,13 +394,12 @@ function makeBuilding(lm) {
     d.position.y = 0.35; g.add(d);
     const door = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.85, 0.12), trim);
     door.position.set(0, 0.75, 1.28); g.add(door);
-  } else { // arch
+  } else {
     const l = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 0.7), body); l.position.set(-0.9, 1.55, 0); g.add(l);
     const r = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 0.7), body); r.position.set(0.9, 1.55, 0); g.add(r);
     const top = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.55, 0.8), trim); top.position.y = 2.95; g.add(top);
   }
 
-  // floating beacon gem — always visible from afar
   const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.42),
     new THREE.MeshStandardMaterial({ color: lm.color, emissive: lm.color, emissiveIntensity: 0.9, flatShading: true }));
   gem.position.y = 4.7;
@@ -335,7 +416,6 @@ function makeBuilding(lm) {
   return g;
 }
 
-// name label sprite (drawn after fonts load; rebuilt crisp)
 function makeLabel(lm) {
   const cv = document.createElement('canvas');
   cv.width = 512; cv.height = 128;
@@ -344,9 +424,8 @@ function makeLabel(lm) {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const w = ctx.measureText(lm.name).width + 70;
   ctx.fillStyle = 'rgba(255, 250, 242, 0.92)';
-  const x = (512 - w) / 2;
   ctx.beginPath();
-  ctx.roundRect(x, 22, w, 84, 42);
+  ctx.roundRect((512 - w) / 2, 22, w, 84, 42);
   ctx.fill();
   ctx.fillStyle = '#2d2138';
   ctx.fillText(lm.name, 256, 66);
@@ -368,14 +447,23 @@ for (const lm of LANDMARKS) {
 }
 document.fonts.ready.then(() => LANDMARKS.forEach(makeLabel));
 
-// scatter AFTER landmarks so trees avoid them
 scatter(pineTree, 46);
 scatter(roundTree, 22);
 scatter(rock, 26);
+// reeds ring the lake shore
+for (let i = 0; i < 14; i++) {
+  const yaw = rand() * Math.PI * 2, arc = 0.205 + rand() * 0.03;
+  const axis = new THREE.Vector3(rand() * 2 - 1, rand() * 2 - 1, rand() * 2 - 1).cross(LAKE).normalize();
+  const d = LAKE.clone().applyAxisAngle(axis, arc).normalize();
+  const o = cattail();
+  o.position.copy(posOn(d, -0.05));
+  alignToSurface(o, d, yaw);
+  deco.add(o);
+}
 
 progress(0.6, 'launching the space station…');
 
-// ─── the old portfolio's space station, orbiting overhead ───────────────────
+// ─── space station ───────────────────────────────────────────────────────────
 const stationPivot = new THREE.Group();
 scene.add(stationPivot);
 const station = (() => {
@@ -393,7 +481,7 @@ const station = (() => {
     const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.2, 6), dark);
     strut.rotation.z = Math.PI / 2; strut.position.x = s * 1.6; g.add(strut);
   }
-  for (let i = 0; i < 6; i++) {  // glowing windows
+  for (let i = 0; i < 6; i++) {
     const w = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.18, 0.05),
       new THREE.MeshStandardMaterial({ color: 0xfff0b0, emissive: 0xffe080, emissiveIntensity: 1.2 }));
     w.position.set(-1.2 + i * 0.5, 0.35, 1.08); g.add(w);
@@ -437,9 +525,9 @@ const cloudPivots = [];
   }
 }
 
-progress(0.78, 'waking the courier…');
+progress(0.72, 'waking the courier…');
 
-// ─── the courier ─────────────────────────────────────────────────────────────
+// ─── courier ─────────────────────────────────────────────────────────────────
 const courier = new THREE.Group();
 const courierBody = (() => {
   const g = new THREE.Group();
@@ -450,7 +538,7 @@ const courierBody = (() => {
   const visor = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8),
     new THREE.MeshStandardMaterial({ color: 0x2d2138, roughness: 0.25 }));
   visor.position.set(0, 0.12, 0.42); g.add(visor);
-  for (const s of [-1, 1]) {  // little wings
+  for (const s of [-1, 1]) {
     const wing = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.3), M(0xffb28a));
     wing.position.set(s * 0.62, 0, -0.05); wing.rotation.z = s * -0.25; g.add(wing);
   }
@@ -468,21 +556,140 @@ const courierBody = (() => {
 courier.add(courierBody);
 scene.add(courier);
 
-// courier state — spherical kinematics
-let dir = ll(6, -30);                      // where on the sphere
-let heading = new THREE.Vector3(0, 0, 1);  // unit tangent
+let dir = ll(6, -30);
+let heading = new THREE.Vector3(0, 0, 1);
+heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
 let speed = 0;
-let targetDir = null;                      // click-to-move goal
-{ // make heading tangent
-  heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
-}
+let targetDir = null;
 
-// travel target ring
 const targetRing = new THREE.Mesh(
   new THREE.RingGeometry(0.5, 0.72, 24),
   new THREE.MeshBasicMaterial({ color: 0xff8a5c, transparent: true, opacity: 0, side: THREE.DoubleSide })
 );
 scene.add(targetRing);
+
+// ─── engine trail particles ──────────────────────────────────────────────────
+const PARTICLES = 42;
+const trail = (() => {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const ctx = cv.getContext('2d');
+  const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  grad.addColorStop(0, 'rgba(255,230,200,1)');
+  grad.addColorStop(0.5, 'rgba(255,190,150,0.55)');
+  grad.addColorStop(1, 'rgba(255,170,120,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(cv);
+  const pool = [];
+  for (let i = 0; i < PARTICLES; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    sp.scale.setScalar(0.4);
+    scene.add(sp);
+    pool.push({ sp, life: 0, vel: new THREE.Vector3() });
+  }
+  let idx = 0;
+  return {
+    pool,
+    emit(pos, backward, up) {
+      const p = pool[idx]; idx = (idx + 1) % PARTICLES;
+      p.life = 0.65 + Math.random() * 0.2;
+      p.maxLife = p.life;
+      p.sp.position.copy(pos)
+        .addScaledVector(backward, 0.75)
+        .addScaledVector(up, -0.15);
+      p.vel.copy(backward).multiplyScalar(2.2 + Math.random())
+        .addScaledVector(up, 0.4 * (Math.random() - 0.3));
+      p.vel.x += (Math.random() - 0.5) * 0.7;
+      p.vel.y += (Math.random() - 0.5) * 0.7;
+      p.vel.z += (Math.random() - 0.5) * 0.7;
+      p.sp.material.opacity = 0.85;
+      p.sp.scale.setScalar(0.35 + Math.random() * 0.2);
+    },
+    update(dt) {
+      for (const p of pool) {
+        if (p.life <= 0) continue;
+        p.life -= dt;
+        const k = Math.max(0, p.life / p.maxLife);
+        p.sp.position.addScaledVector(p.vel, dt);
+        p.sp.material.opacity = 0.85 * k;
+        p.sp.scale.setScalar(0.35 + (1 - k) * 0.85);
+        if (p.life <= 0) p.sp.material.opacity = 0;
+      }
+    },
+  };
+})();
+
+progress(0.85, 'tuning the radio…');
+
+// ─── ambient audio (generated — no assets) ───────────────────────────────────
+const AudioState = { ctx: null, master: null, engineGain: null, enabled: localStorage.getItem('planet-snd') !== 'off' };
+const sndBtn = document.getElementById('snd-toggle');
+function sndLabel() { sndBtn.textContent = AudioState.enabled ? '🔊 sound' : '🔇 muted'; }
+sndLabel();
+
+function startAudio() {
+  if (AudioState.ctx) return;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const master = ctx.createGain();
+  master.gain.value = AudioState.enabled ? 0.14 : 0;
+  master.connect(ctx.destination);
+
+  // warm pad — soft detuned triad through a lowpass, slow breathing
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 760; lp.Q.value = 0.4;
+  lp.connect(master);
+  const breathe = ctx.createGain(); breathe.gain.value = 0.5; breathe.connect(lp);
+  const lfo = ctx.createOscillator(); lfo.frequency.value = 0.045;
+  const lfoAmp = ctx.createGain(); lfoAmp.gain.value = 0.22;
+  lfo.connect(lfoAmp); lfoAmp.connect(breathe.gain); lfo.start();
+  [[130.81, 0.06], [164.81, 0.05], [196.0, 0.045], [261.63, 0.02]].forEach(([f, g0], i) => {
+    const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = f;
+    o.detune.value = (i - 1.5) * 4;
+    const g = ctx.createGain(); g.gain.value = g0;
+    const drift = ctx.createOscillator(); drift.frequency.value = 0.03 + i * 0.013;
+    const driftAmp = ctx.createGain(); driftAmp.gain.value = 2.5;
+    drift.connect(driftAmp); driftAmp.connect(o.detune); drift.start();
+    o.connect(g); g.connect(breathe); o.start();
+  });
+
+  // wind — filtered noise, slowly wandering
+  const len = ctx.sampleRate * 2;
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource(); noise.buffer = buf; noise.loop = true;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 420; bp.Q.value = 0.6;
+  const windG = ctx.createGain(); windG.gain.value = 0.05;
+  const windLfo = ctx.createOscillator(); windLfo.frequency.value = 0.07;
+  const windLfoAmp = ctx.createGain(); windLfoAmp.gain.value = 160;
+  windLfo.connect(windLfoAmp); windLfoAmp.connect(bp.frequency); windLfo.start();
+  noise.connect(bp); bp.connect(windG); windG.connect(master); noise.start();
+
+  // engine hum — gain follows speed (updated in the main loop)
+  const eng = ctx.createOscillator(); eng.type = 'sawtooth'; eng.frequency.value = 82;
+  const engLp = ctx.createBiquadFilter(); engLp.type = 'lowpass'; engLp.frequency.value = 240;
+  const engG = ctx.createGain(); engG.gain.value = 0;
+  eng.connect(engLp); engLp.connect(engG); engG.connect(master); eng.start();
+
+  AudioState.ctx = ctx; AudioState.master = master; AudioState.engineGain = engG; AudioState.engineOsc = eng;
+}
+// audio must begin on a user gesture
+const gestureStart = () => { startAudio(); window.removeEventListener('pointerdown', gestureStart); window.removeEventListener('keydown', gestureStart); };
+window.addEventListener('pointerdown', gestureStart);
+window.addEventListener('keydown', gestureStart);
+sndBtn.addEventListener('click', () => {
+  AudioState.enabled = !AudioState.enabled;
+  localStorage.setItem('planet-snd', AudioState.enabled ? 'on' : 'off');
+  startAudio();
+  if (AudioState.master) {
+    AudioState.master.gain.linearRampToValueAtTime(
+      AudioState.enabled ? 0.14 : 0, AudioState.ctx.currentTime + 0.4);
+  }
+  sndLabel();
+});
 
 // ─── input ───────────────────────────────────────────────────────────────────
 const keys = {};
@@ -525,7 +732,6 @@ if (IS_TOUCH) {
   });
 }
 
-// click / tap: buildings first, else travel to ground point
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 let downAt = 0, downX = 0, downY = 0;
@@ -548,7 +754,6 @@ renderer.domElement.addEventListener('pointerup', e => {
     hideHint();
   }
 });
-// hover cursor on buildings (desktop)
 if (!IS_TOUCH) {
   renderer.domElement.addEventListener('pointermove', e => {
     ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
@@ -557,7 +762,7 @@ if (!IS_TOUCH) {
   });
 }
 
-// ─── project card ────────────────────────────────────────────────────────────
+// ─── card ────────────────────────────────────────────────────────────────────
 const cardEl = document.getElementById('card');
 const cardTag = document.getElementById('card-tag');
 const cardTitle = document.getElementById('card-title');
@@ -595,16 +800,19 @@ function hideHint() {
 const clock = new THREE.Clock();
 let introT = 0;
 let nearLm = null;
+let emitAcc = 0;
 
 const _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _desired = new THREE.Vector3();
-const _m = new THREE.Matrix4(), _q = new THREE.Quaternion();
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _back = new THREE.Vector3();
+const _sunDay = new THREE.Color(0xffe0b8), _sunDusk = new THREE.Color(0xff9a66);
+const _fogDay = new THREE.Color(0xe3cfe8), _fogNight = new THREE.Color(0x241f47);
 
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
-  // ── input → desired tangent direction ──
+  // ── input ──
   let ix = 0, iz = 0;
   if (keys.KeyW || keys.ArrowUp) iz += 1;
   if (keys.KeyS || keys.ArrowDown) iz -= 1;
@@ -614,21 +822,23 @@ function animate() {
   const hasInput = Math.abs(ix) > 0.01 || Math.abs(iz) > 0.01;
   if (hasInput) { targetDir = null; targetRing.material.opacity = 0; hideHint(); }
 
-  // camera-relative frame on the tangent plane
   _fwd.subVectors(courier.position, camera.position);
   _fwd.sub(dir.clone().multiplyScalar(_fwd.dot(dir))).normalize();
-  _right.crossVectors(_fwd, dir).normalize();   // fwd × up = camera-right
+  _right.crossVectors(_fwd, dir).normalize();
+
+  // gentler turning: slower when moving fast so paths arc instead of snapping
+  const turnK = 1 - Math.pow(TURN * (1 + speed / MAX_SPEED), dt);
 
   if (hasInput) {
     _desired.set(0, 0, 0).addScaledVector(_fwd, iz).addScaledVector(_right, ix).normalize();
-    heading.lerp(_desired, 1 - Math.pow(0.0001, dt)).normalize();
+    heading.lerp(_desired, turnK).normalize();
     speed = Math.min(MAX_SPEED, speed + ACCEL * dt);
   } else if (targetDir) {
     const arc = dir.angleTo(targetDir);
     if (arc < 0.02) { targetDir = null; targetRing.material.opacity = 0; }
     else {
       _desired.subVectors(targetDir, dir.clone().multiplyScalar(dir.dot(targetDir))).normalize();
-      heading.lerp(_desired, 1 - Math.pow(0.0001, dt)).normalize();
+      heading.lerp(_desired, turnK).normalize();
       const slow = Math.min(1, arc / 0.12);
       speed = Math.min(MAX_SPEED * slow + 1.2, speed + ACCEL * dt);
     }
@@ -636,34 +846,62 @@ function animate() {
     speed = Math.max(0, speed - DAMP * dt * (speed + 1));
   }
 
-  // ── advance along the sphere ──
   if (speed > 0.001) {
     dir.multiplyScalar(R).addScaledVector(heading, speed * dt).normalize();
     heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
   }
 
-  // ── place + orient courier ──
   const bob = Math.sin(t * 3.1) * 0.12;
   courier.position.copy(posOn(dir, HOVER + bob));
-  _right.crossVectors(dir, heading);                     // up × fwd = local X
+  _right.crossVectors(dir, heading);
   _m.makeBasis(_right, dir, heading);
   _q.setFromRotationMatrix(_m);
-  courier.quaternion.slerp(_q, 1 - Math.pow(0.0001, dt));
-  courierBody.rotation.z = THREE.MathUtils.lerp(courierBody.rotation.z, -ix * 0.35, 0.12);
-  courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.18 * (speed / MAX_SPEED), 0.12);
-  courierBody.userData.rotor.rotation.y += dt * (14 + speed * 2);
+  courier.quaternion.slerp(_q, 1 - Math.pow(0.001, dt));
+  courierBody.rotation.z = THREE.MathUtils.lerp(courierBody.rotation.z, -ix * 0.25, 0.09);
+  courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.14 * (speed / MAX_SPEED), 0.09);
+  courierBody.userData.rotor.rotation.y += dt * (12 + speed * 2);
 
-  // ── chase camera (eases from the intro orbit into place) ──
+  // ── engine particles + hum ──
+  if (speed > 1.4) {
+    emitAcc += dt * (5 + speed * 3.2);
+    _back.copy(heading).negate();
+    while (emitAcc >= 1) { emitAcc -= 1; trail.emit(courier.position, _back, dir); }
+  }
+  trail.update(dt);
+  if (AudioState.engineGain) {
+    const g = (speed / MAX_SPEED);
+    AudioState.engineGain.gain.setTargetAtTime(g * g * 0.05, AudioState.ctx.currentTime, 0.12);
+    AudioState.engineOsc.frequency.setTargetAtTime(72 + g * 46, AudioState.ctx.currentTime, 0.15);
+  }
+
+  // ── chase camera ──
   introT = Math.min(1, introT + dt / 2.6);
   const ease = introT * introT * (3 - 2 * introT);
   const camPos = courier.position.clone()
     .addScaledVector(dir, CAM_H)
     .addScaledVector(heading, -CAM_D);
-  camera.position.lerp(camPos, (0.028 + 0.06 * ease));
-  camera.up.lerp(dir, 0.08).normalize();
+  camera.position.lerp(camPos, (0.02 + 0.05 * ease));
+  camera.up.lerp(dir, 0.06).normalize();
   camera.lookAt(courier.position.clone().addScaledVector(dir, 1.1));
 
-  // ── landmark proximity → open card ──
+  // ── day/night ──
+  const phase = (dayPhase0 + t / DAY_PERIOD) % 1;          // 0 midnight, 0.5 noon
+  const sunEl = Math.sin((phase - 0.25) * Math.PI * 2);    // -1..1 elevation
+  dayK = THREE.MathUtils.clamp(sunEl * 2.4 + 0.5, 0, 1);   // crisp dawn/dusk
+  const th = (phase - 0.25) * Math.PI * 2;
+  sun.position.set(Math.cos(th) * 70, Math.sin(th) * 60, 28);
+  sun.intensity = 0.08 + 1.45 * dayK;
+  const duskiness = 1 - Math.abs(sunEl);                   // strongest at horizon
+  sun.color.copy(_sunDay).lerp(_sunDusk, THREE.MathUtils.clamp(duskiness * 1.4 - 0.2, 0, 1));
+  hemi.intensity = 0.22 + 0.55 * dayK;
+  moon.intensity = 0.18 + 0.35 * (1 - dayK);
+  for (let i = 0; i < 3; i++) {
+    skyU[['cA', 'cB', 'cC'][i]].value.copy(SKY.night[i]).lerp(SKY.day[i], dayK);
+  }
+  scene.fog.color.copy(_fogNight).lerp(_fogDay, dayK);
+  stars.material.opacity = 0.15 + 0.75 * (1 - dayK);
+
+  // ── landmark proximity ──
   let nearest = null, nearestArc = 1e9;
   for (const lm of LANDMARKS) {
     const a = dir.angleTo(lm.dir);
@@ -673,6 +911,7 @@ function animate() {
       lm.gem.position.y = 4.7 + Math.sin(t * 2 + lm.dir.x * 10) * 0.18;
       const target = (lm === nearLm) ? 1.35 : 1.0;
       lm.gem.scale.setScalar(THREE.MathUtils.lerp(lm.gem.scale.x, target, 0.1));
+      lm.gem.material.emissiveIntensity = 0.9 + (1 - dayK) * 0.8;   // brighter at night
     }
   }
   if (nearLm && dir.angleTo(nearLm.dir) > FAR_ARC) {
@@ -684,7 +923,6 @@ function animate() {
     openCard(nearest);
   }
 
-  // labels always face up nicely (sprites auto-face camera; fade far ones)
   for (const lm of LANDMARKS) {
     if (!lm.label) continue;
     const d = camera.position.distanceTo(lm.label.position);
@@ -696,18 +934,27 @@ function animate() {
   stationPivot.rotateY(dt * 0.05);
   station.rotation.y += dt * 0.2;
   targetRing.material.opacity = Math.max(0, targetRing.material.opacity - dt * 0.25);
-  sky.position.copy(camera.position);   // keep sky centered on the eye
+  water.material.opacity = 0.74 + Math.sin(t * 0.9) * 0.06;
+  sky.position.copy(camera.position);
 
-  renderer.render(scene, camera);
+  if (gfxDreamy) {
+    ensureComposer();
+    bloom.strength = 0.3 + (1 - dayK) * 0.35;   // bloom blossoms at night
+    composer.render();
+  } else {
+    renderer.render(scene, camera);
+  }
 }
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  if (composer) composer.setSize(window.innerWidth, window.innerHeight);
 });
 
 // ─── go ──────────────────────────────────────────────────────────────────────
+applyGfx();
 progress(1, 'ready!');
 animate();
 setTimeout(() => loaderEl.classList.add('hide'), 450);
