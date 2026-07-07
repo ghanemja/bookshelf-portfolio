@@ -20,8 +20,8 @@ const HOVER = 0.36;                   // jeep wheels on the ground
 const VIBES = {
   barbie: {
     label: '💖 barbie',
-    skyDay: [0xffe9a8, 0xffb3d1, 0xf48fc0], skyNight: [0x4a1e42, 0x2e1435, 0x180f26],
-    fogDay: 0xffd6e5, fogNight: 0x33162e,
+    skyDay: [0xffe9a8, 0xffb3d1, 0xf48fc0], skyNight: [0x5c2a52, 0x3e1e48, 0x241634],
+    fogDay: 0xffd6e5, fogNight: 0x4a2545,
     sunDay: 0xffe0ec, sunDusk: 0xff7fa8,
     hemiSky: 0xfff0f6, hemiGround: 0xc07898,
     terr: { deep: 0xd9a1b8, sand: 0xffe9b3, mid: 0xff9fc2, high: 0xf2c9e0, snow: 0xfff6fa },
@@ -30,8 +30,8 @@ const VIBES = {
   },
   bratz: {
     label: '😎 bratz',
-    skyDay: [0xffd9b8, 0xd9c4f2, 0x9fc0ee], skyNight: [0x3a2f5e, 0x241f47, 0x121430],
-    fogDay: 0xe3cfe8, fogNight: 0x241f47,
+    skyDay: [0xffd9b8, 0xd9c4f2, 0x9fc0ee], skyNight: [0x4a3e72, 0x342d5c, 0x1e2144],
+    fogDay: 0xe3cfe8, fogNight: 0x3a3462,
     sunDay: 0xffe0b8, sunDusk: 0xff9a66,
     hemiSky: 0xfff2dd, hemiGround: 0x8a76b8,
     terr: { deep: 0xc9b287, sand: 0xefdca6, mid: 0x93ce9d, high: 0xbfaee0, snow: 0xf7f4fb },
@@ -46,7 +46,7 @@ const MAX_SPEED = 7.2;
 const ACCEL = 13;
 const DAMP = 4.5;
 const TURN = 0.05;
-const CAM_H = 3.6, CAM_D = 8.6;
+const CAM_H = 2.5, CAM_D = 7.0;   // lower + closer: street-level, Season-style
 const NEAR_ARC = 0.115, FAR_ARC = 0.165;
 const DAY_PERIOD = 240;
 const STAR_COUNT = 18;
@@ -85,9 +85,9 @@ app.appendChild(renderer.domElement);
 if (IS_TOUCH) document.body.classList.add('touch');
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xe3cfe8, 55, 190);
+scene.fog = new THREE.Fog(0xe3cfe8, 42, 155);
 
-const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 0.1, 600);
+const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 600);
 camera.position.set(0, 26, 95);
 
 // ─── "inked" mode: anime cel look — ink outlines from depth+normal edges ────
@@ -204,8 +204,8 @@ let gfxInked = stored === 'inked';
 const gfxBtn = document.getElementById('gfx-toggle');
 function applyGfx() {
   gfxBtn.textContent = gfxInked ? '🖌 inked' : '🧊 classic';
-  scene.fog.near = gfxInked ? 50 : 55;
-  scene.fog.far = gfxInked ? 175 : 190;
+  scene.fog.near = gfxInked ? 40 : 42;
+  scene.fog.far = gfxInked ? 145 : 155;
 }
 gfxBtn.addEventListener('click', () => {
   gfxInked = !gfxInked;
@@ -301,37 +301,37 @@ const LANDMARKS = [
     enter: './room.html', dir: ll(14, -8) },
   { key: 'yarnflow', name: 'YarnFlow', tag: 'hobby · social', style: 'dome', color: 0xff7eb6,
     desc: 'A crochet studio — patterns as threads you can share, fork, and remix.',
-    url: 'https://ghanemja.github.io/crochet/', dir: ll(32, 58) },
+    url: 'https://ghanemja.github.io/crochet/', dir: ll(24, 22) },
   { key: 'inbox', name: 'Inbox Zero', tag: 'tool', style: 'tower', color: 0x4e8eff,
     desc: 'Kanban for email — drag messages between todo / waiting / done.',
-    url: 'https://ghanemja.github.io/inbox-zero-board/', dir: ll(-18, 38) },
+    url: 'https://ghanemja.github.io/inbox-zero-board/', dir: ll(2, 46) },
   { key: 'charterscope', name: 'CharterScope', tag: 'tool · nlp', style: 'lighthouse', color: 0x33c9ff,
     desc: 'Flags unusual clauses in maritime shipping contracts before you sign.',
-    url: 'https://ghanemja.github.io/charterscope/', dir: ll(8, 118) },
+    url: 'https://ghanemja.github.io/charterscope/', dir: ll(18, 76) },
   { key: 'deckgpt', name: 'DeckGPT', tag: 'ai', style: 'arch', color: 0xb265ff,
     desc: 'Prompt → branded PowerPoint. Slides that argue back.',
-    url: 'https://pptgpt.netlify.app', dir: ll(-34, 96) },
+    url: 'https://pptgpt.netlify.app', dir: ll(-8, 100) },
   { key: 'council', name: 'The Council', tag: 'ai · agents', style: 'dome', color: 0x8f7ae8,
     desc: 'Specialist agents debate with citations; experts score the outcome.',
-    dir: ll(44, 168) },
+    dir: ll(16, 128) },
   { key: 'brainu', name: 'Brain U', tag: 'ai · learning', style: 'tower', color: 0xd06ee0,
     desc: 'Turns paper corpora into an adaptive curriculum with video lessons.',
-    dir: ll(-8, -158) },
+    dir: ll(-2, 156) },
   { key: 'sinescape', name: 'Sinescape', tag: 'creative code', style: 'arch', color: 0x2dd47b,
     desc: 'Rebuilds an image from pure math — Fourier brushstrokes.',
-    url: 'https://yeganeh-formula-studio.netlify.app', dir: ll(26, -118) },
+    url: 'https://yeganeh-formula-studio.netlify.app', dir: ll(12, -176) },
   { key: 'pixels', name: 'Pixels → Params', tag: 'research', style: 'tower', color: 0xff8a3d,
     desc: 'Vision-language models for automated CAD design and optimization.',
-    url: 'https://ghanemja.github.io/html/', dir: ll(-40, -58) },
+    url: 'https://ghanemja.github.io/html/', dir: ll(-6, -148) },
   { key: 'ros2', name: 'Robot Lab', tag: 'robotics', style: 'dome', color: 0xff4d6e,
     desc: 'ROS2 + depth cameras + QNX — my robotics tutorials and demos.',
-    url: 'https://ghanemja.github.io/ros2_depth_camera_tutorial/', dir: ll(-52, 15) },
+    url: 'https://ghanemja.github.io/ros2_depth_camera_tutorial/', dir: ll(14, -120) },
   { key: 'artgarden', name: 'The Art Garden', tag: 'paintings', style: 'garden', color: 0xffd23d,
     desc: 'A sculpture garden of my real acrylics — 45 paintings hang in the gallery inside the Library.',
-    enter: './room.html', dir: ll(52, -44) },
+    enter: './room.html', dir: ll(26, -66) },
 ];
-const LAKE = ll(-15, 75);
-const MTN = ll(58, -95);
+const LAKE = ll(-40, 62);
+const MTN = ll(55, -50);
 
 // ─── terrain: continents + ocean + lake bay + mountain + land pedestals ─────
 function surfH(d) {
@@ -383,7 +383,7 @@ function randomWaterDir() {
 }
 
 const planet = (() => {
-  let g = new THREE.IcosahedronGeometry(R, 4).toNonIndexed();
+  let g = new THREE.IcosahedronGeometry(R, 5).toNonIndexed();   // 4× mesh detail
   const p = g.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) {
@@ -614,9 +614,98 @@ for (const lm of LANDMARKS) {
 }
 document.fonts.ready.then(() => LANDMARKS.forEach(makeLabel));
 
-scatter(pineTree, 44);
-scatter(roundTree, 20);
-scatter(rockDeco, 24);
+scatter(pineTree, 64);
+scatter(roundTree, 30);
+scatter(rockDeco, 30);
+
+// ─── main-street furniture: lamps line the route, cottages + flora fill it ──
+function slerpDir(a, b, t) {
+  const th = a.angleTo(b);
+  if (th < 1e-4) return a.clone();
+  const s = Math.sin(th);
+  return a.clone().multiplyScalar(Math.sin((1 - t) * th) / s)
+    .addScaledVector(b, Math.sin(t * th) / s).normalize();
+}
+function bandLandDir(minArc = 0.12) {   // sample near the equatorial street
+  for (let i = 0; i < 60; i++) {
+    const d = ll((rand() - 0.5) * 48, rand() * 360);
+    if (!isLand(d)) continue;
+    if (LANDMARKS.some(l => l.dir.angleTo(d) < minArc)) continue;
+    return d;
+  }
+  return randomLandDir(minArc);
+}
+const lampBulbMat = new THREE.MeshStandardMaterial({
+  color: 0xfff2c8, emissive: 0xffd98a, emissiveIntensity: 0.5,
+});
+function streetLamp() {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 1.9, 6), M(0x4a3f54));
+  pole.position.y = 0.95; g.add(pole);
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.45, 5), M(0x4a3f54));
+  arm.rotation.z = Math.PI / 2; arm.position.set(0.2, 1.86, 0); g.add(arm);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), lampBulbMat);
+  bulb.position.set(0.42, 1.8, 0); g.add(bulb);
+  return g;
+}
+// two lamps in every gap along the delivery route
+for (let i = 0; i < LANDMARKS.length; i++) {
+  const a = LANDMARKS[i].dir, b = LANDMARKS[(i + 1) % LANDMARKS.length].dir;
+  for (const t of [0.35, 0.68]) {
+    const d = slerpDir(a, b, t);
+    if (!isLand(d, 0.05)) continue;
+    const o = streetLamp();
+    o.position.copy(posOn(d, -0.04));
+    alignToSurface(o, d, rand() * Math.PI * 2);
+    o.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    deco.add(o);
+  }
+}
+const COTTAGE_COLORS = [0xffd9c2, 0xcfe8ff, 0xffe9b3, 0xe0d4ff, 0xd6f2d9];
+function cottage() {
+  const g = new THREE.Group(), s = 0.8 + rand() * 0.5;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.5 * s, 1.0 * s, 1.2 * s),
+    M(COTTAGE_COLORS[Math.floor(rand() * COTTAGE_COLORS.length)]));
+  body.position.y = 0.55 * s; g.add(body);
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(1.25 * s, 0.8 * s, 4), M(0xb5654a));
+  roof.position.y = 1.45 * s; roof.rotation.y = Math.PI / 4; g.add(roof);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(0.3 * s, 0.55 * s, 0.06), M(0x6b4a3a));
+  door.position.set(0, 0.32 * s, 0.62 * s); g.add(door);
+  const win = new THREE.Mesh(new THREE.BoxGeometry(0.3 * s, 0.28 * s, 0.05), lampBulbMat);
+  win.position.set(0.42 * s, 0.62 * s, 0.62 * s); g.add(win);
+  return g;
+}
+function bush() {
+  const s = 0.35 + rand() * 0.35;
+  const m = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 1), rand() > 0.5 ? LEAF_A : LEAF_B);
+  m.scale.y = 0.7; m.position.y = s * 0.5;
+  const g = new THREE.Group(); g.add(m); return g;
+}
+const FLOWER_COLORS = [0xff8ab5, 0xffd23d, 0xfff4f8, 0xb265ff];
+function flowerPatch() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 4), LEAF_A);
+    stem.position.set((rand() - 0.5) * 0.5, 0.15, (rand() - 0.5) * 0.5); g.add(stem);
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.09, 0),
+      M(FLOWER_COLORS[Math.floor(rand() * FLOWER_COLORS.length)]));
+    head.position.copy(stem.position).y += 0.2; g.add(head);
+  }
+  return g;
+}
+function placeBand(make, count, minArc = 0.1) {
+  for (let i = 0; i < count; i++) {
+    const d = bandLandDir(minArc);
+    const o = make();
+    o.position.copy(posOn(d, -0.05));
+    alignToSurface(o, d, rand() * Math.PI * 2);
+    o.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    deco.add(o);
+  }
+}
+placeBand(cottage, 9, 0.13);
+placeBand(bush, 30, 0.07);
+placeBand(flowerPatch, 34, 0.06);
 
 progress(0.52, 'releasing the animals…');
 
@@ -657,7 +746,7 @@ const sheepies = [];
 {
   const woolM = M(0xfdf7ec), faceM = M(0x5d5375);
   for (let i = 0; i < 8; i++) {
-    const d = randomLandDir(0.14);
+    const d = bandLandDir(0.14);
     const s = new THREE.Group();
     const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 1), woolM);
     body.position.y = 0.45; body.scale.set(1.15, 0.95, 1); s.add(body);
@@ -765,7 +854,7 @@ const starItems = [];
     color: 0xffd23d, emissive: 0xffb800, emissiveIntensity: 0.8, flatShading: true,
   });
   for (let i = 0; i < STAR_COUNT; i++) {
-    const d = randomLandDir(0.09);
+    const d = bandLandDir(0.09);
     const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.32), starM.clone());
     m.position.copy(posOn(d, HOVER + 0.55));
     m.visible = !collectedStars.has(i);
@@ -1281,11 +1370,11 @@ function animate() {
   dayK = THREE.MathUtils.clamp(sunEl * 2.4 + 0.5, 0, 1);
   const th = (phase - 0.25) * Math.PI * 2;
   sun.position.set(Math.cos(th) * 70, Math.sin(th) * 60, 28);
-  sun.intensity = 0.08 + 1.45 * dayK;
+  sun.intensity = 0.28 + 1.25 * dayK;
   const duskiness = 1 - Math.abs(sunEl);
   sun.color.copy(_sunDay).lerp(_sunDusk, THREE.MathUtils.clamp(duskiness * 1.4 - 0.2, 0, 1));
-  hemi.intensity = 0.22 + 0.55 * dayK;
-  moon.intensity = 0.18 + 0.35 * (1 - dayK);
+  hemi.intensity = 0.48 + 0.4 * dayK;
+  moon.intensity = 0.3 + 0.45 * (1 - dayK);
   for (let i = 0; i < 3; i++) {
     skyU[['cA', 'cB', 'cC'][i]].value.copy(SKY.night[i]).lerp(SKY.day[i], dayK);
   }
@@ -1303,6 +1392,7 @@ function animate() {
       const target = (lm === nearLm) ? 1.35 : 1.0;
       lm.gem.scale.setScalar(THREE.MathUtils.lerp(lm.gem.scale.x, target, 0.1));
       lm.gem.material.emissiveIntensity = 0.9 + (1 - dayK) * 0.8;
+      lampBulbMat.emissiveIntensity = 0.5 + (1 - dayK) * 1.9;
     }
     if (lm.sculpture) lm.sculpture.rotation.y += dt * 0.6;
   }
