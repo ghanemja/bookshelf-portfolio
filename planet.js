@@ -27,16 +27,18 @@ const VIBES = {
     terr: { deep: 0xd9a1b8, sand: 0xffe9b3, mid: 0xff9fc2, high: 0xf2c9e0, snow: 0xfff6fa },
     water: 0xff9fc0, leafA: 0xff8ab5, leafB: 0xffc2d8, wood: 0xf2e0d0, rock: 0xf4d9e8,
     cloud: 0xffe4ef, trail: 0xffc2d8,
+    road: 0x9c8295, roadLine: 0xfff2d8,
   },
   bratz: {
     label: '😎 bratz',
-    skyDay: [0xffd9b8, 0xd9c4f2, 0x9fc0ee], skyNight: [0x4a3e72, 0x342d5c, 0x1e2144],
-    fogDay: 0xe3cfe8, fogNight: 0x3a3462,
-    sunDay: 0xffe0b8, sunDusk: 0xff9a66,
-    hemiSky: 0xfff2dd, hemiGround: 0x8a76b8,
-    terr: { deep: 0xc9b287, sand: 0xefdca6, mid: 0x93ce9d, high: 0xbfaee0, snow: 0xf7f4fb },
-    water: 0x6cbcdf, leafA: 0x7fbf8b, leafB: 0xa8d8a0, wood: 0x9a6b4f, rock: 0xcdc3dd,
-    cloud: 0xffffff, trail: 0xffbe96,
+    skyDay: [0xbfe8e2, 0x8fd4cd, 0x6cc2bd], skyNight: [0x2e4a58, 0x1f3542, 0x14242e],
+    fogDay: 0xa8ded8, fogNight: 0x2a4450,
+    sunDay: 0xfff2d8, sunDusk: 0xffb37f,
+    hemiSky: 0xf0fff8, hemiGround: 0x6f9a8a,
+    terr: { deep: 0xb5a582, sand: 0xe8dcc0, mid: 0x8fbf7f, high: 0xbfae8e, snow: 0xf4f1e8 },
+    water: 0x3f9db2, leafA: 0x4f8f5f, leafB: 0x7fb56f, wood: 0x8a6248, rock: 0xc2b8a4,
+    cloud: 0xffffff, trail: 0xffe2b8,
+    road: 0x8d8f96, roadLine: 0xf2ecd8,
   },
 };
 let vibe = (new URLSearchParams(location.search).get('vibe'))
@@ -340,6 +342,8 @@ function surfH(d) {
     Math.sin(d.x * 3.1 + 1.3) * Math.sin(d.y * 2.7 + 2.1) * Math.sin(d.z * 3.7 + 0.5) * 0.55 +
     Math.sin(d.x * 6.4 + 4.2) * Math.sin(d.z * 5.2 + 1.1) * 0.24 +
     Math.sin(d.y * 7.3 + 0.7) * 0.10;
+  const stepH = 0.55;                                    // terraced cliffs
+  h = h - (h - Math.round(h / stepH) * stepH) * 0.55;
   const aL = Math.acos(THREE.MathUtils.clamp(d.dot(LAKE), -1, 1));
   h -= 1.5 * Math.exp(-(aL * aL) / (0.16 * 0.16));                    // a bay
   const aM = Math.acos(THREE.MathUtils.clamp(d.dot(MTN), -1, 1));
@@ -614,17 +618,73 @@ for (const lm of LANDMARKS) {
 }
 document.fonts.ready.then(() => LANDMARKS.forEach(makeLabel));
 
-scatter(pineTree, 64);
-scatter(roundTree, 30);
-scatter(rockDeco, 30);
+// trees grow in FOREST CLUMPS (like the reference), not lone scatter
+function scatterClumps(make, clumpCount, perClump, spread = 0.055) {
+  for (let c = 0; c < clumpCount; c++) {
+    const center = randomLandDir(0.13);
+    for (let i = 0; i < perClump; i++) {
+      const axis = randomDir().cross(center).normalize();
+      const d = center.clone().applyAxisAngle(axis, rand() * spread).normalize();
+      if (!isLand(d, 0.08)) continue;
+      const o = make();
+      o.position.copy(posOn(d, -0.06));
+      alignToSurface(o, d, rand() * Math.PI * 2);
+      o.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+      deco.add(o);
+    }
+  }
+}
+scatterClumps(pineTree, 7, 9);
+scatterClumps(roundTree, 5, 6);
+scatter(rockDeco, 26);
 
-// ─── main-street furniture: lamps line the route, cottages + flora fill it ──
+// ─── the ROAD: a paved ribbon through every stop on the route ───────────────
 function slerpDir(a, b, t) {
   const th = a.angleTo(b);
   if (th < 1e-4) return a.clone();
   const s = Math.sin(th);
   return a.clone().multiplyScalar(Math.sin((1 - t) * th) / s)
     .addScaledVector(b, Math.sin(t * th) / s).normalize();
+}
+const roadParts = [];   // tinted by the vibe toggle
+{
+  const pts = [];
+  for (let i = 0; i < LANDMARKS.length; i++) {
+    const a = LANDMARKS[i].dir, b = LANDMARKS[(i + 1) % LANDMARKS.length].dir;
+    const n = 22;
+    for (let k = 0; k < n; k++) pts.push(slerpDir(a, b, k / n));
+  }
+  function ribbon(halfW, lift, key, dashed = false) {
+    const pos = [], idx = [];
+    const lat = new THREE.Vector3();
+    for (let i = 0; i < pts.length; i++) {
+      const d = pts[i], dn = pts[(i + 1) % pts.length];
+      const tang = dn.clone().sub(d.clone().multiplyScalar(d.dot(dn))).normalize();
+      lat.crossVectors(d, tang).normalize();
+      const r = Math.max(radiusAt(d), SEA_R) + lift;   // becomes a causeway over bays
+      const p1 = d.clone().multiplyScalar(r).addScaledVector(lat, halfW);
+      const p2 = d.clone().multiplyScalar(r).addScaledVector(lat, -halfW);
+      pos.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+    }
+    const n = pts.length;
+    for (let i = 0; i < n; i++) {
+      if (dashed && i % 4 >= 2) continue;
+      const a0 = i * 2, a1 = i * 2 + 1, b0 = ((i + 1) % n) * 2, b1 = ((i + 1) % n) * 2 + 1;
+      idx.push(a0, b0, a1, a1, b0, b1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }));
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    roadParts.push({ mesh, key });
+    return mesh;
+  }
+  ribbon(1.62, 0.05, 'roadLine');            // pale shoulders peeking out
+  ribbon(1.45, 0.065, 'road');               // asphalt
+  ribbon(0.09, 0.08, 'roadLine', true);      // dashed centerline
 }
 function bandLandDir(minArc = 0.12) {   // sample near the equatorial street
   for (let i = 0; i < 60; i++) {
@@ -703,7 +763,21 @@ function placeBand(make, count, minArc = 0.1) {
     deco.add(o);
   }
 }
-placeBand(cottage, 9, 0.13);
+// cottages huddle beside each landmark — every stop is a little village
+for (const lm of LANDMARKS) {
+  const n = 1 + Math.floor(rand() * 2);
+  for (let i = 0; i < n; i++) {
+    const axis = randomDir().cross(lm.dir).normalize();
+    const d = lm.dir.clone().applyAxisAngle(axis, 0.09 + rand() * 0.045).normalize();
+    if (!isLand(d, 0.02)) continue;
+    if (LANDMARKS.some(l => l !== lm && l.dir.angleTo(d) < 0.07)) continue;
+    const o = cottage();
+    o.position.copy(posOn(d, -0.05));
+    alignToSurface(o, d, rand() * Math.PI * 2);
+    o.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    deco.add(o);
+  }
+}
 placeBand(bush, 30, 0.07);
 placeBand(flowerPatch, 34, 0.06);
 
@@ -833,10 +907,10 @@ let cloudMat;
       const s = 0.7 + rand() * 0.9;
       const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 1), cloudM);
       puff.position.set(p * 1.1 - puffs * 0.5, rand() * 0.4, rand() * 0.6);
-      puff.scale.y = 0.6;
+      puff.scale.y = 0.45;
       cl.add(puff);
     }
-    cl.position.y = R + 7 + rand() * 4;
+    cl.position.y = R + 4.5 + rand() * 2.5;
     pivot.add(cl);
     pivot.userData.speed = 0.008 + rand() * 0.014;
     scene.add(pivot);
@@ -1043,6 +1117,7 @@ function applyVibe() {
   WOOD.color.setHex(P.wood); ROCK.color.setHex(P.rock);
   cloudMat.color.setHex(P.cloud);
   for (const p of trailPool) p.sp.material.color.setHex(P.trail);
+  for (const rp of roadParts) rp.mesh.material.color.setHex(P[rp.key]);
   paintTerrain(P.terr);
 }
 vibeBtn.addEventListener('click', () => {
