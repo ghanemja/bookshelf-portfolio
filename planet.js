@@ -98,6 +98,33 @@ camera.position.set(0, 26, 95);
 // discontinuities and posterizes the colors. Classic stays single-pass.
 let inkReady = false;
 let rtColor, rtNormal, normalOverride, inkQuad;
+
+// hand-made paper texture: speckle grain + soft blotches (tileable enough)
+function makePaperTexture() {
+  const s = 512, cv = document.createElement('canvas');
+  cv.width = cv.height = s;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, s, s);
+  const img = ctx.getImageData(0, 0, s, s);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 128 + (Math.random() - 0.5) * 88;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+  }
+  ctx.putImageData(img, 0, 0);
+  ctx.filter = 'blur(1px)'; ctx.drawImage(cv, 0, 0); ctx.filter = 'none';
+  for (let b = 0; b < 26; b++) {   // pigment blotches
+    const x = Math.random() * s, y = Math.random() * s, r = 40 + Math.random() * 120;
+    const v = Math.random() > 0.5 ? 255 : 0, a = 0.04 + Math.random() * 0.05;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(${v},${v},${v},${a})`);
+    g.addColorStop(1, 'rgba(128,128,128,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 6.283); ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
 function ensureInk() {
   if (inkReady) return;
   const w = window.innerWidth, h = window.innerHeight;
@@ -114,6 +141,7 @@ function ensureInk() {
       tColor: { value: rtColor.texture },
       tDepth: { value: rtColor.depthTexture },
       tNormal: { value: rtNormal.texture },
+      tPaper: { value: makePaperTexture() },
       res: { value: new THREE.Vector2(w * dpr, h * dpr) },
       camNear: { value: camera.near },
       camFar: { value: camera.far },
@@ -123,7 +151,7 @@ function ensureInk() {
       void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
     fragmentShader: `
       varying vec2 vUv;
-      uniform sampler2D tColor, tDepth, tNormal;
+      uniform sampler2D tColor, tDepth, tNormal, tPaper;
       uniform vec2 res;
       uniform float camNear, camFar;
 
@@ -158,19 +186,27 @@ function ensureInk() {
 
         float skyMask = 1.0 - step(camFar * 0.55, d0);   // no ink on the sky
         // depth threshold scales with distance so far hills don't fill solid
-        float eD = smoothstep(0.3, 1.0, edgeD / (0.02 * d0 + 0.18));
-        float eN = smoothstep(0.55, 1.15, edgeN);        // creases only, not facets
+        float eD = smoothstep(0.35, 1.25, edgeD / (0.02 * d0 + 0.18));
+        float eN = smoothstep(0.6, 1.35, edgeN);         // creases only, not facets
         float edge = clamp(eD + eN, 0.0, 1.0) * skyMask;
 
         vec3 col = texture2D(tColor, vUv).rgb;
-        // cel posterize (soft) — skip the sky so gradients stay smooth
-        vec3 post = floor(col * 6.0 + 0.5) / 6.0;
-        col = mix(col, post, 0.5 * skyMask);
-        // anime pop: gentle saturation + ink lines
+        float paper = texture2D(tPaper, vUv * vec2(res.x / res.y, 1.0) * 2.6).r;
+        // noise-dithered quantize — bands melt into soft watercolor washes
+        float pn = paper - 0.5;
+        vec3 post = floor(col * 5.0 + 0.5 + pn * 0.45) / 5.0;
+        col = mix(col, post, 0.6 * skyMask);
+        // pigment granulation
+        col *= 0.93 + 0.13 * paper;
+        // pooled pigment at edges — darker local color, never black ink
+        vec3 pooled = col * 0.5;
+        col = mix(col, pooled, edge * 0.8 * (0.65 + 0.35 * paper));
+        // watercolor softness: shadows lifted, paper never reaches black
         float lum = dot(col, vec3(0.299, 0.587, 0.114));
-        col = mix(vec3(lum), col, 1.18);
-        vec3 ink = vec3(0.09, 0.10, 0.14);
-        col = mix(col, ink, edge * 0.85);
+        col = mix(vec3(lum), col, 1.05);
+        col = col * 0.9 + 0.075;
+        // grain washes over the sky too
+        col = mix(col * (0.95 + 0.08 * paper), col, skyMask);
         // proper linear → sRGB (RT holds tone-mapped linear)
         vec3 lo = col * 12.92;
         vec3 hi = 1.055 * pow(max(col, 0.0), vec3(1.0 / 2.4)) - 0.055;
@@ -201,17 +237,17 @@ function renderInked() {
 }
 const gfxParam = new URLSearchParams(location.search).get('gfx');
 let stored = gfxParam ?? localStorage.getItem('planet-gfx') ?? (IS_TOUCH ? 'classic' : 'inked');
-if (stored === 'dreamy') stored = 'inked';   // migrate old setting
-let gfxInked = stored === 'inked';
+if (stored === 'dreamy' || stored === 'inked') stored = 'watercolor';   // migrate old settings
+let gfxInked = stored === 'watercolor';
 const gfxBtn = document.getElementById('gfx-toggle');
 function applyGfx() {
-  gfxBtn.textContent = gfxInked ? '🖌 inked' : '🧊 classic';
+  gfxBtn.textContent = gfxInked ? '🎨 watercolor' : '🧊 classic';
   scene.fog.near = gfxInked ? 40 : 42;
   scene.fog.far = gfxInked ? 145 : 155;
 }
 gfxBtn.addEventListener('click', () => {
   gfxInked = !gfxInked;
-  localStorage.setItem('planet-gfx', gfxInked ? 'inked' : 'classic');
+  localStorage.setItem('planet-gfx', gfxInked ? 'watercolor' : 'classic');
   applyGfx();
 });
 
@@ -634,7 +670,7 @@ function scatterClumps(make, clumpCount, perClump, spread = 0.055) {
     }
   }
 }
-scatterClumps(pineTree, 7, 9);
+scatterClumps(pineTree, 5, 8);
 scatterClumps(roundTree, 5, 6);
 scatter(rockDeco, 26);
 
@@ -685,6 +721,23 @@ const roadParts = [];   // tinted by the vibe toggle
   ribbon(1.62, 0.05, 'roadLine');            // pale shoulders peeking out
   ribbon(1.45, 0.065, 'road');               // asphalt
   ribbon(0.09, 0.08, 'roadLine', true);      // dashed centerline
+
+  // pines line the road at regular intervals — planted, not scattered
+  for (let i = 0; i < pts.length; i += 5) {
+    const d = pts[i], dn = pts[(i + 1) % pts.length];
+    const tang = dn.clone().sub(d.clone().multiplyScalar(d.dot(dn))).normalize();
+    for (const s of [-1, 1]) {
+      const dd = d.clone().applyAxisAngle(tang, s * 0.06).normalize();
+      if (!isLand(dd, 0.1)) continue;
+      if (LANDMARKS.some(l => l.dir.angleTo(dd) < 0.09)) continue;
+      const o = pineTree();
+      o.scale.setScalar(0.8);
+      o.position.copy(posOn(dd, -0.06));
+      alignToSurface(o, dd, rand() * Math.PI * 2);
+      o.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+      deco.add(o);
+    }
+  }
 }
 function bandLandDir(minArc = 0.12) {   // sample near the equatorial street
   for (let i = 0; i < 60; i++) {
@@ -763,23 +816,92 @@ function placeBand(make, count, minArc = 0.1) {
     deco.add(o);
   }
 }
-// cottages huddle beside each landmark — every stop is a little village
-for (const lm of LANDMARKS) {
-  const n = 1 + Math.floor(rand() * 2);
-  for (let i = 0; i < n; i++) {
-    const axis = randomDir().cross(lm.dir).normalize();
-    const d = lm.dir.clone().applyAxisAngle(axis, 0.09 + rand() * 0.045).normalize();
+// yaw that turns a surface object to face a target point along the ground
+function yawToFace(d, target) {
+  const q0 = new THREE.Quaternion().setFromUnitVectors(UP_Y, d);
+  const v0 = new THREE.Vector3(0, 0, 1).applyQuaternion(q0);
+  const f = target.clone().sub(d.clone().multiplyScalar(d.dot(target))).normalize();
+  const c = new THREE.Vector3().crossVectors(v0, f);
+  return Math.atan2(c.dot(d), v0.dot(f));
+}
+// cottages flank each stop across the road, FACING it — deliberate villages
+for (let i = 0; i < LANDMARKS.length; i++) {
+  const lm = LANDMARKS[i];
+  const nxt = LANDMARKS[(i + 1) % LANDMARKS.length];
+  const tang = nxt.dir.clone().sub(lm.dir.clone().multiplyScalar(lm.dir.dot(nxt.dir))).normalize();
+  for (const s of [-1, 1]) {
+    const d = lm.dir.clone().applyAxisAngle(tang, s * 0.085).normalize();
     if (!isLand(d, 0.02)) continue;
     if (LANDMARKS.some(l => l !== lm && l.dir.angleTo(d) < 0.07)) continue;
     const o = cottage();
     o.position.copy(posOn(d, -0.05));
-    alignToSurface(o, d, rand() * Math.PI * 2);
+    alignToSurface(o, d, yawToFace(d, lm.dir));
     o.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
     deco.add(o);
   }
 }
 placeBand(bush, 30, 0.07);
 placeBand(flowerPatch, 34, 0.06);
+
+// ─── hand-placed set pieces ──────────────────────────────────────────────────
+// town plaza at the Library: paved circle ringed with benches
+{
+  const lib = LANDMARKS[0];
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 4.8, 0.3, 20), M(0xcfc4b2));
+  disc.position.copy(posOn(lib.dir, -0.12));
+  alignToSurface(disc, lib.dir);
+  disc.receiveShadow = true;
+  scene.add(disc);
+  const t1 = new THREE.Vector3(1, 0, 0).cross(lib.dir).normalize();
+  const t2 = new THREE.Vector3().crossVectors(lib.dir, t1);
+  for (let k = 0; k < 4; k++) {
+    const ang = k * Math.PI / 2 + Math.PI / 4;
+    const axis = t1.clone().multiplyScalar(Math.cos(ang)).addScaledVector(t2, Math.sin(ang)).normalize();
+    const d = lib.dir.clone().applyAxisAngle(axis, 0.115).normalize();
+    const bench = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.1, 0.45), WOOD);
+    seat.position.y = 0.45; bench.add(seat);
+    for (const sx of [-0.5, 0.5]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.45, 0.4), WOOD);
+      leg.position.set(sx, 0.22, 0); bench.add(leg);
+    }
+    bench.position.copy(posOn(d, -0.02));
+    alignToSurface(bench, d, yawToFace(d, lib.dir));
+    bench.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    deco.add(bench);
+  }
+}
+// harbor dock at CharterScope — planks reach toward the nearest water
+{
+  const cs = LANDMARKS[3];
+  const t1 = new THREE.Vector3(1, 0, 0).cross(cs.dir).normalize();
+  const t2 = new THREE.Vector3().crossVectors(cs.dir, t1);
+  let best = null, bestH = 1e9;
+  for (let k = 0; k < 16; k++) {
+    const ang = k / 16 * Math.PI * 2;
+    const axis = t1.clone().multiplyScalar(Math.cos(ang)).addScaledVector(t2, Math.sin(ang)).normalize();
+    const d = cs.dir.clone().applyAxisAngle(axis, 0.1).normalize();
+    const h = surfH(d);
+    if (h < bestH) { bestH = h; best = axis; }
+  }
+  if (bestH < SEA_H + 0.12) {
+    for (let k = 0; k < 5; k++) {
+      const d = cs.dir.clone().applyAxisAngle(best, 0.035 + k * 0.017).normalize();
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.12, 0.85), WOOD);
+      plank.position.copy(d.clone().multiplyScalar(SEA_R + 0.35));
+      alignToSurface(plank, d, yawToFace(d, cs.dir));
+      if (!IS_TOUCH) plank.castShadow = true;
+      deco.add(plank);
+      if (k % 2 === 1) for (const s of [-0.45, 0.45]) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.9, 5), WOOD);
+        post.position.copy(d.clone().multiplyScalar(SEA_R + 0.1));
+        alignToSurface(post, d);
+        post.translateX(s);
+        deco.add(post);
+      }
+    }
+  }
+}
 
 progress(0.52, 'releasing the animals…');
 
