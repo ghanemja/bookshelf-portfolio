@@ -2227,7 +2227,9 @@ let navAcc = 0;
     enterGame();
     const tp = _qs.get('transport');
     beginRun(tp && TRANSPORT[tp] ? tp : 'jeep');
-    if (_qs.get('launch') === '1') startLaunch();
+    // ?launch=1 rides from the pad; ?launch=0.5 seeks into the flight (dev)
+    const lp = _qs.get('launch');
+    if (lp !== null) { startLaunch(); launchT = Math.min(0.99, parseFloat(lp) || 0); }
     if (_qs.get('sail') === '1') boardBoat();
   } else if (_qs.get('gps') === '1') {
     enterGame();   // jump straight to the phone (testing)
