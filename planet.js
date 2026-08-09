@@ -1541,7 +1541,12 @@ function buildBoat() {
   mast.position.set(0, 1.8, 0.3); g.add(mast);
   const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.5, 6), M(0x8a6a3a));
   boom.rotation.x = Math.PI / 2; boom.position.set(0, 0.95, -0.45); g.add(boom);
-  const sailM = new THREE.MeshStandardMaterial({ color: 0xfffaf0, roughness: 0.85, flatShading: true, side: THREE.DoubleSide });
+  // canvas is lit from both sides — the trimmed-out sail faces away from the
+  // sun half the time and would otherwise read as a grey slab
+  const sailM = new THREE.MeshStandardMaterial({
+    color: 0xfffaf0, roughness: 0.85, flatShading: true, side: THREE.DoubleSide,
+    emissive: 0xfff0dc, emissiveIntensity: 0.42,
+  });
   // sails are trimmed out on a broad reach — dead fore-and-aft they'd be
   // edge-on to the chase camera and read as an invisible sliver
   const sail = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 1.7), sailM);
@@ -1551,7 +1556,7 @@ function buildBoat() {
   jib.rotation.y = Math.PI / 2 - 0.5;
   jib.position.set(-0.14, 1.5, 0.85); g.add(jib);
   const rider = makePerson(0x2d2138, 0xff4d6e);
-  rider.position.set(0, 0.55, -0.75);
+  rider.position.set(0, 0.72, -0.75);   // sits ON the deck, not in it
   g.add(rider);
   g.userData.wheels = [];
   g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
@@ -2081,6 +2086,18 @@ let hintHidden = false;
 function hideHint() {
   if (!hintHidden) { hintHidden = true; setTimeout(() => hintEl.classList.add('hide'), 1200); }
 }
+// the hint has to follow whatever you're currently riding — you can swap into
+// the sailboat mid-route, so it can't be written once at the start of the run
+const HINT_VERB = { jeep: 'drive', bike: 'pedal', walk: 'walk', boat: 'sail', train: 'ride' };
+function showHint(t) {
+  hintEl.innerHTML = TRANSPORT[t].rail
+    ? 'sit back — the Museum Express drives itself &nbsp;·&nbsp; click a building for details'
+    : `<kbd>WASD</kbd> / <kbd>←↑↓→</kbd> ${HINT_VERB[t]} &nbsp;·&nbsp; ${
+        t === 'boat' ? 'run ashore to hop out' : 'click ground to travel'
+      } &nbsp;·&nbsp; click a building`;
+  hintHidden = false;
+  hintEl.classList.remove('hide');
+}
 
 // ─── attractions: go sailing, ride the rocket ────────────────────────────────
 function boardBoat() {
@@ -2090,6 +2107,7 @@ function boardBoat() {
   if (heading.lengthSq() < 1e-4) heading.set(1, 0, 0);
   speed = 0; targetDir = null; targetRing.material.opacity = 0;
   setTransport('boat');
+  showHint('boat');
   ping(760, 0.14);
 }
 
@@ -2198,11 +2216,7 @@ function beginRun(t) {
   runTransport = t;
   route = ROUTES[t].map(k => STOPS[k]);
   routeIdx = 0; bag = []; trainU = 0;
-  hintEl.innerHTML = TRANSPORT[t].rail
-    ? 'sit back — the Museum Express drives itself &nbsp;·&nbsp; click a building for details'
-    : `<kbd>WASD</kbd> / <kbd>←↑↓→</kbd> ${t === 'walk' ? 'walk' : t === 'bike' ? 'pedal' : 'drive'} &nbsp;·&nbsp; click ground to travel &nbsp;·&nbsp; click a building`;
-  hintHidden = false;
-  hintEl.classList.remove('hide');
+  showHint(t);
   if (t === 'train') dir = STOP_DIRS.central.clone();
   else dir = ll(8, -22);
   heading = new THREE.Vector3(0, 0, 1);
@@ -2395,7 +2409,9 @@ function animate() {
 
     // sailing ends at the shoreline — beach the boat and hop out
     if (transport === 'boat' && isLand(dir, 0.02)) {
-      setTransport(TRANSPORT[runTransport].rail ? 'walk' : runTransport);
+      const ashore = TRANSPORT[runTransport].rail ? 'walk' : runTransport;
+      setTransport(ashore);
+      showHint(ashore);
       speed = Math.min(speed, 1.5);
       ping(620, 0.12);
     }
