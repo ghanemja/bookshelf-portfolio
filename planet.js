@@ -164,50 +164,65 @@ function ensureInk() {
         p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
         return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
       }
-      void main() {
+      // edge strength at uv with stroke width o (pixels)
+      float edgeAt(vec2 uv, float o, float d0ref) {
         vec2 px = 1.0 / res;
-        // subtle hand-drawn wobble (kept small so lines stay solid, not specks)
-        vec2 wob = hash22(floor(vUv * res / 6.0)) * px * 0.55;
-        vec2 uv = vUv + wob;
-        float o = 2.0;   // line thickness in pixels
-
-        float d0 = readDepth(uv);
-        float dN = readDepth(uv + vec2(0.0,  px.y * o));
-        float dS = readDepth(uv - vec2(0.0,  px.y * o));
+        float dN = readDepth(uv + vec2(0.0, px.y * o));
+        float dS = readDepth(uv - vec2(0.0, px.y * o));
         float dE = readDepth(uv + vec2(px.x * o, 0.0));
         float dW = readDepth(uv - vec2(px.x * o, 0.0));
         float edgeD = abs(dN - dS) + abs(dE - dW);
-
-        vec3 nN = texture2D(tNormal, uv + vec2(0.0,  px.y * o)).xyz;
-        vec3 nS = texture2D(tNormal, uv - vec2(0.0,  px.y * o)).xyz;
+        vec3 nN = texture2D(tNormal, uv + vec2(0.0, px.y * o)).xyz;
+        vec3 nS = texture2D(tNormal, uv - vec2(0.0, px.y * o)).xyz;
         vec3 nE = texture2D(tNormal, uv + vec2(px.x * o, 0.0)).xyz;
         vec3 nW = texture2D(tNormal, uv - vec2(px.x * o, 0.0)).xyz;
         float edgeN = length(nN - nS) + length(nE - nW);
-
-        float skyMask = 1.0 - step(camFar * 0.55, d0);   // no ink on the sky
-        // depth threshold scales with distance so far hills don't fill solid
-        float eD = smoothstep(0.35, 1.25, edgeD / (0.02 * d0 + 0.18));
-        float eN = smoothstep(0.6, 1.35, edgeN);         // creases only, not facets
-        float edge = clamp(eD + eN, 0.0, 1.0) * skyMask;
-
-        vec3 col = texture2D(tColor, vUv).rgb;
+        float eD = smoothstep(0.3, 1.0, edgeD / (0.02 * d0ref + 0.18));
+        float eN = smoothstep(0.5, 1.1, edgeN);
+        return clamp(eD + eN, 0.0, 1.0);
+      }
+      void main() {
+        vec2 px = 1.0 / res;
         float paper = texture2D(tPaper, vUv * vec2(res.x / res.y, 1.0) * 2.6).r;
-        // noise-dithered quantize — bands melt into soft watercolor washes
+        float d0 = readDepth(vUv);
+        float skyMask = 1.0 - step(camFar * 0.55, d0);
+
+        // ── the ink: double-stroked, wobbling, pen width varies with the paper
+        vec2 wobA = hash22(floor(vUv * res / 6.0)) * px * 1.4;
+        vec2 wobB = hash22(floor(vUv * res / 6.0) + 31.7) * px * 2.4;
+        float w = 1.5 + paper * 1.7;
+        float e1 = edgeAt(vUv + wobA, w, d0);
+        float e2 = edgeAt(vUv + wobB, w * 0.65, d0);
+        float ink = clamp(e1 + e2 * 0.6, 0.0, 1.0) * skyMask;
+
+        // ── the fill: watercolor washes
+        vec3 col = texture2D(tColor, vUv).rgb;
         float pn = paper - 0.5;
         vec3 post = floor(col * 5.0 + 0.5 + pn * 0.45) / 5.0;
-        col = mix(col, post, 0.6 * skyMask);
-        // pigment granulation
+        col = mix(col, post, 0.65 * skyMask);
         col *= 0.93 + 0.13 * paper;
-        // pooled pigment at edges — darker local color, never black ink
-        vec3 pooled = col * 0.5;
-        col = mix(col, pooled, edge * 0.8 * (0.65 + 0.35 * paper));
-        // watercolor softness: shadows lifted, paper never reaches black
+
+        // pencil hatching creeps into the shadows
+        float lum0 = dot(col, vec3(0.299, 0.587, 0.114));
+        float hatch = step(0.55, fract((gl_FragCoord.x + gl_FragCoord.y) / 7.0));
+        col *= 1.0 - (1.0 - hatch) * smoothstep(0.45, 0.12, lum0) * 0.16 * skyMask;
+
+        // soft pooled pigment just beneath the line
+        col = mix(col, col * 0.55, e1 * 0.35 * skyMask);
+
+        // watercolor lift — the PAPER never reaches black…
         float lum = dot(col, vec3(0.299, 0.587, 0.114));
-        col = mix(vec3(lum), col, 1.05);
+        col = mix(vec3(lum), col, 1.06);
         col = col * 0.9 + 0.075;
-        // grain washes over the sky too
+
+        // …but the INK does: confident near-black sketch line on top
+        vec3 inkCol = vec3(0.07, 0.07, 0.10);
+        col = mix(col, inkCol, ink * 0.9);
+
+        // grain washes over the sky
         col = mix(col * (0.95 + 0.08 * paper), col, skyMask);
-        // proper linear → sRGB (RT holds tone-mapped linear)
+
+        // linear → sRGB
         vec3 lo = col * 12.92;
         vec3 hi = 1.055 * pow(max(col, 0.0), vec3(1.0 / 2.4)) - 0.055;
         col = mix(lo, hi, step(0.0031308, col));
@@ -237,17 +252,17 @@ function renderInked() {
 }
 const gfxParam = new URLSearchParams(location.search).get('gfx');
 let stored = gfxParam ?? localStorage.getItem('planet-gfx') ?? (IS_TOUCH ? 'classic' : 'inked');
-if (stored === 'dreamy' || stored === 'inked') stored = 'watercolor';   // migrate old settings
-let gfxInked = stored === 'watercolor';
+if (['dreamy', 'inked', 'watercolor'].includes(stored)) stored = 'sketch';   // migrate old settings
+let gfxInked = stored === 'sketch';
 const gfxBtn = document.getElementById('gfx-toggle');
 function applyGfx() {
-  gfxBtn.textContent = gfxInked ? '🎨 watercolor' : '🧊 classic';
+  gfxBtn.textContent = gfxInked ? '✏️ sketchbook' : '🧊 classic';
   scene.fog.near = gfxInked ? 40 : 42;
   scene.fog.far = gfxInked ? 145 : 155;
 }
 gfxBtn.addEventListener('click', () => {
   gfxInked = !gfxInked;
-  localStorage.setItem('planet-gfx', gfxInked ? 'watercolor' : 'classic');
+  localStorage.setItem('planet-gfx', gfxInked ? 'sketch' : 'classic');
   applyGfx();
 });
 
