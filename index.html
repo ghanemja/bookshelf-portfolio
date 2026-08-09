@@ -43,6 +43,56 @@
     background: var(--accent); transition: width 0.3s ease; }
   #loader p { color: #5d5375; font-weight: 600; font-size: 14px; letter-spacing: 0.04em; }
 
+  /* ── title screen ── */
+  #title {
+    position: fixed; inset: 0; z-index: 40;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; pointer-events: none;
+    transition: opacity 0.7s ease;
+  }
+  #title.hide { opacity: 0; }
+  #title .t-kicker {
+    font-size: clamp(16px, 2.6vw, 22px); font-weight: 700; color: var(--panel);
+    background: var(--ink); padding: 4px 18px; border-radius: 999px;
+    transform: rotate(-2deg); letter-spacing: 0.06em;
+    box-shadow: 3px 4px 0 rgba(45, 33, 56, 0.25);
+  }
+  #title .t-word {
+    font-size: clamp(52px, 11vw, 116px); font-weight: 700; line-height: 0.98;
+    text-align: center; text-transform: uppercase; letter-spacing: 0.01em;
+    color: #fffaf0;
+    -webkit-text-stroke: 3px var(--ink);
+    text-shadow:
+      4px 4px 0 var(--ink),
+      8px 9px 0 rgba(45, 33, 56, 0.22);
+    transform: rotate(-2deg);
+    animation: t-bob 3.2s ease-in-out infinite;
+  }
+  @keyframes t-bob { 0%, 100% { transform: rotate(-2deg) translateY(0) } 50% { transform: rotate(-2deg) translateY(-8px) } }
+  #title .t-sub {
+    font-size: clamp(13px, 2vw, 16px); font-weight: 600; color: var(--ink);
+    background: rgba(255, 250, 242, 0.85); padding: 5px 16px; border-radius: 999px;
+    border: 2px solid var(--panel-edge); transform: rotate(-1deg);
+  }
+  #enter-btn {
+    pointer-events: auto; cursor: pointer; margin-top: 22px;
+    font-family: inherit; font-weight: 700; font-size: clamp(20px, 3vw, 26px);
+    letter-spacing: 0.08em; color: var(--ink);
+    background: #ffd23d; border: 3px solid var(--ink); border-radius: 14px;
+    padding: 13px 54px; transform: rotate(-1.5deg);
+    box-shadow: 0 6px 0 var(--ink), 0 12px 24px rgba(45, 33, 56, 0.3);
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+    animation: t-pulse 2s ease-in-out infinite;
+  }
+  #enter-btn:hover { transform: rotate(-1.5deg) translateY(2px); box-shadow: 0 4px 0 var(--ink), 0 8px 18px rgba(45, 33, 56, 0.3); }
+  #enter-btn:active { transform: rotate(-1.5deg) translateY(5px); box-shadow: 0 1px 0 var(--ink); }
+  @keyframes t-pulse { 0%, 100% { filter: brightness(1) } 50% { filter: brightness(1.09) } }
+  #title .t-hint { font-size: 12px; font-weight: 600; color: rgba(45, 33, 56, 0.55); margin-top: 6px; }
+  body.title-mode #hud, body.title-mode #quest, body.title-mode #toggles,
+  body.title-mode #controls-hint, body.title-mode #stick, body.title-mode #card {
+    opacity: 0 !important; pointer-events: none !important; transition: opacity 0.4s ease;
+  }
+
   /* ── HUD ── */
   #hud { position: fixed; top: 20px; left: 24px; z-index: 10; pointer-events: none; }
   #hud h1 { font-size: 20px; font-weight: 700; color: var(--ink); text-shadow: 0 1px 0 rgba(255,255,255,0.5); }
@@ -147,6 +197,14 @@
     <p id="loader-msg">warming up the planet…</p>
   </div>
 
+  <div id="title">
+    <span class="t-kicker">janelle's</span>
+    <div class="t-word">Tiny<br>Planet</div>
+    <span class="t-sub">a portfolio you can drive 🚙</span>
+    <button id="enter-btn">enter</button>
+    <span class="t-hint">or press ⏎</span>
+  </div>
+
   <div id="hud">
     <h1>janelle's tiny planet</h1>
     <p>every building is a project — fly over and take a look</p>
@@ -191,6 +249,6 @@
     }
   }
   </script>
-  <script type="module" src="./planet.js?cb=p9"></script>
+  <script type="module" src="./planet.js?cb=p10"></script>
 </body>
 </html>

@@ -145,6 +145,7 @@ function ensureInk() {
       res: { value: new THREE.Vector2(w * dpr, h * dpr) },
       camNear: { value: camera.near },
       camFar: { value: camera.far },
+      time: { value: 0 },
     },
     vertexShader: `
       varying vec2 vUv;
@@ -153,7 +154,7 @@ function ensureInk() {
       varying vec2 vUv;
       uniform sampler2D tColor, tDepth, tNormal, tPaper;
       uniform vec2 res;
-      uniform float camNear, camFar;
+      uniform float camNear, camFar, time;
 
       float readDepth(vec2 uv) {
         float z = texture2D(tDepth, uv).x;
@@ -183,37 +184,46 @@ function ensureInk() {
       }
       void main() {
         vec2 px = 1.0 / res;
-        float paper = texture2D(tPaper, vUv * vec2(res.x / res.y, 1.0) * 2.6).r;
+        // "line boil": time stepped at 8fps, like hand-painted animation frames
+        float tq = floor(time * 8.0) / 8.0;
+        vec2 pj = hash22(vec2(tq * 7.3, tq * 3.1)) * 0.012;
+        float paper = texture2D(tPaper, vUv * vec2(res.x / res.y, 1.0) * 2.6 + pj).r;
+        // slow continuous pigment drift — the wash never quite dries
+        float flow = texture2D(tPaper, vUv * vec2(res.x / res.y, 1.0) * 0.7
+                               + vec2(time * 0.010, -time * 0.007)).r;
         float d0 = readDepth(vUv);
         float skyMask = 1.0 - step(camFar * 0.55, d0);
 
-        // ── the ink: double-stroked, wobbling, pen width varies with the paper
-        vec2 wobA = hash22(floor(vUv * res / 6.0)) * px * 1.4;
-        vec2 wobB = hash22(floor(vUv * res / 6.0) + 31.7) * px * 2.4;
+        // ── the ink: double-stroked, wobbling, redrawn every boil step
+        vec2 wobA = hash22(floor(vUv * res / 6.0) + tq * 17.0) * px * 1.4;
+        vec2 wobB = hash22(floor(vUv * res / 6.0) + 31.7 + tq * 17.0) * px * 2.4;
         float w = 1.5 + paper * 1.7;
         float e1 = edgeAt(vUv + wobA, w, d0);
         float e2 = edgeAt(vUv + wobB, w * 0.65, d0);
         float ink = clamp(e1 + e2 * 0.6, 0.0, 1.0) * skyMask;
 
-        // ── the fill: watercolor washes
+        // ── the fill: watercolor washes whose boundaries slowly crawl
         vec3 col = texture2D(tColor, vUv).rgb;
-        float pn = paper - 0.5;
+        float pn = (paper - 0.5) + (flow - 0.5) * 0.55;
         vec3 post = floor(col * 5.0 + 0.5 + pn * 0.45) / 5.0;
         col = mix(col, post, 0.65 * skyMask);
-        col *= 0.93 + 0.13 * paper;
+        col *= 0.94 + 0.10 * paper + 0.05 * flow;
 
         // pencil hatching creeps into the shadows
         float lum0 = dot(col, vec3(0.299, 0.587, 0.114));
         float hatch = step(0.55, fract((gl_FragCoord.x + gl_FragCoord.y) / 7.0));
-        col *= 1.0 - (1.0 - hatch) * smoothstep(0.45, 0.12, lum0) * 0.16 * skyMask;
+        col *= 1.0 - (1.0 - hatch) * smoothstep(0.45, 0.12, lum0) * 0.12 * skyMask;
 
-        // soft pooled pigment just beneath the line
-        col = mix(col, col * 0.55, e1 * 0.35 * skyMask);
+        // pooled pigment beneath the line — cool blue, never gray
+        col = mix(col, col * vec3(0.50, 0.55, 0.78), e1 * 0.35 * skyMask);
 
-        // watercolor lift — the PAPER never reaches black…
+        // ── pastel watercolor grade: saturated but LIGHT, shadows go ultramarine
         float lum = dot(col, vec3(0.299, 0.587, 0.114));
-        col = mix(vec3(lum), col, 1.06);
-        col = col * 0.9 + 0.075;
+        col = clamp(mix(vec3(lum), col, 1.35), 0.0, 1.0);   // vibrance — no more faded gray
+        col = pow(col, vec3(0.80));                          // lift everything into pastel range
+        float sh = 1.0 - smoothstep(0.06, 0.5, lum);
+        col = mix(col, col * vec3(0.66, 0.70, 1.05) + vec3(0.10, 0.11, 0.24), sh * 0.55);
+        col = col * 0.93 + 0.05;
 
         // …but the INK does: confident near-black sketch line on top
         vec3 inkCol = vec3(0.07, 0.07, 0.10);
@@ -233,6 +243,7 @@ function ensureInk() {
 }
 function renderInked() {
   ensureInk();
+  inkQuad.material.uniforms.time.value = clock.elapsedTime;
   // pass 1: color + depth
   renderer.setRenderTarget(rtColor);
   renderer.render(scene, camera);
@@ -620,6 +631,39 @@ function makeBuilding(lm) {
     const l = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 0.7), body); l.position.set(-0.9, 1.55, 0); g.add(l);
     const r = new THREE.Mesh(new THREE.BoxGeometry(0.55, 2.4, 0.7), body); r.position.set(0.9, 1.55, 0); g.add(r);
     const top = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.55, 0.8), trim); top.position.y = 2.95; g.add(top);
+  }
+
+  // lived-in clutter around each stop: crates, barrel, signpost, potted plants
+  if (lm.style !== 'garden') {
+    const crateM = M(0xc9a06a);
+    const ca = rand() * Math.PI * 2;
+    const cx = Math.sin(ca) * 1.65, cz = Math.cos(ca) * 1.65;
+    const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), crateM);
+    c1.position.set(cx, 0.56, cz); c1.rotation.y = rand(); g.add(c1);
+    const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 0.32), crateM);
+    c2.position.set(cx + 0.36, 0.51, cz - 0.12); c2.rotation.y = rand(); g.add(c2);
+    const c3 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), crateM);
+    c3.position.set(cx - 0.05, 0.92, cz + 0.04); c3.rotation.y = rand() * 0.8; g.add(c3);
+    const ba = ca + 1.6 + rand() * 1.2;
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.46, 9), M(0x9a6a44));
+    barrel.position.set(Math.sin(ba) * 1.7, 0.58, Math.cos(ba) * 1.7); g.add(barrel);
+    const sa = ca - 1.2 - rand() * 0.8;
+    const sx = Math.sin(sa) * 1.85, sz = Math.cos(sa) * 1.85;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 1.05, 6), WOOD);
+    pole.position.set(sx, 0.85, sz); g.add(pole);
+    const board = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.34, 0.06), M(0xffd23d));
+    board.position.set(sx, 1.28, sz);
+    board.rotation.y = sa + Math.PI + (rand() - 0.5) * 0.5;
+    board.rotation.z = (rand() - 0.5) * 0.12;
+    g.add(board);
+    for (let i = 0; i < 2; i++) {
+      const pa = ca + 3 + i * 0.7 + rand() * 0.4;
+      const px = Math.sin(pa) * 1.8, pz2 = Math.cos(pa) * 1.8;
+      const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.085, 0.2, 7), M(0xc76a3a));
+      pot.position.set(px, 0.44, pz2); g.add(pot);
+      const bush = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 0), LEAF_A);
+      bush.position.set(px, 0.62, pz2); g.add(bush);
+    }
   }
 
   const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.42),
@@ -1428,6 +1472,7 @@ renderer.domElement.addEventListener('pointerdown', e => {
   downAt = performance.now(); downX = e.clientX; downY = e.clientY;
 });
 renderer.domElement.addEventListener('pointerup', e => {
+  if (gameState === 'title') return;
   if (performance.now() - downAt > 350 || Math.hypot(e.clientX - downX, e.clientY - downY) > 8) return;
   ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   ray.setFromCamera(ndc, camera);
@@ -1485,9 +1530,26 @@ function hideHint() {
   if (!hintHidden) { hintHidden = true; setTimeout(() => hintEl.classList.add('hide'), 1200); }
 }
 
+// ─── title screen ────────────────────────────────────────────────────────────
+let gameState = 'title';
+document.body.classList.add('title-mode');
+const titleEl = document.getElementById('title');
+function enterGame() {
+  if (gameState === 'play') return;
+  gameState = 'play';
+  titleEl.classList.add('hide');
+  document.body.classList.remove('title-mode');
+  introT = 0;
+  applyGfx();          // restore driving-distance fog
+  startAudio();
+}
+document.getElementById('enter-btn').addEventListener('click', enterGame);
+window.addEventListener('keydown', e => { if (e.key === 'Enter') enterGame(); });
+
 // ─── main loop ───────────────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let introT = 0;
+if (new URLSearchParams(location.search).get('title') === '0') enterGame();
 let nearLm = null;
 let emitAcc = 0;
 
@@ -1497,10 +1559,90 @@ const _tan = new THREE.Vector3();
 const _sunDay = new THREE.Color(0xffe0b8), _sunDusk = new THREE.Color(0xff9a66);
 const _fogDay = new THREE.Color(0xe3cfe8), _fogNight = new THREE.Color(0x241f47);
 
+// world keeps breathing whether you're on the title screen or driving
+function updateWorldAmbient(dt, t) {
+  // day/night
+  const phase = (dayPhase0 + t / DAY_PERIOD) % 1;
+  const sunEl = Math.sin((phase - 0.25) * Math.PI * 2);
+  dayK = THREE.MathUtils.clamp(sunEl * 2.4 + 0.5, 0, 1);
+  const th = (phase - 0.25) * Math.PI * 2;
+  sun.position.set(Math.cos(th) * 70, Math.sin(th) * 60, 28);
+  sun.intensity = 0.28 + 1.25 * dayK;
+  const duskiness = 1 - Math.abs(sunEl);
+  sun.color.copy(_sunDay).lerp(_sunDusk, THREE.MathUtils.clamp(duskiness * 1.4 - 0.2, 0, 1));
+  // sketch nights stay luminous — pastel watercolor never goes muddy dark
+  const nightLift = gfxInked ? (1 - dayK) * 0.42 : 0;
+  hemi.intensity = 0.48 + 0.4 * dayK + nightLift;
+  moon.intensity = 0.3 + 0.45 * (1 - dayK) + nightLift * 0.5;
+  for (let i = 0; i < 3; i++) {
+    skyU[['cA', 'cB', 'cC'][i]].value.copy(SKY.night[i]).lerp(SKY.day[i], dayK);
+  }
+  scene.fog.color.copy(_fogNight).lerp(_fogDay, dayK);
+  skyStars.material.opacity = 0.15 + 0.75 * (1 - dayK);
+  lampBulbMat.emissiveIntensity = 0.5 + (1 - dayK) * 1.9;
+
+  // animals
+  for (const f of birdFlocks) {
+    f.rotateY(f.userData.speed * dt);
+    for (const b of f.userData.birds) {
+      const flap = Math.sin(t * 9 + b.userData.phase) * 0.7;
+      b.userData.wl.rotation.z = flap;
+      b.userData.wr.rotation.z = -flap;
+    }
+  }
+  for (const s of sheepies) {
+    const hop = Math.max(0, Math.sin(t * 2.2 + s.userData.phase)) * 0.22;
+    s.position.copy(posOn(s.userData.dir, -0.02 + hop));
+    s.userData.body.scale.y = 0.95 - hop * 0.25;
+  }
+  for (const f of fishes) {
+    const u = ((t + f.phase) / f.period) % 1;
+    if (u < 0.32) {
+      const k = u / 0.32;
+      f.mesh.visible = true;
+      const d2 = f.dir.clone().applyAxisAngle(f.axis, (k - 0.5) * 0.05).normalize();
+      const alt = SEA_R + Math.sin(k * Math.PI) * 1.25;
+      f.mesh.position.copy(d2.multiplyScalar(alt));
+      const pitch = (0.5 - k) * 2.2;
+      f.mesh.quaternion.setFromUnitVectors(UP_Y, f.dir);
+      f.mesh.rotateOnAxis(new THREE.Vector3(1, 0, 0), pitch);
+    } else {
+      f.mesh.visible = false;
+    }
+  }
+
+  // ambient motion
+  for (const p of cloudPivots) p.rotateY(p.userData.speed * dt);
+  stationPivot.rotateY(dt * 0.05);
+  station.rotation.y += dt * 0.2;
+  ocean.material.opacity = 0.78 + Math.sin(t * 0.7) * 0.05;
+  ocean.rotation.y += dt * 0.004;
+
+  if (gameState === 'title') {
+    for (const lm of LANDMARKS) {
+      if (lm.gem) lm.gem.rotation.y += dt * 1.5;
+      if (lm.sculpture) lm.sculpture.rotation.y += dt * 0.6;
+    }
+  }
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
+
+  // title screen: slow orbit of the whole planet, world alive behind the logo
+  if (gameState === 'title') {
+    const a = t * 0.055;
+    camera.position.set(Math.sin(a) * 92, 34, Math.cos(a) * 92);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(0, 0, 0);
+    scene.fog.near = 260; scene.fog.far = 520;   // whole planet crisp from space
+    updateWorldAmbient(dt, t);
+    sky.position.copy(camera.position);
+    if (gfxInked) renderInked(); else renderer.render(scene, camera);
+    return;
+  }
 
   // input
   let ix = 0, iz = 0;
@@ -1576,22 +1718,7 @@ function animate() {
   camera.up.lerp(dir, 0.06).normalize();
   camera.lookAt(courier.position.clone().addScaledVector(dir, 1.1));
 
-  // day/night
-  const phase = (dayPhase0 + t / DAY_PERIOD) % 1;
-  const sunEl = Math.sin((phase - 0.25) * Math.PI * 2);
-  dayK = THREE.MathUtils.clamp(sunEl * 2.4 + 0.5, 0, 1);
-  const th = (phase - 0.25) * Math.PI * 2;
-  sun.position.set(Math.cos(th) * 70, Math.sin(th) * 60, 28);
-  sun.intensity = 0.28 + 1.25 * dayK;
-  const duskiness = 1 - Math.abs(sunEl);
-  sun.color.copy(_sunDay).lerp(_sunDusk, THREE.MathUtils.clamp(duskiness * 1.4 - 0.2, 0, 1));
-  hemi.intensity = 0.48 + 0.4 * dayK;
-  moon.intensity = 0.3 + 0.45 * (1 - dayK);
-  for (let i = 0; i < 3; i++) {
-    skyU[['cA', 'cB', 'cC'][i]].value.copy(SKY.night[i]).lerp(SKY.day[i], dayK);
-  }
-  scene.fog.color.copy(_fogNight).lerp(_fogDay, dayK);
-  skyStars.material.opacity = 0.15 + 0.75 * (1 - dayK);
+  updateWorldAmbient(dt, t);
 
   // landmark proximity → card + delivery
   let nearest = null, nearestArc = 1e9;
@@ -1604,7 +1731,6 @@ function animate() {
       const target = (lm === nearLm) ? 1.35 : 1.0;
       lm.gem.scale.setScalar(THREE.MathUtils.lerp(lm.gem.scale.x, target, 0.1));
       lm.gem.material.emissiveIntensity = 0.9 + (1 - dayK) * 0.8;
-      lampBulbMat.emissiveIntensity = 0.5 + (1 - dayK) * 1.9;
     }
     if (lm.sculpture) lm.sculpture.rotation.y += dt * 0.6;
   }
@@ -1651,43 +1777,7 @@ function animate() {
     }
   }
 
-  // animals
-  for (const f of birdFlocks) {
-    f.rotateY(f.userData.speed * dt);
-    for (const b of f.userData.birds) {
-      const flap = Math.sin(t * 9 + b.userData.phase) * 0.7;
-      b.userData.wl.rotation.z = flap;
-      b.userData.wr.rotation.z = -flap;
-    }
-  }
-  for (const s of sheepies) {
-    const hop = Math.max(0, Math.sin(t * 2.2 + s.userData.phase)) * 0.22;
-    s.position.copy(posOn(s.userData.dir, -0.02 + hop));
-    s.userData.body.scale.y = 0.95 - hop * 0.25;
-  }
-  for (const f of fishes) {
-    const u = ((t + f.phase) / f.period) % 1;
-    if (u < 0.32) {
-      const k = u / 0.32;
-      f.mesh.visible = true;
-      const d2 = f.dir.clone().applyAxisAngle(f.axis, (k - 0.5) * 0.05).normalize();
-      const alt = SEA_R + Math.sin(k * Math.PI) * 1.25;
-      f.mesh.position.copy(d2.multiplyScalar(alt));
-      const pitch = (0.5 - k) * 2.2;
-      f.mesh.quaternion.setFromUnitVectors(UP_Y, f.dir);
-      f.mesh.rotateOnAxis(new THREE.Vector3(1, 0, 0), pitch);
-    } else {
-      f.mesh.visible = false;
-    }
-  }
-
-  // ambient motion
-  for (const p of cloudPivots) p.rotateY(p.userData.speed * dt);
-  stationPivot.rotateY(dt * 0.05);
-  station.rotation.y += dt * 0.2;
   targetRing.material.opacity = Math.max(0, targetRing.material.opacity - dt * 0.25);
-  ocean.material.opacity = 0.78 + Math.sin(t * 0.7) * 0.05;
-  ocean.rotation.y += dt * 0.004;
   sky.position.copy(camera.position);
 
   if (gfxInked) {
