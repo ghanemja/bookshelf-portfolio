@@ -390,12 +390,25 @@ const LANDMARKS = [
   { key: 'ros2', name: 'Robot Lab', tag: 'robotics', style: 'dome', color: 0xff4d6e,
     desc: 'ROS2 + depth cameras + QNX — my robotics tutorials and demos.',
     url: 'https://ghanemja.github.io/ros2_depth_camera_tutorial/', dir: ll(14, -120) },
-  { key: 'artgarden', name: 'The Art Garden', tag: 'paintings', style: 'garden', color: 0xffd23d,
-    desc: 'A sculpture garden of my real acrylics — 45 paintings hang in the gallery inside the Library.',
+  { key: 'artgarden', name: 'The Art Museum', tag: 'tonight’s main event', style: 'garden', color: 0xffd23d,
+    desc: 'Opening night! A sculpture garden of my real acrylics — 45 paintings hang in the gallery inside.',
     enter: './room.html', dir: ll(26, -66) },
 ];
 const LAKE = ll(-40, 62);
 const MTN = ll(55, -50);
+
+// extra route stops (train stations, the overlook, the boardwalk) — these are
+// part of the world whether or not your route uses them
+const STOP_DIRS = {
+  central: ll(12, 4),        // Central Station, just east of the Library
+  lakeside: ll(-26, 58),     // Lakeside Station, on the bay
+  farside: ll(6, -168),      // Far Side Station, out past Sinescape
+  museumst: ll(18, -74),     // Museum Station, walking distance to the event
+  overlook: ll(44, -46),     // Summit Overlook, on the mountain's shoulder
+  boardwalk: ll(-9, -38),    // Seaside Boardwalk, on the west coast
+};
+// stops that get flat land pedestals like landmarks do (not the overlook — it clings to the mountain)
+const STOP_PEDESTALS = [STOP_DIRS.central, STOP_DIRS.lakeside, STOP_DIRS.farside, STOP_DIRS.museumst, STOP_DIRS.boardwalk];
 
 // ─── terrain: continents + ocean + lake bay + mountain + land pedestals ─────
 function surfH(d) {
@@ -414,12 +427,31 @@ function surfH(d) {
     const a = Math.acos(THREE.MathUtils.clamp(d.dot(lm.dir), -1, 1));
     h += (SEA_H + 0.55 - Math.min(h, SEA_H + 0.55)) * Math.exp(-(a * a) / (0.09 * 0.09));
   }
+  for (const sd of STOP_PEDESTALS) {                                   // land under stations & boardwalk
+    const a = Math.acos(THREE.MathUtils.clamp(d.dot(sd), -1, 1));
+    h += (SEA_H + 0.55 - Math.min(h, SEA_H + 0.55)) * Math.exp(-(a * a) / (0.07 * 0.07));
+  }
   return h;
 }
 const radiusAt = (d) => R + surfH(d) * H_AMP;
 const posOn = (d, extra = 0) => d.clone().multiplyScalar(radiusAt(d) + extra);
 const isLand = (d, margin = 0.15) => surfH(d) > SEA_H + margin;
 const isWater = (d, margin = 0.2) => surfH(d) < SEA_H - margin;
+
+// sit a structure on the LOWEST ground under its footprint (sunk a touch),
+// so nothing floats off a slope or terrace edge
+function settleOn(dirVec, halfExtent = 1.2, sink = 0.1) {
+  let r = radiusAt(dirVec);
+  const axisA = new THREE.Vector3(0, 1, 0).cross(dirVec).normalize();
+  if (axisA.lengthSq() < 1e-6) axisA.set(1, 0, 0);
+  const axisB = new THREE.Vector3().crossVectors(dirVec, axisA).normalize();
+  const arc = halfExtent / R;
+  for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [0.7, -0.7], [-0.7, 0.7], [-0.7, -0.7]]) {
+    const d2 = dirVec.clone().applyAxisAngle(axisA, a * arc).applyAxisAngle(axisB, b * arc).normalize();
+    r = Math.min(r, radiusAt(d2));
+  }
+  return dirVec.clone().multiplyScalar(Math.max(r, SEA_R) - sink);
+}
 
 const UP_Y = new THREE.Vector3(0, 1, 0);
 function alignToSurface(obj, d, yaw = 0) {
@@ -706,12 +738,12 @@ function makeLabel(lm) {
 
 for (const lm of LANDMARKS) {
   const b = makeBuilding(lm);
-  b.position.copy(posOn(lm.dir, -0.05));
+  b.position.copy(settleOn(lm.dir, 2.2, 0.14));
   alignToSurface(b, lm.dir, rand() * Math.PI * 2);
   landmarkGroup.add(b);
   lm.root = b;
 }
-document.fonts.ready.then(() => LANDMARKS.forEach(makeLabel));
+document.fonts.ready.then(() => { LANDMARKS.forEach(makeLabel); makeVehicleSigns(); });
 
 // trees grow in FOREST CLUMPS (like the reference), not lone scatter
 function scatterClumps(make, clumpCount, perClump, spread = 0.055) {
@@ -797,6 +829,250 @@ const roadParts = [];   // tinted by the vibe toggle
       deco.add(o);
     }
   }
+}
+
+// ─── the railway: open track through 4 stations, rails + ties + platforms ───
+const TRAIN_STATIONS = ['central', 'lakeside', 'farside', 'museumst'];
+const trackPts = [];
+{
+  for (let i = 0; i < TRAIN_STATIONS.length - 1; i++) {
+    const a = STOP_DIRS[TRAIN_STATIONS[i]], b = STOP_DIRS[TRAIN_STATIONS[i + 1]];
+    const n = 26;
+    for (let k = 0; k < n; k++) trackPts.push(slerpDir(a, b, k / n));
+  }
+  trackPts.push(STOP_DIRS.museumst.clone());
+
+  // open ribbon (no wraparound) — same trick as the road, raised a touch
+  function railRibbon(offset, halfW, lift, color) {
+    const pos = [], idx = [];
+    const lat = new THREE.Vector3();
+    for (let i = 0; i < trackPts.length; i++) {
+      const d = trackPts[i], dn = trackPts[Math.min(i + 1, trackPts.length - 1)];
+      const dp = trackPts[Math.max(i - 1, 0)];
+      const tang = dn.clone().sub(dp.clone().multiplyScalar(dp.dot(dn))).normalize();
+      lat.crossVectors(d, tang).normalize();
+      const r = Math.max(radiusAt(d), SEA_R) + lift;
+      const c = d.clone().multiplyScalar(r).addScaledVector(lat, offset);
+      const p1 = c.clone().addScaledVector(lat, halfW);
+      const p2 = c.clone().addScaledVector(lat, -halfW);
+      pos.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+    }
+    for (let i = 0; i < trackPts.length - 1; i++) {
+      const a0 = i * 2, a1 = i * 2 + 1, b0 = (i + 1) * 2, b1 = (i + 1) * 2 + 1;
+      idx.push(a0, b0, a1, a1, b0, b1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const mesh = new THREE.Mesh(g, M(color));
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    return mesh;
+  }
+  railRibbon(0, 0.55, 0.045, 0xb0a488);          // gravel bed
+  railRibbon(0.3, 0.05, 0.075, 0x8b8fa0);        // rail
+  railRibbon(-0.3, 0.05, 0.075, 0x8b8fa0);       // rail
+  const _tieM = new THREE.Matrix4(), _tieLat = new THREE.Vector3();
+  for (let i = 0; i < trackPts.length - 1; i += 2) {   // crossties
+    const d = trackPts[i], dn = trackPts[i + 1];
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.05, 0.16), WOOD);
+    tie.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.06));
+    const tang = dn.clone().sub(d.clone().multiplyScalar(d.dot(dn))).normalize();
+    _tieLat.crossVectors(d, tang).normalize();
+    _tieM.makeBasis(_tieLat, d, tang);
+    tie.quaternion.setFromRotationMatrix(_tieM);
+    deco.add(tie);
+  }
+}
+
+// station platform + canopy + sign; overlook cairn; boardwalk stand
+function makeStation(dir, name) {
+  const g = new THREE.Group();
+  const plat = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.34, 1.7), M(0xd8cbb2));
+  plat.position.y = 0.17; g.add(plat);
+  for (const s of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.25, 6), WOOD);
+    post.position.set(s * 1.2, 0.95, -0.45); g.add(post);
+  }
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.1, 1.15), M(0xc7572a));
+  canopy.position.set(0, 1.62, -0.45); canopy.rotation.x = 0.09; g.add(canopy);
+  const bench = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.12, 0.34), WOOD);
+  bench.position.set(0, 0.52, -0.55); g.add(bench);
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.4, 0.07), M(0x2d6ea8));
+  sign.position.set(1.35, 1.15, 0.35); g.add(sign);
+  const lpole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.3, 6), M(0x2d2138));
+  lpole.position.set(-1.35, 0.9, 0.4); g.add(lpole);
+  const lbulb = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6),
+    new THREE.MeshStandardMaterial({ color: 0xfff2c8, emissive: 0xffd98a, emissiveIntensity: 1.1 }));
+  lbulb.position.set(-1.35, 1.6, 0.4); g.add(lbulb);
+  g.userData.stopName = name;
+  return g;
+}
+const stopStructures = {};
+{
+  const names = { central: 'Central Station', lakeside: 'Lakeside Station', farside: 'Far Side Station', museumst: 'Museum Station' };
+  TRAIN_STATIONS.forEach((key, i) => {
+    const d = STOP_DIRS[key];
+    const st = makeStation(d, names[key]);
+    // platform long axis along the local track tangent, shifted off the rails
+    // so the Museum Express pulls up BESIDE it (canopy side away from the track)
+    const pi2 = Math.min(i * 26, trackPts.length - 1);
+    const nb = i < TRAIN_STATIONS.length - 1 ? trackPts[pi2 + 1] : trackPts[pi2 - 1];
+    const tang = nb.clone().sub(d.clone().multiplyScalar(d.dot(nb))).normalize();
+    if (i === TRAIN_STATIONS.length - 1) tang.negate();   // neighbor is behind the last stop
+    const sd = d.clone().applyAxisAngle(tang, -1.5 / R).normalize();   // ~1.5 units to the +lat side
+    st.position.copy(settleOn(sd, 1.7, 0.12));
+    const zAxis = new THREE.Vector3().crossVectors(tang, sd).normalize();
+    st.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(tang, sd, zAxis));
+    scene.add(st);
+    stopStructures[key] = st;
+  });
+  // Summit Overlook: stone cairn + telescope + bench facing the museum
+  const ov = new THREE.Group();
+  let cy = 0.16;
+  for (const s of [0.34, 0.27, 0.19]) {
+    const stone = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), ROCK);
+    stone.position.y = cy; cy += s * 0.9; ov.add(stone);
+  }
+  const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 0.75, 7), M(0x8f7ae8));
+  scope.position.set(0.75, 0.85, 0); scope.rotation.z = -0.7; ov.add(scope);
+  const tripod = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.8, 5), M(0x2d2138));
+  tripod.position.set(0.75, 0.4, 0); ov.add(tripod);
+  const obench = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.12, 0.35), WOOD);
+  obench.position.set(-0.8, 0.42, 0.2); ov.add(obench);
+  ov.position.copy(settleOn(STOP_DIRS.overlook, 1.0, 0.1));
+  alignToSurface(ov, STOP_DIRS.overlook, yawToFace(STOP_DIRS.overlook, lmByKeyLater('artgarden')));
+  scene.add(ov);
+  stopStructures.overlook = ov;
+  // Seaside Boardwalk: planks + shave-ice stand with a striped awning
+  const bw = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.09, 0.5), WOOD);
+    plank.position.set(0, 0.12, -1.1 + i * 0.55); bw.add(plank);
+  }
+  const stand = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.9, 0.8), M(0xfff4e0));
+  stand.position.set(0.6, 0.65, -0.4); bw.add(stand);
+  for (let i = 0; i < 4; i++) {
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.95), M(i % 2 ? 0xff7eb6 : 0xfffaf2));
+    strip.position.set(0.15 + i * 0.3, 1.28, -0.4); strip.rotation.z = 0.08; bw.add(strip);
+  }
+  bw.position.copy(settleOn(STOP_DIRS.boardwalk, 1.4, 0.1));
+  alignToSurface(bw, STOP_DIRS.boardwalk, rand() * Math.PI * 2);
+  scene.add(bw);
+  stopStructures.boardwalk = bw;
+}
+// forward ref helper — LANDMARKS is defined above, lmByKey comes later
+function lmByKeyLater(k) { return LANDMARKS.find(l => l.key === k).dir; }
+
+// ─── attractions: the sailboat mooring + Cape Far Side launchpad ─────────────
+const vehicleMeshes = [];
+// the sailboat moors in the first open water off the boardwalk
+let moorDir = null;
+{
+  const bwD = STOP_DIRS.boardwalk;
+  const t1 = new THREE.Vector3(1, 0, 0).cross(bwD).normalize();
+  const t2 = new THREE.Vector3().crossVectors(bwD, t1);
+  outer: for (let ring = 0.07; ring <= 0.2; ring += 0.03) {
+    for (let k = 0; k < 16; k++) {
+      const ang = (k / 16) * Math.PI * 2;
+      const axis = t1.clone().multiplyScalar(Math.cos(ang)).addScaledVector(t2, Math.sin(ang)).normalize();
+      const d = bwD.clone().applyAxisAngle(axis, ring).normalize();
+      if (isWater(d, 0.3)) { moorDir = d; break outer; }
+    }
+  }
+  if (!moorDir) moorDir = LAKE.clone();   // the bay is always wet
+}
+const mooredBoat = buildBoat();
+mooredBoat.position.copy(moorDir.clone().multiplyScalar(SEA_R + 0.1));
+alignToSurface(mooredBoat, moorDir, rand() * Math.PI * 2);
+scene.add(mooredBoat);
+mooredBoat.traverse(m => { if (m.isMesh) { m.userData.vehicle = 'boat'; vehicleMeshes.push(m); } });
+
+// Cape Far Side: launchpad, gantry, and a very eager rocket
+const padDir = STOP_DIRS.farside.clone().applyAxisAngle(
+  new THREE.Vector3(0, 1, 0).cross(STOP_DIRS.farside).normalize(), 0.12).normalize();
+const padPos = settleOn(padDir, 1.7, 0.12);
+// a surface tangent at the pad — the liftoff camera stands here to watch
+const padSide = new THREE.Vector3(0, 1, 0).cross(padDir).normalize();
+if (padSide.lengthSq() < 1e-6) padSide.set(1, 0, 0);
+{
+  const padG = new THREE.Group();
+  const slab = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.9, 0.35, 12), M(0xb8b2a6));
+  slab.position.y = 0.17; padG.add(slab);
+  const scorch = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.37, 10), M(0x5a5248));
+  scorch.position.y = 0.17; padG.add(scorch);
+  const gant = new THREE.Mesh(new THREE.BoxGeometry(0.22, 2.6, 0.22), M(0xd9534f));
+  gant.position.set(1.0, 1.6, 0); padG.add(gant);
+  const gantArm = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.14, 0.14), M(0xd9534f));
+  gantArm.position.set(0.65, 2.6, 0); padG.add(gantArm);
+  padG.position.copy(padPos);
+  alignToSurface(padG, padDir);
+  padG.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+  scene.add(padG);
+}
+const rocketG = new THREE.Group();
+{
+  const rbody = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 1.7, 10), M(0xf4f0e6, { roughness: 0.4 }));
+  rbody.position.y = 1.35; rocketG.add(rbody);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.7, 10), M(0xff4d6e));
+  nose.position.y = 2.55; rocketG.add(nose);
+  const win = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.16, 10), M(0x33c9ff));
+  win.position.y = 1.8; rocketG.add(win);
+  for (let f = 0; f < 3; f++) {
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.6, 0.42), M(0xff4d6e));
+    const fa = (f / 3) * Math.PI * 2;
+    fin.position.set(Math.sin(fa) * 0.42, 0.65, Math.cos(fa) * 0.42);
+    fin.rotation.y = fa;
+    rocketG.add(fin);
+  }
+  const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.32, 0.3, 10), M(0x4a4454));
+  bell.position.y = 0.42; rocketG.add(bell);
+  rocketG.position.copy(padPos.clone().addScaledVector(padDir, 0.3));
+  alignToSurface(rocketG, padDir);
+  rocketG.traverse(m => { if (m.isMesh) { m.userData.vehicle = 'rocket'; vehicleMeshes.push(m); if (!IS_TOUCH) m.castShadow = true; } });
+  scene.add(rocketG);
+}
+const rocketHome = rocketG.position.clone();
+const rocketHomeQ = rocketG.quaternion.clone();
+
+function tinySign(text, pos) {
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 128;
+  const c2 = cv.getContext('2d');
+  c2.font = '700 52px "Fredoka", system-ui, sans-serif';
+  c2.textAlign = 'center'; c2.textBaseline = 'middle';
+  const w = c2.measureText(text).width + 60;
+  c2.fillStyle = 'rgba(255, 250, 242, 0.92)';
+  c2.beginPath(); c2.roundRect((512 - w) / 2, 24, w, 80, 40); c2.fill();
+  c2.fillStyle = '#2d2138';
+  c2.fillText(text, 256, 64);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sp.scale.set(5.2, 1.3, 1);
+  sp.position.copy(pos);
+  scene.add(sp);
+  return sp;
+}
+function makeVehicleSigns() {
+  tinySign('⛵ go sailing', mooredBoat.position.clone().addScaledVector(moorDir, 2.6));
+  tinySign('🚀 space tour', rocketHome.clone().addScaledVector(padDir, 3.6));
+}
+
+// ─── little people: NPCs who hand you things for the museum ─────────────────
+function makePerson(bodyHex, hatHex = null) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.55, 8), M(bodyHex));
+  body.position.y = 0.45; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), M(0xffd9b8));
+  head.position.y = 0.9; g.add(head);
+  if (hatHex !== null) {
+    const beret = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.14, 0.09, 9), M(hatHex));
+    beret.position.set(0.03, 1.04, 0); beret.rotation.z = 0.22; g.add(beret);
+  }
+  g.userData.head = head;
+  return g;
 }
 function bandLandDir(minArc = 0.12) {   // sample near the equatorial street
   for (let i = 0; i < 60; i++) {
@@ -893,7 +1169,7 @@ for (let i = 0; i < LANDMARKS.length; i++) {
     if (!isLand(d, 0.02)) continue;
     if (LANDMARKS.some(l => l !== lm && l.dir.angleTo(d) < 0.07)) continue;
     const o = cottage();
-    o.position.copy(posOn(d, -0.05));
+    o.position.copy(settleOn(d, 1.0, 0.12));
     alignToSurface(o, d, yawToFace(d, lm.dir));
     o.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
     deco.add(o);
@@ -907,7 +1183,7 @@ placeBand(flowerPatch, 34, 0.06);
 {
   const lib = LANDMARKS[0];
   const disc = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 4.8, 0.3, 20), M(0xcfc4b2));
-  disc.position.copy(posOn(lib.dir, -0.12));
+  disc.position.copy(settleOn(lib.dir, 3.2, 0.16));
   alignToSurface(disc, lib.dir);
   disc.receiveShadow = true;
   scene.add(disc);
@@ -924,7 +1200,7 @@ placeBand(flowerPatch, 34, 0.06);
       const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.45, 0.4), WOOD);
       leg.position.set(sx, 0.22, 0); bench.add(leg);
     }
-    bench.position.copy(posOn(d, -0.02));
+    bench.position.copy(settleOn(d, 0.7, 0.08));
     alignToSurface(bench, d, yawToFace(d, lib.dir));
     bench.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
     deco.add(bench);
@@ -1119,10 +1395,10 @@ const starItems = [];
 }
 function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...collectedStars])); }
 
-// ─── the courier ─────────────────────────────────────────────────────────────
-// the Tuscadero jeep — hot pink, doors off, parcel in the back. local +Z = forward
+// ─── the courier: one group, four possible rides. local +Z = forward ─────────
 const courier = new THREE.Group();
-const courierBody = (() => {
+// the Tuscadero jeep — hot pink, doors off, parcel in the back
+function buildJeep() {
   const g = new THREE.Group();
   const PINK = M(0xff2e88, { roughness: 0.45 });      // tuscadero
   const PINK_D = M(0xe0176f, { roughness: 0.5 });
@@ -1195,9 +1471,152 @@ const courierBody = (() => {
   g.userData.wheels = wheels;
   g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
   return g;
-})();
-courier.add(courierBody);
+}
+
+// the art critic on foot — beret, scarf, satchel, phone held high
+function buildCritic() {
+  const g = new THREE.Group();
+  const p = makePerson(0x2d2138, 0xff4d6e);
+  p.scale.setScalar(1.5);
+  g.add(p);
+  const scarf = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.29, 0.16, 8), M(0xffd23d));
+  scarf.position.y = 1.13; g.add(scarf);
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.62, 6), M(0x2d2138));
+  arm.position.set(0.36, 1.3, 0.1); arm.rotation.z = -0.85; g.add(arm);
+  const phone = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.32, 0.04), M(0x1c1626));
+  phone.position.set(0.62, 1.62, 0.1); phone.rotation.z = -0.2; g.add(phone);
+  const phoneGlow = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.27, 0.015),
+    new THREE.MeshStandardMaterial({ color: 0xbfe8ff, emissive: 0x9fd8ff, emissiveIntensity: 0.9 }));
+  phoneGlow.position.set(0.62, 1.62, 0.125); phoneGlow.rotation.z = -0.2; g.add(phoneGlow);
+  const satchel = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.28, 0.14), M(0x9a6b4f));
+  satchel.position.set(-0.36, 0.72, -0.05); g.add(satchel);
+  g.userData.wheels = [];
+  g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+  return g;
+}
+
+// the rental bike — basket in front, critic in the saddle
+function buildBike() {
+  const g = new THREE.Group();
+  const FR = M(0x33c9ff, { roughness: 0.4 });
+  const DARK = M(0x2d2138);
+  const wheelGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.09, 12);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const wheels = [];
+  for (const z of [0.52, -0.52]) {
+    const w = new THREE.Mesh(wheelGeo, DARK);
+    w.position.set(0, 0.32, z); g.add(w); wheels.push(w);
+  }
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.0, 6), FR);
+  tube.rotation.x = Math.PI / 2; tube.position.set(0, 0.55, 0); g.add(tube);
+  const seatPost = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.4, 6), FR);
+  seatPost.position.set(0, 0.75, -0.4); g.add(seatPost);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.08, 0.3), DARK);
+  seat.position.set(0, 0.97, -0.4); g.add(seat);
+  const barPost = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.45, 6), FR);
+  barPost.position.set(0, 0.78, 0.45); barPost.rotation.x = 0.2; g.add(barPost);
+  const bars = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.55, 6), DARK);
+  bars.rotation.z = Math.PI / 2; bars.position.set(0, 1.0, 0.4); g.add(bars);
+  const basket = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.26, 0.3), M(0xc9a06a));
+  basket.position.set(0, 0.86, 0.62); g.add(basket);
+  const rider = makePerson(0x2d2138, 0xff4d6e);
+  rider.position.set(0, 0.5, -0.35);
+  g.add(rider);
+  g.userData.wheels = wheels;
+  g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+  return g;
+}
+
+// the day-sailer — white sails, wooden hull, critic at the tiller
+function buildBoat() {
+  const g = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.45, 2.3), WOOD);
+  hull.position.y = 0.42; g.add(hull);
+  const bow = new THREE.Mesh(new THREE.ConeGeometry(0.48, 0.8, 4), WOOD);
+  bow.rotation.x = Math.PI / 2; bow.rotation.z = Math.PI / 4;
+  bow.position.set(0, 0.42, 1.5); g.add(bow);
+  const gunwale = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.1, 2.4), M(0xc7572a));
+  gunwale.position.y = 0.66; g.add(gunwale);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 2.4, 6), M(0x8a6a3a));
+  mast.position.set(0, 1.8, 0.3); g.add(mast);
+  const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.5, 6), M(0x8a6a3a));
+  boom.rotation.x = Math.PI / 2; boom.position.set(0, 0.95, -0.45); g.add(boom);
+  const sailM = new THREE.MeshStandardMaterial({ color: 0xfffaf0, roughness: 0.85, flatShading: true, side: THREE.DoubleSide });
+  // sails are trimmed out on a broad reach — dead fore-and-aft they'd be
+  // edge-on to the chase camera and read as an invisible sliver
+  const sail = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 1.7), sailM);
+  sail.rotation.y = Math.PI / 2 - 0.62;
+  sail.position.set(-0.28, 1.85, -0.35); g.add(sail);
+  const jib = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 1.1), sailM);
+  jib.rotation.y = Math.PI / 2 - 0.5;
+  jib.position.set(-0.14, 1.5, 0.85); g.add(jib);
+  const rider = makePerson(0x2d2138, 0xff4d6e);
+  rider.position.set(0, 0.55, -0.75);
+  g.add(rider);
+  g.userData.wheels = [];
+  g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+  return g;
+}
+
+// the Museum Express — a stubby engine with the critic waving from the cab
+function buildTrain() {
+  const g = new THREE.Group();
+  const BODY = M(0x2d6ea8, { roughness: 0.5 });
+  const TRIM = M(0xffd23d);
+  const DARK = M(0x2d2138);
+  const boiler = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 12), BODY);
+  boiler.rotation.x = Math.PI / 2; boiler.position.set(0, 0.85, 0.45); g.add(boiler);
+  const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.14, 12), TRIM);
+  nose.rotation.x = Math.PI / 2; nose.position.set(0, 0.85, 1.22); g.add(nose);
+  const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.16, 0.42, 8), DARK);
+  chimney.position.set(0, 1.5, 0.95); g.add(chimney);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.0, 0.9), BODY);
+  cab.position.set(0, 1.05, -0.75); g.add(cab);
+  const roofC = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.12, 1.05), TRIM);
+  roofC.position.set(0, 1.62, -0.75); g.add(roofC);
+  const cow = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.5, 4), TRIM);
+  cow.rotation.x = Math.PI / 2; cow.rotation.z = Math.PI / 4;
+  cow.position.set(0, 0.42, 1.35); g.add(cow);
+  const lampT = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6),
+    new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0xffedb0, emissiveIntensity: 1.0 }));
+  lampT.position.set(0, 1.18, 1.3); g.add(lampT);
+  const wheelGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.14, 10);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const wheels = [];
+  for (const [wx, wz] of [[-0.5, 0.7], [0.5, 0.7], [-0.5, 0.0], [0.5, 0.0], [-0.5, -0.8], [0.5, -0.8]]) {
+    const w = new THREE.Mesh(wheelGeo, DARK);
+    w.position.set(wx, 0.28, wz); g.add(w); wheels.push(w);
+  }
+  const rider = makePerson(0x2d2138, 0xff4d6e);
+  rider.position.set(0, 0.8, -0.75);
+  g.add(rider);
+  g.userData.wheels = wheels;
+  g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+  return g;
+}
+
+const bodies = { jeep: buildJeep(), walk: buildCritic(), bike: buildBike(), train: buildTrain(), boat: buildBoat() };
+for (const k of Object.keys(bodies)) { bodies[k].visible = (k === 'jeep'); courier.add(bodies[k]); }
+let courierBody = bodies.jeep;
 scene.add(courier);
+
+// how each ride handles: top speed, pickup, ride height, camera distance
+const TRANSPORT = {
+  jeep: { max: 7.2, accel: 13, hover: 0.36, camH: 2.5, camD: 7.0, emoji: '🚙', label: 'rental jeep', engine: true },
+  bike: { max: 4.8, accel: 9, hover: 0.12, camH: 2.2, camD: 6.0, emoji: '🚲', label: 'bike', engine: false },
+  walk: { max: 2.8, accel: 8, hover: 0.03, camH: 1.9, camD: 4.8, emoji: '🚶', label: 'on foot', engine: false },
+  train: { max: 8.5, accel: 6, hover: 0.16, camH: 3.0, camD: 8.6, emoji: '🚂', label: 'the Museum Express', engine: true, rail: true },
+  boat: { max: 6.2, accel: 7, hover: 0.1, camH: 2.4, camD: 7.4, emoji: '⛵', label: 'sailboat', engine: false },
+};
+let transport = 'jeep';
+let runTransport = 'jeep';   // the mode the run STARTED with (the train ends on foot)
+function setTransport(t) {
+  transport = t;
+  for (const k of Object.keys(bodies)) bodies[k].visible = (k === t);
+  courierBody = bodies[t];
+  courierBody.rotation.set(0, 0, 0);
+  updateNav();
+}
 
 let dir = ll(8, -22);           // spawn just east of the Library
 let heading = new THREE.Vector3(0, 0, 1);
@@ -1307,41 +1726,165 @@ vibeBtn.addEventListener('click', () => {
   applyVibe();
 });
 
-// ─── delivery quests ─────────────────────────────────────────────────────────
-const QUEST_ORDER = ['library', 'yarnflow', 'inbox', 'charterscope', 'deckgpt',
-  'council', 'brainu', 'sinescape', 'pixels', 'ros2', 'artgarden'];
-const delivered = new Set(JSON.parse(localStorage.getItem('planet-delivered') || '[]'));
+// ─── the GPS run: routes, NPC side quests, the navigator ─────────────────────
 const questText = document.getElementById('quest-text');
 const questCount = document.getElementById('quest-count');
 const starCount = document.getElementById('star-count');
 const lmByKey = Object.fromEntries(LANDMARKS.map(l => [l.key, l]));
 
-function currentQuest() {
-  const k = QUEST_ORDER.find(k => !delivered.has(k));
-  return k ? lmByKey[k] : null;
+// cumulative arc along the railway + where each station sits on it
+const trackArc = [0];
+for (let i = 1; i < trackPts.length; i++) trackArc.push(trackArc[i - 1] + trackPts[i - 1].angleTo(trackPts[i]));
+const stationU = TRAIN_STATIONS.map((k, i) => trackArc[Math.min(i * 26, trackArc.length - 1)]);
+const _tanTmp = new THREE.Vector3();
+function sampleTrack(u, outDir, outTan) {
+  let i = 0;
+  while (i < trackArc.length - 2 && trackArc[i + 1] < u) i++;
+  const span = Math.max(1e-6, trackArc[i + 1] - trackArc[i]);
+  const f = THREE.MathUtils.clamp((u - trackArc[i]) / span, 0, 1);
+  outDir.copy(slerpDir(trackPts[i], trackPts[i + 1], f));
+  outTan.copy(trackPts[i + 1]).sub(_tanTmp.copy(trackPts[i]).multiplyScalar(trackPts[i].dot(trackPts[i + 1]))).normalize();
 }
+
+// every stop: who's there, what they say (per transport), what they hand you
+const STOPS = {};
+function defStop(key, o) {
+  const lm = o.dirOf ? lmByKey[o.dirOf] : null;
+  STOPS[key] = { key, name: o.name ?? lm.name, dir: o.dir ?? lm.dir, lm, npc: o.npc, line: o.line, item: o.item, switchTo: o.switchTo };
+}
+defStop('library', { dirOf: 'library', npc: { face: '📚', name: 'Bea the librarian' }, item: '📖',
+  line: {
+    jeep: 'The critic! Your rental’s gassed up. Take this rare exhibition catalog with you — the museum wants it on the front desk tonight!',
+    walk: 'Walking over the summit? Brave choice. Would you carry this exhibition catalog? The view up there is worth every step.',
+    bike: 'Taking the coastal path? Lovely. Here — the museum needs this exhibition catalog for opening night!',
+  } });
+defStop('inbox', { dirOf: 'inbox', npc: { face: '✉️', name: 'Piet the postmaster' }, item: '💌',
+  line: { all: 'Disaster! The opening-night invitations never went out. You’re driving there anyway — deliver them for me and I’ll owe you forever!' } });
+defStop('deckgpt', { dirOf: 'deckgpt', npc: { face: '🎤', name: 'Nova the curator' }, item: '📊',
+  line: { all: 'My artist talk is TONIGHT and my slides are here. Take the deck — I’ll catch the next ride. Don’t let them argue with anyone on the way!' } });
+defStop('sinescape', { dirOf: 'sinescape', npc: { face: '📐', name: 'Yeganeh the mathematician' }, item: '🌀',
+  line: { all: 'One formula print, fresh off the plotter — pure math, pure art. Hang it well, critic. The curves must face the light.' } });
+defStop('ros2', { dirOf: 'ros2', npc: { face: '🤖', name: 'Turing the robot' }, item: '🖼️',
+  line: { all: 'BEEP. MY FIRST PAINTING. ACRYLIC ON CANVAS. PLEASE DELIVER TO MUSEUM. DO NOT FOLD. I AM… NERVOUS.' } });
+defStop('overlook', { dir: STOP_DIRS.overlook, name: 'Summit Overlook', npc: { face: '🥾', name: 'Hana the hiker' }, item: '🎨',
+  line: { all: 'You hiked up too?! Best view on the planet. Take my plein-air sketch down to the museum — careful, the paint’s still wet!' } });
+defStop('boardwalk', { dir: STOP_DIRS.boardwalk, name: 'Seaside Boardwalk', npc: { face: '🍧', name: 'Coco the vendor' }, item: '🍧',
+  line: { all: 'Museum opening? Take the director her strawberry shaved ice — pedal FAST, it’s already melting!' } });
+defStop('central', { dir: STOP_DIRS.central, name: 'Central Station', npc: { face: '🚂', name: 'Casey the conductor' }, item: '🎫',
+  line: { all: 'All aboard the Museum Express! Three stops, almost no delays. Keep your ticket — the museum stamps them into little artworks.' } });
+defStop('lakeside', { dir: STOP_DIRS.lakeside, name: 'Lakeside Station', npc: { face: '🎣', name: 'Finn the angler' }, item: '🐟',
+  line: { all: 'Quick stop! The fish are jumping today. Take this lake-glass sculpture to the museum for me, will you? Caught the light myself.' } });
+defStop('farside', { dir: STOP_DIRS.farside, name: 'Far Side Station', npc: { face: '🔭', name: 'Stella the stargazer' }, item: '🌌',
+  line: { all: 'From this platform you can watch the space station pass over twice a night. Bring my astro-photograph for the night wing!' } });
+defStop('museumst', { dir: STOP_DIRS.museumst, name: 'Museum Station', switchTo: 'walk',
+  npc: { face: '🚂', name: 'Casey the conductor' },
+  line: { all: 'End of the line! The museum’s just up the path — you’ll walk from here. Enjoy the opening, critic. Make it a kind review!' } });
+defStop('artgarden', { dirOf: 'artgarden', npc: { face: '🖼️', name: 'Director Vivi' },
+  line: { all: 'You MADE it! And you brought treasures from all over the planet! The opening is saved — come in, come in, the preview starts NOW!' } });
+
+// the NPCs stand at their stops whether or not your route goes there
+const npcs = [];
+{
+  const palette = [0xff7eb6, 0x4e8eff, 0x2dd47b, 0xb265ff, 0xff8a3d, 0x33c9ff, 0xffd23d, 0xff4d6e];
+  let pi = 0;
+  for (const key of Object.keys(STOPS)) {
+    const s = STOPS[key];
+    const axis = new THREE.Vector3(0, 1, 0).cross(s.dir).normalize();
+    const nd = s.dir.clone().applyAxisAngle(axis, 0.055).normalize();
+    const p = makePerson(palette[pi % palette.length], pi % 3 === 0 ? 0x2d2138 : null);
+    pi++;
+    p.scale.setScalar(1.35);
+    p.position.copy(settleOn(nd, 0.3, 0.05));
+    alignToSurface(p, nd, yawToFace(nd, s.dir));
+    p.userData.phase = pi * 1.7;
+    scene.add(p);
+    npcs.push(p);
+    s.npcMesh = p;
+  }
+}
+
+const ROUTES = {
+  jeep: ['library', 'inbox', 'deckgpt', 'sinescape', 'ros2', 'artgarden'],
+  walk: ['library', 'overlook', 'artgarden'],
+  bike: ['library', 'boardwalk', 'artgarden'],
+  train: ['central', 'lakeside', 'farside', 'museumst', 'artgarden'],
+};
+let route = ROUTES.jeep.map(k => STOPS[k]);
+let routeIdx = 0;
+let bag = [];
+let trainU = 0;
+
+function currentStop() { return routeIdx < route.length ? route[routeIdx] : null; }
+
 function updateQuestHUD() {
-  const q = currentQuest();
-  questText.textContent = q ? `next delivery: ${q.name}` : 'all parcels delivered! 🎉';
-  questCount.textContent = `${delivered.size}/${QUEST_ORDER.length}`;
+  const s = currentStop();
+  questText.textContent = s ? `🎨 to the museum · next: ${s.name}` : 'you made the opening! 🎉';
+  questCount.textContent = `stop ${Math.min(routeIdx + 1, route.length)}/${route.length}`;
   starCount.textContent = `⭐ ${collectedStars.size}/${STAR_COUNT}`;
 }
-function saveDelivered() { localStorage.setItem('planet-delivered', JSON.stringify([...delivered])); }
 
-function deliverTo(lm) {
-  if (!QUEST_ORDER.includes(lm.key) || delivered.has(lm.key)) return;
-  delivered.add(lm.key);
-  saveDelivered();
-  burstConfetti(posOn(lm.dir, 4.5), lm.dir.clone());
-  ping(680, 0.16); setTimeout(() => ping(920, 0.2), 130);
-  updateQuestHUD();
-  if (delivered.size === QUEST_ORDER.length) {
+// the corner navigator — the critic's phone, still running directions
+const navMode = document.getElementById('nav-mode');
+const navEta = document.getElementById('nav-eta');
+const navNext = document.getElementById('nav-next');
+const navDots = document.getElementById('nav-dots');
+const navBag = document.getElementById('nav-bag');
+function updateNav() {
+  navMode.textContent = TRANSPORT[transport].emoji;
+  const s = currentStop();
+  navNext.textContent = s ? `→ ${s.name}` : '🏛️ you have arrived';
+  navDots.textContent = route.map((_, i) => (i < routeIdx ? '●' : i === routeIdx ? '◉' : '○')).join(' ');
+  navBag.textContent = bag.length ? `carrying: ${bag.join(' ')}` : 'carrying: (nothing yet)';
+}
+
+// dialogue — an NPC talks, the world waits
+const dlgEl = document.getElementById('dlg');
+const dlgFace = document.getElementById('dlg-face');
+const dlgName = document.getElementById('dlg-name');
+const dlgText = document.getElementById('dlg-text');
+let dlgOpen = false, dlgTimer = null;
+function openDlg(stop) {
+  dlgOpen = true;
+  dlgEl.classList.add('show');
+  dlgFace.textContent = stop.npc.face;
+  dlgName.textContent = stop.npc.name;
+  const text = stop.line[transport] ?? stop.line.all ?? Object.values(stop.line)[0];
+  clearInterval(dlgTimer);
+  let i = 0;
+  dlgText.textContent = '';
+  dlgTimer = setInterval(() => {
+    i += 2;
+    dlgText.textContent = text.slice(0, i);
+    if (i >= text.length) clearInterval(dlgTimer);
+  }, 24);
+}
+document.getElementById('dlg-ok').addEventListener('click', () => {
+  if (!dlgOpen) return;
+  clearInterval(dlgTimer);
+  dlgOpen = false;
+  dlgEl.classList.remove('show');
+  const stop = route[routeIdx];
+  if (stop.item) { bag.push(stop.item); ping(980, 0.12); }
+  routeIdx++;
+  if (stop.switchTo) setTransport(stop.switchTo);
+  if (routeIdx >= route.length) {
+    burstConfetti(posOn(stop.dir, 5), stop.dir.clone());
+    ping(680, 0.16); setTimeout(() => ping(920, 0.2), 130); setTimeout(() => ping(1240, 0.24), 280);
     setTimeout(() => openCard({
-      name: 'Planet complete! 🎉', tag: 'every parcel delivered',
-      desc: `You visited all ${QUEST_ORDER.length} projects and collected ${collectedStars.size}/${STAR_COUNT} stars. Thanks for flying — step into the Library to browse everything up close, or restart the route from the ↺ button.`,
+      name: 'Opening night! 🎉', tag: 'the main event',
+      desc: `You arrived ${runTransport === 'walk' ? 'on foot' : `by ${TRANSPORT[runTransport].label}`} carrying ${bag.length ? bag.join(' ') : 'nothing but opinions'} — and ${collectedStars.size}/${STAR_COUNT} stars. Step inside: the gallery is real, and so are the paintings.`,
       enter: './room.html',
-    }), 700);
+    }), 600);
   }
+  updateQuestHUD(); updateNav();
+});
+
+function arriveAtStop(stop) {
+  targetDir = null;                       // cancel any pending click-to-travel
+  targetRing.material.opacity = 0;        // …so the world actually waits
+  burstConfetti(posOn(stop.dir, 4.2), stop.dir.clone());
+  ping(680, 0.14);
+  openDlg(stop);
 }
 
 document.getElementById('reset-progress').addEventListener('click', () => {
@@ -1472,12 +2015,20 @@ renderer.domElement.addEventListener('pointerdown', e => {
   downAt = performance.now(); downX = e.clientX; downY = e.clientY;
 });
 renderer.domElement.addEventListener('pointerup', e => {
-  if (gameState === 'title') return;
+  if (gameState !== 'play' || dlgOpen) return;
   if (performance.now() - downAt > 350 || Math.hypot(e.clientX - downX, e.clientY - downY) > 8) return;
   ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   ray.setFromCamera(ndc, camera);
+  const hitVeh = ray.intersectObjects(vehicleMeshes, false)[0];
+  if (hitVeh) {
+    const v = hitVeh.object.userData.vehicle;
+    if (v === 'boat' && transport !== 'boat' && dir.angleTo(moorDir) < 0.45) boardBoat();
+    else if (v === 'rocket' && dir.angleTo(padDir) < 0.45) startLaunch();
+    return;
+  }
   const hitLm = ray.intersectObjects(clickables, false)[0];
   if (hitLm) { openCard(hitLm.object.userData.landmark); return; }
+  if (TRANSPORT[transport].rail) return;   // no click-to-travel while riding the train
   const hitPlanet = ray.intersectObject(planet, false)[0];
   if (hitPlanet) {
     targetDir = hitPlanet.point.clone().normalize();
@@ -1492,7 +2043,8 @@ if (!IS_TOUCH) {
   renderer.domElement.addEventListener('pointermove', e => {
     ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
     ray.setFromCamera(ndc, camera);
-    renderer.domElement.style.cursor = ray.intersectObjects(clickables, false)[0] ? 'pointer' : 'default';
+    renderer.domElement.style.cursor =
+      (ray.intersectObjects(vehicleMeshes, false)[0] || ray.intersectObjects(clickables, false)[0]) ? 'pointer' : 'default';
   });
 }
 
@@ -1530,26 +2082,157 @@ function hideHint() {
   if (!hintHidden) { hintHidden = true; setTimeout(() => hintEl.classList.add('hide'), 1200); }
 }
 
-// ─── title screen ────────────────────────────────────────────────────────────
+// ─── attractions: go sailing, ride the rocket ────────────────────────────────
+function boardBoat() {
+  if (gameState !== 'play' || dlgOpen || TRANSPORT[transport].rail) return;
+  dir = moorDir.clone();
+  heading = new THREE.Vector3(0, 1, 0).cross(dir).normalize();
+  if (heading.lengthSq() < 1e-4) heading.set(1, 0, 0);
+  speed = 0; targetDir = null; targetRing.material.opacity = 0;
+  setTransport('boat');
+  ping(760, 0.14);
+}
+
+let launchT = 0, launchConfettied = false, exitStored = false;
+const _lPrev = new THREE.Vector3(), _lVel = new THREE.Vector3(), _lUp = new THREE.Vector3();
+const _stW = new THREE.Vector3(), _camL = new THREE.Vector3(), _launchExit = new THREE.Vector3();
+function startLaunch() {
+  if (gameState !== 'play' || dlgOpen || TRANSPORT[transport].rail) return;
+  gameState = 'launch';
+  launchT = 0; launchConfettied = false; exitStored = false;
+  _lPrev.copy(rocketG.position);
+  hideHint();
+  closeCard();
+  ping(520, 0.2); setTimeout(() => ping(700, 0.2), 220); setTimeout(() => ping(940, 0.25), 440);
+}
+function updateLaunch(dt) {
+  launchT = Math.min(1, launchT + dt / 26);
+  const T = launchT;
+  station.getWorldPosition(_stW);
+  let p;
+  if (T < 0.3) {                                   // liftoff
+    const k = (T / 0.3) ** 2;
+    const alt = padPos.length() + 0.4 + k * (_stW.length() - padPos.length());
+    p = padDir.clone().multiplyScalar(alt);
+  } else if (T < 0.78) {                           // one lap around the station
+    const k = (T - 0.3) / 0.48;
+    const up2 = _lUp.copy(_stW).normalize();
+    const side = new THREE.Vector3(0, 1, 0).cross(up2).normalize();
+    if (side.lengthSq() < 1e-4) side.set(1, 0, 0);
+    const fwd2 = up2.clone().cross(side).normalize();
+    const ang = k * Math.PI * 2 + Math.PI * 0.2;
+    p = _stW.clone().addScaledVector(side, Math.cos(ang) * 9.5)
+      .addScaledVector(fwd2, Math.sin(ang) * 9.5).addScaledVector(up2, 2.2);
+    if (!launchConfettied && k > 0.5) { launchConfettied = true; burstConfetti(p.clone(), up2.clone()); ping(1240, 0.22); }
+  } else {                                         // glide home
+    if (!exitStored) { exitStored = true; _launchExit.copy(_lPrev); }
+    const k = (T - 0.78) / 0.22;
+    const e = k * k * (3 - 2 * k);
+    p = _launchExit.clone().lerp(rocketHome, e);
+  }
+  rocketG.position.copy(p);
+  _lVel.subVectors(p, _lPrev);
+  if (_lVel.lengthSq() > 1e-8) {
+    rocketG.quaternion.slerp(new THREE.Quaternion().setFromUnitVectors(UP_Y, _lVel.clone().normalize()), 0.12);
+  }
+  if (T < 0.3) {                                   // exhaust
+    emitTrail(p.clone().addScaledVector(padDir, -0.2), padDir.clone().negate(), padDir);
+    emitTrail(p.clone().addScaledVector(padDir, -0.2), padDir.clone().negate(), padDir);
+  }
+  // liftoff is watched from BESIDE the pad — trailing the rocket at T≈0 would
+  // put the camera 8 units straight down, i.e. inside the planet
+  if (T < 0.34) {
+    const k = THREE.MathUtils.smoothstep(T, 0.16, 0.34);
+    _camL.copy(p).addScaledVector(padSide, 9 - k * 3).addScaledVector(padDir, 2.5 + k * 4);
+  } else {
+    const back = _lVel.lengthSq() > 1e-8 ? _lVel.clone().normalize() : padDir.clone();
+    _camL.copy(p).addScaledVector(back, -8).addScaledVector(_lUp.copy(p).normalize(), 3);
+  }
+  camera.position.lerp(_camL, T < 0.02 ? 1 : 0.08);
+  camera.up.lerp(p.clone().normalize(), 0.08).normalize();
+  camera.lookAt(T > 0.32 && T < 0.75 ? _stW : p);
+  _lPrev.copy(p);
+  if (T >= 1) {                                    // wheels down — well, fins
+    gameState = 'play';
+    rocketG.position.copy(rocketHome);
+    rocketG.quaternion.copy(rocketHomeQ);
+    introT = 0.3;
+    ping(880, 0.18);
+  }
+}
+
+// ─── title screen → GPS phone → play ─────────────────────────────────────────
 let gameState = 'title';
 document.body.classList.add('title-mode');
 const titleEl = document.getElementById('title');
+const phoneEl = document.getElementById('phone');
+const pGo = document.getElementById('p-go');
+const pRoute = document.getElementById('p-route');
+let chosenTransport = null;
+
 function enterGame() {
-  if (gameState === 'play') return;
-  gameState = 'play';
+  if (gameState !== 'title') return;
+  gameState = 'gps';
   titleEl.classList.add('hide');
-  document.body.classList.remove('title-mode');
-  introT = 0;
-  applyGfx();          // restore driving-distance fog
+  phoneEl.classList.add('show');
   startAudio();
 }
 document.getElementById('enter-btn').addEventListener('click', enterGame);
-window.addEventListener('keydown', e => { if (e.key === 'Enter') enterGame(); });
+window.addEventListener('keydown', e => { if (e.key === 'Enter' && gameState === 'title') enterGame(); });
+
+for (const btn of document.querySelectorAll('#phone .p-modes button')) {
+  btn.addEventListener('click', () => {
+    chosenTransport = btn.dataset.t;
+    document.querySelectorAll('#phone .p-modes button').forEach(b => b.classList.toggle('sel', b === btn));
+    const names = ROUTES[chosenTransport].map(k => STOPS[k].name);
+    pRoute.innerHTML = names.map((n, i) =>
+      `<div class="p-stop">${i === names.length - 1 ? '🏛️' : '📍'} ${n}</div>`).join('');
+    pGo.disabled = false;
+    ping(880, 0.08);
+  });
+}
+pGo.addEventListener('click', () => { if (chosenTransport) beginRun(chosenTransport); });
+
+function beginRun(t) {
+  setTransport(t);
+  runTransport = t;
+  route = ROUTES[t].map(k => STOPS[k]);
+  routeIdx = 0; bag = []; trainU = 0;
+  hintEl.innerHTML = TRANSPORT[t].rail
+    ? 'sit back — the Museum Express drives itself &nbsp;·&nbsp; click a building for details'
+    : `<kbd>WASD</kbd> / <kbd>←↑↓→</kbd> ${t === 'walk' ? 'walk' : t === 'bike' ? 'pedal' : 'drive'} &nbsp;·&nbsp; click ground to travel &nbsp;·&nbsp; click a building`;
+  hintHidden = false;
+  hintEl.classList.remove('hide');
+  if (t === 'train') dir = STOP_DIRS.central.clone();
+  else dir = ll(8, -22);
+  heading = new THREE.Vector3(0, 0, 1);
+  heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
+  speed = 0;
+  targetDir = null;
+  phoneEl.classList.remove('show');
+  document.body.classList.remove('title-mode');
+  gameState = 'play';
+  introT = 0;
+  applyGfx();          // restore driving-distance fog
+  updateQuestHUD(); updateNav();
+}
 
 // ─── main loop ───────────────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let introT = 0;
-if (new URLSearchParams(location.search).get('title') === '0') enterGame();
+let navAcc = 0;
+{
+  const _qs = new URLSearchParams(location.search);
+  if (_qs.get('title') === '0') {
+    enterGame();
+    const tp = _qs.get('transport');
+    beginRun(tp && TRANSPORT[tp] ? tp : 'jeep');
+    if (_qs.get('launch') === '1') startLaunch();
+    if (_qs.get('sail') === '1') boardBoat();
+  } else if (_qs.get('gps') === '1') {
+    enterGame();   // jump straight to the phone (testing)
+  }
+}
 let nearLm = null;
 let emitAcc = 0;
 
@@ -1618,7 +2301,7 @@ function updateWorldAmbient(dt, t) {
   ocean.material.opacity = 0.78 + Math.sin(t * 0.7) * 0.05;
   ocean.rotation.y += dt * 0.004;
 
-  if (gameState === 'title') {
+  if (gameState !== 'play') {
     for (const lm of LANDMARKS) {
       if (lm.gem) lm.gem.rotation.y += dt * 1.5;
       if (lm.sculpture) lm.sculpture.rotation.y += dt * 0.6;
@@ -1631,8 +2314,19 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
-  // title screen: slow orbit of the whole planet, world alive behind the logo
-  if (gameState === 'title') {
+  // the space tour: cinematic, hands off the controls
+  if (gameState === 'launch') {
+    updateLaunch(dt);
+    updateWorldAmbient(dt, t);
+    updatePool(trailPool, dt);
+    updatePool(confettiPool, dt);
+    sky.position.copy(camera.position);
+    if (gfxInked) renderInked(); else renderer.render(scene, camera);
+    return;
+  }
+
+  // title + GPS phone: slow orbit of the whole planet, world alive behind the UI
+  if (gameState !== 'play') {
     const a = t * 0.055;
     camera.position.set(Math.sin(a) * 92, 34, Math.cos(a) * 92);
     camera.up.set(0, 1, 0);
@@ -1644,58 +2338,84 @@ function animate() {
     return;
   }
 
-  // input
+  const TR = TRANSPORT[transport];
+
+  // input (the world waits while someone's talking to you)
   let ix = 0, iz = 0;
-  if (keys.KeyW || keys.ArrowUp) iz += 1;
-  if (keys.KeyS || keys.ArrowDown) iz -= 1;
-  if (keys.KeyA || keys.ArrowLeft) ix -= 1;
-  if (keys.KeyD || keys.ArrowRight) ix += 1;
-  if (stickState.active) { ix += stickState.x; iz += -stickState.y; }
+  if (!dlgOpen) {
+    if (keys.KeyW || keys.ArrowUp) iz += 1;
+    if (keys.KeyS || keys.ArrowDown) iz -= 1;
+    if (keys.KeyA || keys.ArrowLeft) ix -= 1;
+    if (keys.KeyD || keys.ArrowRight) ix += 1;
+    if (stickState.active) { ix += stickState.x; iz += -stickState.y; }
+  }
+  if (TR.rail) { ix = 0; iz = 0; }   // the Express takes no steering suggestions
   const hasInput = Math.abs(ix) > 0.01 || Math.abs(iz) > 0.01;
   if (hasInput) { targetDir = null; targetRing.material.opacity = 0; hideHint(); }
 
-  _fwd.subVectors(courier.position, camera.position);
-  _fwd.sub(dir.clone().multiplyScalar(_fwd.dot(dir))).normalize();
-  _right.crossVectors(_fwd, dir).normalize();
-  const turnK = 1 - Math.pow(TURN * (1 + speed / MAX_SPEED), dt);
-
-  if (hasInput) {
-    _desired.set(0, 0, 0).addScaledVector(_fwd, iz).addScaledVector(_right, ix).normalize();
-    heading.lerp(_desired, turnK).normalize();
-    speed = Math.min(MAX_SPEED, speed + ACCEL * dt);
-  } else if (targetDir) {
-    const arc = dir.angleTo(targetDir);
-    if (arc < 0.02) { targetDir = null; targetRing.material.opacity = 0; }
-    else {
-      _desired.subVectors(targetDir, dir.clone().multiplyScalar(dir.dot(targetDir))).normalize();
-      heading.lerp(_desired, turnK).normalize();
-      const slow = Math.min(1, arc / 0.12);
-      speed = Math.min(MAX_SPEED * slow + 1.2, speed + ACCEL * dt);
-    }
+  if (TR.rail) {
+    // the Museum Express drives itself — ease toward the next station
+    const targetU = stationU[Math.min(routeIdx, stationU.length - 1)];
+    const distArc = Math.max(0, targetU - trainU);
+    speed = (dlgOpen || distArc < 0.0005)
+      ? Math.max(0, speed - 6 * dt)
+      : Math.min(Math.min(TR.max, 1.6 + distArc * R * 0.55), speed + TR.accel * dt);
+    trainU = Math.min(targetU, trainU + (speed * dt) / R);
+    sampleTrack(trainU, dir, heading);
   } else {
-    speed = Math.max(0, speed - DAMP * dt * (speed + 1));
+    _fwd.subVectors(courier.position, camera.position);
+    _fwd.sub(dir.clone().multiplyScalar(_fwd.dot(dir))).normalize();
+    _right.crossVectors(_fwd, dir).normalize();
+    const turnK = 1 - Math.pow(TURN * (1 + speed / TR.max), dt);
+
+    if (hasInput) {
+      _desired.set(0, 0, 0).addScaledVector(_fwd, iz).addScaledVector(_right, ix).normalize();
+      heading.lerp(_desired, turnK).normalize();
+      speed = Math.min(TR.max, speed + TR.accel * dt);
+    } else if (targetDir) {
+      const arc = dir.angleTo(targetDir);
+      if (arc < 0.02) { targetDir = null; targetRing.material.opacity = 0; }
+      else {
+        _desired.subVectors(targetDir, dir.clone().multiplyScalar(dir.dot(targetDir))).normalize();
+        heading.lerp(_desired, turnK).normalize();
+        const slow = Math.min(1, arc / 0.12);
+        speed = Math.min(TR.max * slow + 1.2, speed + TR.accel * dt);
+      }
+    } else {
+      speed = Math.max(0, speed - DAMP * dt * (speed + 1));
+    }
+    if (dlgOpen) speed = Math.max(0, speed - 8 * dt);
+
+    if (speed > 0.001) {
+      dir.multiplyScalar(R).addScaledVector(heading, speed * dt).normalize();
+      heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
+    }
+
+    // sailing ends at the shoreline — beach the boat and hop out
+    if (transport === 'boat' && isLand(dir, 0.02)) {
+      setTransport(TRANSPORT[runTransport].rail ? 'walk' : runTransport);
+      speed = Math.min(speed, 1.5);
+      ping(620, 0.12);
+    }
   }
 
-  if (speed > 0.001) {
-    dir.multiplyScalar(R).addScaledVector(heading, speed * dt).normalize();
-    heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
-  }
-
-  // suspension jiggle scales with speed (it's a jeep now, not a drone)
-  const bob = Math.sin(t * 8.5) * 0.03 * (0.3 + speed / MAX_SPEED);
-  // drive on whichever is higher: terrain or the sea surface (magic jeep)
+  // ride-height bob: suspension for wheels, a light step for the walker
+  const bob = transport === 'walk'
+    ? Math.abs(Math.sin(t * 9)) * 0.07 * (speed / TR.max)
+    : Math.sin(t * 8.5) * 0.03 * (0.3 + speed / TR.max);
   const groundR = Math.max(radiusAt(dir), SEA_R);
-  courier.position.copy(dir.clone().multiplyScalar(groundR + HOVER + bob));
+  courier.position.copy(dir.clone().multiplyScalar(groundR + TR.hover + bob));
   _right.crossVectors(dir, heading);
   _m.makeBasis(_right, dir, heading);
   _q.setFromRotationMatrix(_m);
   courier.quaternion.slerp(_q, 1 - Math.pow(0.001, dt));
-  courierBody.rotation.z = THREE.MathUtils.lerp(courierBody.rotation.z, -ix * 0.12, 0.09);
-  courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.07 * (speed / MAX_SPEED), 0.09);
+  const leanK = transport === 'bike' ? 0.22 : transport === 'jeep' ? 0.12 : 0;
+  courierBody.rotation.z = THREE.MathUtils.lerp(courierBody.rotation.z, -ix * leanK, 0.09);
+  courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.07 * (speed / TR.max), 0.09);
   for (const w of courierBody.userData.wheels) w.rotation.x += dt * speed / 0.34;
 
   // engine particles + hum
-  if (speed > 1.4) {
+  if (TR.engine && speed > 1.4) {
     emitAcc += dt * (5 + speed * 3.2);
     _back.copy(heading).negate();
     while (emitAcc >= 1) { emitAcc -= 1; emitTrail(courier.position, _back, dir); }
@@ -1703,17 +2423,17 @@ function animate() {
   updatePool(trailPool, dt);
   updatePool(confettiPool, dt);
   if (AudioState.engineGain) {
-    const g = (speed / MAX_SPEED);
+    const g = (speed / TR.max) * (TR.engine ? 1 : 0);
     AudioState.engineGain.gain.setTargetAtTime(g * g * 0.05, AudioState.ctx.currentTime, 0.12);
-    AudioState.engineOsc.frequency.setTargetAtTime(72 + g * 46, AudioState.ctx.currentTime, 0.15);
+    AudioState.engineOsc.frequency.setTargetAtTime((transport === 'train' ? 54 : 72) + g * 46, AudioState.ctx.currentTime, 0.15);
   }
 
   // chase camera
   introT = Math.min(1, introT + dt / 2.6);
   const ease = introT * introT * (3 - 2 * introT);
   const camPos = courier.position.clone()
-    .addScaledVector(dir, CAM_H)
-    .addScaledVector(heading, -CAM_D);
+    .addScaledVector(dir, TR.camH)
+    .addScaledVector(heading, -TR.camD);
   camera.position.lerp(camPos, (0.02 + 0.05 * ease));
   camera.up.lerp(dir, 0.06).normalize();
   camera.lookAt(courier.position.clone().addScaledVector(dir, 1.1));
@@ -1738,11 +2458,13 @@ function animate() {
     if (openLm === nearLm) closeCard();
     nearLm = null;
   }
-  if (!nearLm && nearest && nearestArc < NEAR_ARC) {
-    nearLm = nearest;
-    openCard(nearest);
-    deliverTo(nearest);
-  }
+  if (!nearLm && nearest && nearestArc < NEAR_ARC) nearLm = nearest;
+
+  // route: reaching the next stop starts a conversation
+  // (the train pulls all the way into the platform before anyone talks)
+  const stop = currentStop();
+  const arriveArc = TR.rail ? 0.02 : 0.1;
+  if (stop && !dlgOpen && dir.angleTo(stop.dir) < arriveArc) arriveAtStop(stop);
 
   for (const lm of LANDMARKS) {
     if (!lm.label) continue;
@@ -1750,8 +2472,8 @@ function animate() {
     lm.label.material.opacity = THREE.MathUtils.clamp(1.6 - d / 55, 0, 1);
   }
 
-  // compass → next delivery
-  const quest = currentQuest();
+  // compass → next stop on the route
+  const quest = currentStop();
   if (quest && dir.angleTo(quest.dir) > NEAR_ARC) {
     compass.visible = true;
     _tan.subVectors(quest.dir, dir.clone().multiplyScalar(dir.dot(quest.dir))).normalize();
@@ -1774,6 +2496,31 @@ function animate() {
       ping(1180, 0.14);
       burstConfetti(s.mesh.position, s.dir.clone());
       updateQuestHUD();
+    }
+  }
+
+  // the moored sailboat bobs at anchor (hidden while you're sailing it)
+  mooredBoat.visible = transport !== 'boat';
+  mooredBoat.position.copy(moorDir).multiplyScalar(SEA_R + 0.1 + Math.sin(t * 1.3) * 0.05);
+
+  // npcs idle — a little breath, a little head-bob
+  for (const p of npcs) {
+    const ph = p.userData.phase;
+    p.userData.head.position.y = 0.9 + Math.sin(t * 2 + ph) * 0.025;
+    p.scale.y = 1.35 * (1 + Math.sin(t * 2.6 + ph) * 0.02);
+  }
+
+  // navigator: distance + eta to the next stop
+  navAcc += dt;
+  if (navAcc > 0.3) {
+    navAcc = 0;
+    const ns = currentStop();
+    if (ns) {
+      const meters = Math.round(dir.angleTo(ns.dir) * R * 12);
+      const eta = Math.max(1, Math.round(meters / (Math.max(TR.max, 1) * 11)));
+      navEta.textContent = `${meters} m · ~${eta}s`;
+    } else {
+      navEta.textContent = 'arrived 🏛️';
     }
   }
 
@@ -1804,6 +2551,7 @@ window.addEventListener('resize', () => {
 applyGfx();
 applyVibe();
 updateQuestHUD();
+updateNav();
 progress(1, 'ready!');
 animate();
 setTimeout(() => loaderEl.classList.add('hide'), 450);

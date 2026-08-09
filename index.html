@@ -6,7 +6,7 @@
 <title>Janelle Ghanem — a tiny planet</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Permanent+Marker&display=swap" rel="stylesheet">
 <style>
   :root {
     --ink: #2d2138;
@@ -51,46 +51,185 @@
     transition: opacity 0.7s ease;
   }
   #title.hide { opacity: 0; }
+  /* the title is PAINTED on: each word is wiped in left-to-right by a brush
+     that flies along, dry-brush edges faked with an SVG turbulence filter */
+  /* the turbulence filter paints ~15% outside each word's box, so the gap has
+     to be wider than it looks or "Tiny" and "Planet" bleed into each other */
+  #title .t-line { display: flex; align-items: baseline; gap: 0.6em; }
+  #title .t-brushword {
+    position: relative; display: inline-block;
+    font-family: "Permanent Marker", "Fredoka", cursive;
+    font-weight: 400; letter-spacing: 0.012em; line-height: 1.02;
+    filter: url(#brushRough);
+    -webkit-text-stroke: 0;
+    opacity: 0;
+    animation: word-appear 0.01s linear forwards;
+  }
+  #title .t-brushword .ink {
+    display: inline-block;
+    clip-path: inset(0 100% -30% 0);
+    animation: paint-on 0.78s cubic-bezier(0.55, 0.1, 0.35, 1) forwards;
+    text-shadow: 0.05em 0.055em 0 rgba(45, 33, 56, 0.55), 0.11em 0.12em 0.06em rgba(45, 33, 56, 0.22);
+  }
+  #title .t-brushword .brush {
+    position: absolute; top: 50%; left: 0;
+    font-size: 0.5em; line-height: 1; pointer-events: none;
+    transform: translate(-46%, -78%) rotate(-32deg);
+    opacity: 0;
+    animation: brush-run 0.78s cubic-bezier(0.55, 0.1, 0.35, 1) forwards;
+    filter: drop-shadow(2px 4px 3px rgba(45, 33, 56, 0.35));
+  }
+  @keyframes word-appear { to { opacity: 1 } }
+  @keyframes paint-on {
+    from { clip-path: inset(0 100% -30% 0) }
+    to   { clip-path: inset(0 -6% -30% 0) }
+  }
+  @keyframes brush-run {
+    0%   { left: 0%;   opacity: 0; transform: translate(-46%, -78%) rotate(-32deg) scale(0.8) }
+    12%  { opacity: 1; transform: translate(-46%, -86%) rotate(-38deg) scale(1.12) }
+    50%  { transform: translate(-46%, -70%) rotate(-26deg) scale(1.06) }
+    88%  { left: 100%; opacity: 1; transform: translate(-46%, -84%) rotate(-36deg) scale(1.02) }
+    100% { left: 108%; opacity: 0; transform: translate(-46%, -60%) rotate(-14deg) scale(0.8) }
+  }
+  /* stagger: the brush paints one word, then hops to the next */
+  #title .w1 { animation-delay: 0.25s }  #title .w1 .ink, #title .w1 .brush { animation-delay: 0.25s }
+  #title .w2 { animation-delay: 1.00s }  #title .w2 .ink, #title .w2 .brush { animation-delay: 1.00s }
+  #title .w3 { animation-delay: 1.80s }  #title .w3 .ink, #title .w3 .brush { animation-delay: 1.80s }
+
   #title .t-kicker {
-    font-size: clamp(16px, 2.6vw, 22px); font-weight: 700; color: var(--panel);
-    background: var(--ink); padding: 4px 18px; border-radius: 999px;
-    transform: rotate(-2deg); letter-spacing: 0.06em;
-    box-shadow: 3px 4px 0 rgba(45, 33, 56, 0.25);
+    font-size: clamp(26px, 5vw, 54px);
+    color: #ff2e88;
+    transform: rotate(-4deg);
   }
-  #title .t-word {
-    font-size: clamp(52px, 11vw, 116px); font-weight: 700; line-height: 0.98;
-    text-align: center; text-transform: uppercase; letter-spacing: 0.01em;
-    color: #fffaf0;
-    -webkit-text-stroke: 3px var(--ink);
-    text-shadow:
-      4px 4px 0 var(--ink),
-      8px 9px 0 rgba(45, 33, 56, 0.22);
-    transform: rotate(-2deg);
-    animation: t-bob 3.2s ease-in-out infinite;
-  }
-  @keyframes t-bob { 0%, 100% { transform: rotate(-2deg) translateY(0) } 50% { transform: rotate(-2deg) translateY(-8px) } }
-  #title .t-sub {
-    font-size: clamp(13px, 2vw, 16px); font-weight: 600; color: var(--ink);
-    background: rgba(255, 250, 242, 0.85); padding: 5px 16px; border-radius: 999px;
-    border: 2px solid var(--panel-edge); transform: rotate(-1deg);
+  #title .t-big { font-size: clamp(46px, 10.5vw, 112px); }
+  #title .t-tiny  { color: #ffc233; transform: rotate(-2deg); }
+  #title .t-plnt  { color: #33c9ff; transform: rotate(1.5deg); }
+
+  /* paint splats behind the words */
+  #title .t-stack { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  #title .t-stack::before {
+    content: ''; position: absolute; inset: -8% -6%;
+    background:
+      radial-gradient(ellipse 38% 30% at 22% 34%, rgba(255, 46, 136, 0.16), transparent 70%),
+      radial-gradient(ellipse 34% 32% at 78% 62%, rgba(51, 201, 255, 0.16), transparent 70%),
+      radial-gradient(ellipse 30% 26% at 52% 20%, rgba(255, 194, 51, 0.15), transparent 70%);
+    filter: blur(6px); z-index: -1;
+    opacity: 0; animation: word-appear 1.4s ease 0.4s forwards;
   }
   #enter-btn {
     pointer-events: auto; cursor: pointer; margin-top: 22px;
+    opacity: 0;
     font-family: inherit; font-weight: 700; font-size: clamp(20px, 3vw, 26px);
     letter-spacing: 0.08em; color: var(--ink);
     background: #ffd23d; border: 3px solid var(--ink); border-radius: 14px;
     padding: 13px 54px; transform: rotate(-1.5deg);
     box-shadow: 0 6px 0 var(--ink), 0 12px 24px rgba(45, 33, 56, 0.3);
     transition: transform 0.1s ease, box-shadow 0.1s ease;
-    animation: t-pulse 2s ease-in-out infinite;
+    animation: word-appear 0.5s ease 2.75s forwards, t-pulse 2s ease-in-out 3.25s infinite;
   }
   #enter-btn:hover { transform: rotate(-1.5deg) translateY(2px); box-shadow: 0 4px 0 var(--ink), 0 8px 18px rgba(45, 33, 56, 0.3); }
   #enter-btn:active { transform: rotate(-1.5deg) translateY(5px); box-shadow: 0 1px 0 var(--ink); }
   @keyframes t-pulse { 0%, 100% { filter: brightness(1) } 50% { filter: brightness(1.09) } }
-  #title .t-hint { font-size: 12px; font-weight: 600; color: rgba(45, 33, 56, 0.55); margin-top: 6px; }
+  #title .t-hint {
+    font-size: 12px; font-weight: 600; color: rgba(45, 33, 56, 0.55); margin-top: 6px;
+    opacity: 0; animation: word-appear 0.5s ease 3.1s forwards;
+  }
   body.title-mode #hud, body.title-mode #quest, body.title-mode #toggles,
-  body.title-mode #controls-hint, body.title-mode #stick, body.title-mode #card {
+  body.title-mode #controls-hint, body.title-mode #stick, body.title-mode #card,
+  body.title-mode #nav {
     opacity: 0 !important; pointer-events: none !important; transition: opacity 0.4s ease;
+  }
+
+  /* ── the GPS phone (choose your ride) ── */
+  #phone {
+    position: fixed; inset: 0; z-index: 45;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    opacity: 0; pointer-events: none; transition: opacity 0.5s ease;
+  }
+  #phone.show { opacity: 1; pointer-events: auto; }
+  #phone .ph-intro {
+    font-size: clamp(14px, 2.2vw, 17px); font-weight: 700; color: var(--ink);
+    background: rgba(255, 250, 242, 0.9); padding: 7px 20px; border-radius: 999px;
+    border: 2px solid var(--panel-edge); transform: rotate(-1.5deg);
+  }
+  #phone .p-frame {
+    width: min(330px, calc(100vw - 48px));
+    background: #1c1626; border-radius: 34px; padding: 14px 12px 18px;
+    border: 3px solid var(--ink);
+    box-shadow: 0 24px 60px rgba(45, 33, 56, 0.45), 0 6px 0 var(--ink);
+    transform: rotate(-2deg);
+    animation: ph-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes ph-rise { from { transform: rotate(-4deg) translateY(60px); opacity: 0 } to { transform: rotate(-2deg) translateY(0); opacity: 1 } }
+  #phone .p-notch { width: 88px; height: 9px; background: #0d0a14; border-radius: 999px; margin: 0 auto 10px; }
+  #phone .p-app { background: var(--panel); border-radius: 22px; padding: 14px 14px 16px; }
+  #phone .p-head { font-weight: 700; font-size: 15px; color: var(--ink); }
+  #phone .p-dest {
+    margin-top: 9px; padding: 9px 12px; border-radius: 12px;
+    background: #f0eafc; font-size: 13px; color: var(--ink); line-height: 1.35;
+  }
+  #phone .p-dest span { color: var(--ink-dim); font-size: 11.5px; font-weight: 600; }
+  #phone .p-q { margin-top: 11px; font-size: 12px; font-weight: 700; color: var(--ink-dim); letter-spacing: 0.04em; }
+  #phone .p-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 7px; }
+  #phone .p-modes button {
+    font-family: inherit; cursor: pointer; text-align: left;
+    background: #fff; border: 2px solid var(--panel-edge); border-radius: 12px;
+    padding: 8px 10px; font-size: 17px; line-height: 1;
+    transition: transform 0.1s ease, border-color 0.1s ease, background 0.1s ease;
+  }
+  #phone .p-modes button span { display: block; font-size: 12.5px; font-weight: 700; color: var(--ink); margin-top: 3px; }
+  #phone .p-modes button i { display: block; font-style: normal; font-size: 10px; font-weight: 600; color: var(--ink-dim); margin-top: 2px; }
+  #phone .p-modes button:hover { transform: translateY(-1px); }
+  #phone .p-modes button.sel { border-color: var(--accent); background: #fff2ea; }
+  #phone .p-route { margin-top: 9px; display: flex; flex-direction: column; gap: 2px; max-height: 108px; overflow: auto; }
+  #phone .p-stop { font-size: 11.5px; font-weight: 700; color: var(--ink); padding: 2px 4px; }
+  #phone #p-go {
+    width: 100%; margin-top: 11px; cursor: pointer;
+    font-family: inherit; font-weight: 700; font-size: 15px; color: #fff6ec;
+    background: var(--accent); border: none; border-radius: 12px; padding: 11px;
+    box-shadow: 0 3px 0 #d96a40;
+  }
+  #phone #p-go:disabled { opacity: 0.45; cursor: default; }
+
+  /* ── corner navigator (the phone, still guiding you) ── */
+  #nav {
+    position: fixed; right: 18px; bottom: 18px; z-index: 14;
+    width: 190px; padding: 10px 12px 11px;
+    background: #1c1626; border-radius: 18px; border: 2px solid var(--ink);
+    box-shadow: 0 10px 30px rgba(45, 33, 56, 0.35);
+    color: #fffaf2; transform: rotate(1.2deg);
+  }
+  #nav .n-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 700; }
+  #nav #nav-eta { font-size: 11px; color: #b9aed0; }
+  #nav #nav-next { margin-top: 4px; font-size: 13.5px; font-weight: 700; color: #ffd23d; }
+  #nav #nav-dots { margin-top: 5px; font-size: 11px; letter-spacing: 3px; color: #8f7ae8; }
+  #nav #nav-bag { margin-top: 5px; font-size: 11px; color: #b9aed0; }
+  @media (max-width: 640px) { #nav { right: 12px; bottom: 150px; width: 165px; } }
+
+  /* ── NPC dialogue ── */
+  #dlg {
+    position: fixed; left: 50%; bottom: 30px; transform: translate(-50%, 24px); z-index: 25;
+    width: min(460px, calc(100vw - 32px));
+    display: flex; gap: 13px; align-items: flex-start;
+    background: var(--panel); border: 2px solid var(--panel-edge); border-radius: 20px;
+    padding: 16px 18px;
+    box-shadow: 0 18px 50px rgba(70, 50, 110, 0.3);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  #dlg.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  #dlg .d-face {
+    flex: 0 0 auto; width: 54px; height: 54px; border-radius: 50%;
+    background: #f0eafc; border: 2px solid var(--panel-edge);
+    display: flex; align-items: center; justify-content: center; font-size: 28px;
+  }
+  #dlg .d-body { flex: 1; }
+  #dlg b { font-size: 13px; color: var(--accent-2); letter-spacing: 0.03em; }
+  #dlg p { font-size: 14.5px; line-height: 1.5; color: var(--ink); margin-top: 3px; min-height: 44px; }
+  #dlg button {
+    margin-top: 9px; cursor: pointer; font-family: inherit; font-weight: 700; font-size: 13px;
+    color: #fff6ec; background: var(--accent); border: none; border-radius: 10px;
+    padding: 8px 18px; box-shadow: 0 3px 0 #d96a40;
   }
 
   /* ── HUD ── */
@@ -197,23 +336,73 @@
     <p id="loader-msg">warming up the planet…</p>
   </div>
 
+  <!-- dry-brush edges: roughen the glyph outlines with turbulence -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="brushRough" x="-15%" y="-15%" width="130%" height="130%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.75" numOctaves="4" seed="7" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="4.5" xChannelSelector="R" yChannelSelector="G" result="d"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.11" numOctaves="3" seed="3" result="n2"/>
+      <feDisplacementMap in="d" in2="n2" scale="6" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </svg>
+
   <div id="title">
-    <span class="t-kicker">janelle's</span>
-    <div class="t-word">Tiny<br>Planet</div>
-    <span class="t-sub">a portfolio you can drive 🚙</span>
+    <div class="t-stack">
+      <span class="t-brushword t-kicker w1"><span class="ink">Janelle's</span><span class="brush">🖌️</span></span>
+      <div class="t-line">
+        <span class="t-brushword t-big t-tiny w2"><span class="ink">Tiny</span><span class="brush">🖌️</span></span>
+        <span class="t-brushword t-big t-plnt w3"><span class="ink">Planet</span><span class="brush">🖌️</span></span>
+      </div>
+    </div>
     <button id="enter-btn">enter</button>
     <span class="t-hint">or press ⏎</span>
   </div>
 
+  <div id="phone">
+    <span class="ph-intro">🧑‍🎨 you're the art critic — the opening starts soon</span>
+    <div class="p-frame">
+      <div class="p-notch"></div>
+      <div class="p-app">
+        <div class="p-head">🗺️ ArtMaps</div>
+        <div class="p-dest">📍 <b>The Art Museum</b> — opening night<br><span>tonight's main event · doors close at dusk*</span></div>
+        <div class="p-q">HOW ARE YOU GETTING THERE?</div>
+        <div class="p-modes">
+          <button data-t="jeep">🚙<span>rental jeep</span><i>the grand tour · 6 stops</i></button>
+          <button data-t="train">🚂<span>train</span><i>the Museum Express · 4 stations</i></button>
+          <button data-t="bike">🚲<span>bike</span><i>coastal path · 3 stops</i></button>
+          <button data-t="walk">🚶<span>walk</span><i>over the summit · 3 stops</i></button>
+        </div>
+        <div class="p-route" id="p-route"></div>
+        <button id="p-go" disabled>start navigation</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="nav">
+    <div class="n-head"><span id="nav-mode">🚙</span><span id="nav-eta">—</span></div>
+    <div id="nav-next">—</div>
+    <div id="nav-dots"></div>
+    <div id="nav-bag"></div>
+  </div>
+
+  <div id="dlg">
+    <div class="d-face" id="dlg-face">📚</div>
+    <div class="d-body">
+      <b id="dlg-name">—</b>
+      <p id="dlg-text"></p>
+      <button id="dlg-ok">got it! →</button>
+    </div>
+  </div>
+
   <div id="hud">
     <h1>janelle's tiny planet</h1>
-    <p>every building is a project — fly over and take a look</p>
+    <p>every building is a project — drive the route, meet the locals</p>
   </div>
 
   <div id="quest">
     <span class="q-icon">📦</span>
-    <span id="quest-text">next delivery: The Library</span>
-    <span id="quest-count">0/11</span>
+    <span id="quest-text">🎨 to the museum</span>
+    <span id="quest-count">stop 1/6</span>
     <span id="star-count">⭐ 0/18</span>
   </div>
 
@@ -249,6 +438,6 @@
     }
   }
   </script>
-  <script type="module" src="./planet.js?cb=p10"></script>
+  <script type="module" src="./planet.js?cb=p12"></script>
 </body>
 </html>
