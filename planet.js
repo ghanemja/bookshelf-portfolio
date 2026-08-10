@@ -439,7 +439,7 @@ function surfH(d) {
   }
   // downtown is built on a plateau — a grid can't sit on terraced hillside
   const aC = Math.acos(THREE.MathUtils.clamp(d.dot(DOWNTOWN), -1, 1));
-  const kC = Math.exp(-Math.pow(aC / 0.235, 6));
+  const kC = Math.exp(-Math.pow(aC / 0.52, 6));
   h = h * (1 - kC) + (SEA_H + 0.92) * kC;
   // the strait the bridge spans — carved AFTER the plateau or it gets filled in
   const aS = Math.acos(THREE.MathUtils.clamp(d.dot(STRAIT), -1, 1));
@@ -525,6 +525,7 @@ const planet = (() => {
 })();
 
 // paint (or repaint) the terrain colors for the active vibe
+const CONCRETE = new THREE.Color(0x9c9a95);
 function paintTerrain(T) {
   const g = planet.geometry;
   const p = g.attributes.position;
@@ -546,6 +547,16 @@ function paintTerrain(T) {
     else if (h < 0.45) c.copy(cSand).lerp(cMid, Math.min(1, (h - SEA_H - 0.10) / 0.35));
     else if (h < 1.15) c.copy(cMid).lerp(cHigh, (h - 0.45) / 0.7);
     else c.copy(cHigh).lerp(cSnow, Math.min(1, (h - 1.15) / 0.8));
+    // downtown is PAVED. Grass under the towers is what made the city read as
+    // a forest with buildings in it.
+    v.set(0, 0, 0);
+    for (let k = 0; k < 3; k++) { const q = new THREE.Vector3().fromBufferAttribute(p, f + k); v.add(q); }
+    v.normalize();
+    const aCity = v.angleTo(DOWNTOWN);
+    if (aCity < 0.54 && h > SEA_H + 0.05) {
+      const k2 = THREE.MathUtils.smoothstep(aCity, 0.40, 0.54);   // fades into grass
+      c.lerp(CONCRETE, 1 - k2);
+    }
     const jit = 0.965 + jr() * 0.07;
     for (let k = 0; k < 3; k++) colAttr.setXYZ(f + k, c.r * jit, c.g * jit, c.b * jit);
   }
@@ -1114,6 +1125,7 @@ function bandLandDir(minArc = 0.12) {   // sample near the equatorial street
   return randomLandDir(minArc);
 }
 const cityWindowMats = [];
+const traffic = [];   // cars and pedestrians that actually move
 const lampBulbMat = new THREE.MeshStandardMaterial({
   color: 0xfff2c8, emissive: 0xffd98a, emissiveIntensity: 0.5,
 });
@@ -1436,9 +1448,9 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
   const at = (x, y) => DOWNTOWN.clone().multiplyScalar(R)
     .addScaledVector(cEast, x).addScaledVector(cNorth, y).normalize();
 
-  const BLOCK = 5.4;          // block pitch, centre to centre
-  const ROAD_W = 1.15;        // half-width of the asphalt
-  const N = 3;                // blocks out from centre, each way
+  const BLOCK = 4.0;          // block pitch, centre to centre
+  const ROAD_W = 0.85;        // half-width of the asphalt
+  const N = 2;                // blocks out from centre, each way
 
   // streets: an open ribbon, same construction as the highway
   function street(a, b, halfW, lift, key) {
@@ -1470,7 +1482,7 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
     roadParts.push({ mesh, key });
   }
 
-  const SUB = N + 2;                       // suburbs reach two blocks further
+  const SUB = N + 1;                       // suburbs reach one block further
   const SPAN = BLOCK * (SUB + 0.55);
   for (let i = -SUB; i <= SUB; i++) {
     const o = i * BLOCK;
@@ -1554,7 +1566,7 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
       const fromCentre = ring / SUB;
 
       if (ring <= N * 0.55) {                          // ── core: towers
-        if (rand() < 0.08) { park(cx, cy, 5); continue; }
+        if (rand() < 0.06) { plaza(cx, cy); continue; }   // a square, not a wood
         const per = 1 + Math.floor(rand() * 2);
         for (let k = 0; k < per; k++) {
           const h = (4.6 + rand() * 3.4) * (1.25 - fromCentre * 0.5);
@@ -1563,7 +1575,7 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
             towerMats[(mi++) % towerMats.length], Math.round(rand() * 4) * Math.PI / 2);
         }
       } else if (ring <= N) {                          // ── midrise: shops + flats
-        if (rand() < 0.12) { park(cx, cy, 4); continue; }
+        if (rand() < 0.1) { plaza(cx, cy); continue; }
         const per = 1 + Math.floor(rand() * 2);
         for (let k = 0; k < per; k++) {
           const h = 1.7 + rand() * 1.9;
@@ -1595,6 +1607,24 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
     }
   }
 
+  function plaza(cx, cy) {
+    for (let k = 0; k < 4; k++) {
+      const dd = at(cx + (rand() - 0.5) * 3, cy + (rand() - 0.5) * 3);
+      const bench = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.14, 0.3), WOOD);
+      bench.position.copy(settleOn(dd, 0.4, 0.02));
+      alignToSurface(bench, dd, rand() * Math.PI);
+      deco.add(bench);
+    }
+    for (let k = 0; k < 2; k++) {
+      const dd = at(cx + (rand() - 0.5) * 3.6, cy + (rand() - 0.5) * 3.6);
+      const tr = roundTree();
+      tr.scale.setScalar(0.7);
+      tr.position.copy(settleOn(dd, 0.4, 0.1));
+      alignToSurface(tr, dd, rand() * Math.PI * 2);
+      deco.add(tr);
+    }
+  }
+
   function park(cx, cy, n) {
     for (let k = 0; k < n; k++) {
       const dd = at(cx + (rand() - 0.5) * 3.4, cy + (rand() - 0.5) * 3.4);
@@ -1604,6 +1634,102 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
       alignToSurface(tr, dd, rand() * Math.PI * 2);
       deco.add(tr);
     }
+  }
+
+  // ── kerbs: a raised sidewalk slab down each block frontage. This is what
+  // actually separates "buildings on grass" from "buildings on a street".
+  for (let i = -N; i <= N; i++) {
+    for (const axis of [0, 1]) {
+      for (const side of [-1, 1]) {
+        const o = i * BLOCK + side * (ROAD_W + 0.42);
+        const ext = BLOCK * (N + 0.5);
+        const a = axis ? at(-ext, o) : at(o, -ext);
+        const b = axis ? at(ext, o) : at(o, ext);
+        street(a, b, 0.42, 0.14, 'roadLine');
+      }
+    }
+  }
+  // crosswalk stripes. One InstancedMesh, not ~1000 separate meshes: the naive
+  // version cost more to build than the entire rest of the planet.
+  {
+    const marks = [];
+    const _q = new THREE.Quaternion(), _sc = new THREE.Vector3(1, 1, 1), _mm = new THREE.Matrix4();
+    const _bx = new THREE.Vector3(), _bz = new THREE.Vector3();
+    for (let i = -N; i <= N; i++) {
+      for (let j = -N; j <= N; j++) {
+        if ((i + j) % 2) continue;                      // every other junction
+        for (const axis of [0, 1]) {
+          for (const sgn of [-1, 1]) {
+            for (let k = -1; k <= 1; k++) {
+              const ox = axis ? k * 0.44 : (ROAD_W + 0.3) * sgn;
+              const oy = axis ? (ROAD_W + 0.3) * sgn : k * 0.44;
+              const dd = at(i * BLOCK + ox, j * BLOCK + oy);
+              const pos = settleOn(dd, 0.25, -0.04);
+              // lay the stripe flat, running across the carriageway
+              const tangent = axis
+                ? at(i * BLOCK + ox + 1, j * BLOCK + oy)
+                : at(i * BLOCK + ox, j * BLOCK + oy + 1);
+              _bz.copy(tangent).sub(dd.clone().multiplyScalar(dd.dot(tangent))).normalize();
+              _bx.crossVectors(dd, _bz).normalize();
+              _mm.makeBasis(_bx, dd, _bz);
+              _q.setFromRotationMatrix(_mm);
+              marks.push({ pos, q: _q.clone() });
+            }
+          }
+        }
+      }
+    }
+    const geo = new THREE.BoxGeometry(0.7, 0.05, 0.2);
+    const inst = new THREE.InstancedMesh(geo, M(0xf2ecd8), marks.length);
+    marks.forEach((mk, idx) => {
+      _mm.compose(mk.pos, mk.q, _sc);
+      inst.setMatrixAt(idx, _mm);
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    inst.receiveShadow = true;
+    scene.add(inst);
+  }
+
+  // ── traffic: cars driving the grid, and people on the sidewalks
+  const carBody = [0xff4d6e, 0x4e8eff, 0xffd23d, 0xfffaf2, 0x2dd47b, 0x8f7ae8];
+  function makeCar(hex) {
+    const g = new THREE.Group();
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.26, 1.0), M(hex, { roughness: 0.5 }));
+    b.position.y = 0.26; g.add(b);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.22, 0.46), M(0xcfeef8, { roughness: 0.2 }));
+    cab.position.set(0, 0.48, -0.05); g.add(cab);
+    for (const [wx, wz] of [[-0.26, 0.32], [0.26, 0.32], [-0.26, -0.32], [0.26, -0.32]]) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.08, 6), M(0x2d2138));
+      w.rotation.z = Math.PI / 2; w.position.set(wx, 0.12, wz); g.add(w);
+    }
+    return g;
+  }
+  const LANE = ROAD_W * 0.5;
+  for (let n = 0; n < 22; n++) {
+    const axis = n % 2;
+    const line = (Math.floor(rand() * (2 * N + 1)) - N) * BLOCK;
+    const fwd = rand() > 0.5 ? 1 : -1;
+    const ext = BLOCK * (N + 0.5);
+    const lane = fwd * LANE;                       // keep right
+    const a = axis ? at(-ext * fwd, line + lane) : at(line - lane, -ext * fwd);
+    const b = axis ? at(ext * fwd, line + lane) : at(line - lane, ext * fwd);
+    const car = makeCar(carBody[n % carBody.length]);
+    scene.add(car);
+    traffic.push({ obj: car, a, b, t: rand(), speed: 0.055 + rand() * 0.05, kind: 'car' });
+  }
+  for (let n = 0; n < 16; n++) {                   // pedestrians on the kerb
+    const axis = n % 2;
+    const line = (Math.floor(rand() * (2 * N + 1)) - N) * BLOCK;
+    const side = rand() > 0.5 ? 1 : -1;
+    const off = side * (ROAD_W + 0.42);
+    const ext = BLOCK * (N + 0.4);
+    const dirSign = rand() > 0.5 ? 1 : -1;
+    const a = axis ? at(-ext * dirSign, line + off) : at(line + off, -ext * dirSign);
+    const b = axis ? at(ext * dirSign, line + off) : at(line + off, ext * dirSign);
+    const ped = makePerson(carBody[(n + 3) % carBody.length], n % 3 === 0 ? 0x2d2138 : null);
+    ped.scale.setScalar(1.15);
+    scene.add(ped);
+    traffic.push({ obj: ped, a, b, t: rand(), speed: 0.016 + rand() * 0.01, kind: 'ped', phase: n });
   }
 
   // street furniture at the intersections
@@ -2837,6 +2963,25 @@ function updateWorldAmbient(dt, t) {
       f.mesh.rotateOnAxis(new THREE.Vector3(1, 0, 0), pitch);
     } else {
       f.mesh.visible = false;
+    }
+  }
+
+  // downtown lives: cars run their lanes, people walk the kerb
+  const _tPos = new THREE.Vector3(), _tNext = new THREE.Vector3(), _tRight = new THREE.Vector3();
+  const _tM = new THREE.Matrix4();
+  for (const v of traffic) {
+    v.t += v.speed * dt;
+    if (v.t > 1) v.t -= 1;
+    const d = slerpDir(v.a, v.b, v.t);
+    const dn = slerpDir(v.a, v.b, (v.t + 0.004) % 1);
+    _tPos.copy(d).multiplyScalar(Math.max(radiusAt(d), SEA_R) + (v.kind === 'car' ? 0.08 : 0.16));
+    _tNext.copy(dn).sub(d.clone().multiplyScalar(d.dot(dn))).normalize();
+    _tRight.crossVectors(d, _tNext);
+    _tM.makeBasis(_tRight, d, _tNext);
+    v.obj.position.copy(_tPos);
+    v.obj.quaternion.setFromRotationMatrix(_tM);
+    if (v.kind === 'ped') {                       // a little walking bounce
+      v.obj.position.addScaledVector(d, Math.abs(Math.sin(t * 6 + v.phase)) * 0.05);
     }
   }
 
