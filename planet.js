@@ -67,7 +67,11 @@ const rand = mulberry32(20260705);
 const loaderEl = document.getElementById('loader');
 const loaderBar = document.getElementById('loader-bar');
 const loaderMsg = document.getElementById('loader-msg');
+const _T0 = performance.now();
+const TRACE = new URLSearchParams(location.search).get('debug') === '1';
+const mark = (s) => { if (TRACE) console.log(`[build] ${Math.round(performance.now() - _T0)}ms ${s}`); };
 function progress(p, msg) {
+  mark(msg);
   loaderBar.style.width = `${Math.round(p * 100)}%`;
   if (msg) loaderMsg.textContent = msg;
 }
@@ -481,6 +485,10 @@ function foundation(radius, depth = 2.6, sides = 10) {
   m.position.y = -depth / 2 + 0.12;
   return m;
 }
+
+// solid footprints: {dir, r} where r is an ARC radius in radians
+const solids = [];
+function addSolid(dirVec, worldRadius) { solids.push({ dir: dirVec.clone(), r: worldRadius / R }); }
 
 const UP_Y = new THREE.Vector3(0, 1, 0);
 function alignToSurface(obj, d, yaw = 0) {
@@ -1130,9 +1138,6 @@ function bandLandDir(minArc = 0.12) {   // sample near the equatorial street
 }
 const cityWindowMats = [];
 const traffic = [];   // cars and pedestrians that actually move
-// solid footprints: {dir, r} where r is an ARC radius in radians
-const solids = [];
-function addSolid(dirVec, worldRadius) { solids.push({ dir: dirVec.clone(), r: worldRadius / R }); }
 const lampBulbMat = new THREE.MeshStandardMaterial({
   color: 0xfff2c8, emissive: 0xffd98a, emissiveIntensity: 0.5,
 });
@@ -1446,6 +1451,7 @@ const starItems = [];
 }
 function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...collectedStars])); }
 
+mark('downtown:start');
 // ─── DOWNTOWN: a real street grid, blocks, and towers ───────────────────────
 // Local tangent frame at the plateau: everything below is laid out in metres
 // on that plane and then projected back onto the sphere.
@@ -1754,6 +1760,7 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
   }
 }
 
+mark('bridge:start');
 // ─── the big red bridge, and the working waterfront ─────────────────────────
 {
   const INTL_ORANGE = M(0xd8492a, { roughness: 0.72 });
@@ -1935,6 +1942,7 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
   }
 }
 
+mark('courier:start');
 // ─── the courier: one group, four possible rides. local +Z = forward ─────────
 const courier = new THREE.Group();
 // the Tuscadero jeep — hot pink, doors off, parcel in the back
@@ -2744,6 +2752,7 @@ function updateLaunch(dt) {
 }
 
 
+mark('title3d:start');
 // ─── THE TITLE, PAINTED IN 3D ────────────────────────────────────────────────
 // Letters are not a font: each glyph is a set of polyline strokes in a unit em
 // box, exactly the path a brush would take. That gives real waypoints across
