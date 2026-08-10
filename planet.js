@@ -453,6 +453,14 @@ const STOP_DIRS = {
 const STOP_PEDESTALS = [STOP_DIRS.central, STOP_DIRS.lakeside, STOP_DIRS.farside, STOP_DIRS.museumst, STOP_DIRS.boardwalk];
 // a wide sandy bay on the south coast, for the beach, the dock and the fishing
 const BEACH = ll(-16, -60);
+// district anchors (lat, lon), each on open ground linked to downtown by a radial
+const MALL = ll(9, -48);       // shopping district SE of downtown
+const AIRPORT = ll(38, -30);   // north of downtown, flat, room for a runway
+const FARM_A = ll(46, -12);    // north-east fields
+const FARM_B = ll(-34, -46);   // south-west fields
+const RESORT = ll(-14, -66);   // hotel, just inland of the beach
+const FLATS = [MALL, AIRPORT, FARM_A, FARM_B, RESORT];
+const HILL_A = ll(30, 40), HILL_B = ll(-46, -110);
 // a channel of open water south-west of downtown, spanned by the big bridge
 const STRAIT = DOWNTOWN.clone().multiplyScalar(0.4)
   .addScaledVector(STOP_DIRS.boardwalk, 0.6).normalize();
@@ -467,6 +475,9 @@ function surfH(d) {
     Math.sin(d.y * 7.3 + 0.7) * 0.10;
   const stepH = 0.55;                                    // terraced cliffs
   h = h - (h - Math.round(h / stepH) * stepH) * 0.55;
+  // rolling hills fill the empty country between districts
+  h += 0.9 * Math.exp(-(2 - 2 * d.dot(HILL_A)) / (0.22 * 0.22));
+  h += 0.7 * Math.exp(-(2 - 2 * d.dot(HILL_B)) / (0.20 * 0.20));
   // chord² = 2-2·dot ≈ angle² for the small radii below, and skips ~20 acos
   const aL2 = 2 - 2 * d.dot(LAKE);
   h -= 1.5 * Math.exp(-aL2 / (0.16 * 0.16));                          // a bay
@@ -486,6 +497,14 @@ function surfH(d) {
   const aC = Math.acos(THREE.MathUtils.clamp(d.dot(DOWNTOWN), -1, 1));
   const kC = Math.exp(-Math.pow(aC / 0.70, 6));
   h = h * (1 - kC) + (SEA_H + 0.92) * kC;
+  // level ground under each outlying district so nothing sits on a slope
+  for (let i = 0; i < FLATS.length; i++) {
+    const a2 = 2 - 2 * d.dot(FLATS[i]);
+    const wide = FLATS[i] === AIRPORT ? 0.16 : 0.11;
+    if (a2 > wide * wide * 6) continue;
+    const kF = Math.exp(-a2 / (wide * wide));
+    h = h * (1 - kF) + (SEA_H + (FLATS[i] === RESORT ? 0.30 : 0.62)) * kF;
+  }
   // the strait the bridge spans — carved AFTER the plateau or it gets filled in
   const aS2 = 2 - 2 * d.dot(STRAIT);
   h -= 2.6 * Math.exp(-aS2 / (0.085 * 0.085));
@@ -536,6 +555,9 @@ const roadParts = [];         // road meshes, retinted by the vibe toggle
 const cityWindowMats = [];    // tower window materials, lit after dark
 const traffic = [];           // cars and pedestrians that actually move
 const bobbers = [];           // moored boats that rock on the swell
+let airportPlane = null, resortHotel = null;   // handles for the arrival intro
+const SKIN = [0xffd9b8, 0xe8b98f, 0xc68a5e, 0x8a5a3a];
+const HAIR = [0x2d2138, 0x5a3a22, 0x8a6a3a, 0x1c1620, 0x704020];
 const npcs = [];              // everyone standing around the world
 function addSolid(dirVec, worldRadius) { solids.push({ dir: dirVec.clone(), r: worldRadius / R }); }
 
@@ -1161,19 +1183,52 @@ function makeVehicleSigns() {
   tinySign('🚀 space tour', rocketHome.clone().addScaledVector(padDir, 3.6));
 }
 
-// ─── little people: NPCs who hand you things for the museum ─────────────────
+// ─── little people: torso, head, arms and legs, with a walk cycle ───────────
 function makePerson(bodyHex, hatHex = null) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.55, 8), M(bodyHex));
-  body.position.y = 0.28; g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), M(0xffd9b8));
-  head.position.y = 0.72; g.add(head);
+  const skin = M(SKIN[Math.floor(rand() * SKIN.length)]);
+  const legM = M(0x2d2138);
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.19, 0.42, 10), M(bodyHex));
+  torso.position.y = 0.60; g.add(torso);
+  const hips = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.17, 0.14, 10), legM);
+  hips.position.y = 0.36; g.add(hips);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), skin);
+  head.position.y = 0.94; g.add(head);
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.155, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.6),
+    M(HAIR[Math.floor(rand() * HAIR.length)]));
+  hair.position.y = 0.96; g.add(hair);
+  // arms and legs, pivoting from the shoulder/hip so they can swing
+  const limbs = [];
+  for (const side of [-1, 1]) {
+    const arm = new THREE.Group(); arm.position.set(side * 0.19, 0.78, 0);
+    const am = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.38, 6), M(bodyHex));
+    am.position.y = -0.19; arm.add(am);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), skin);
+    hand.position.y = -0.38; arm.add(hand);
+    g.add(arm);
+    const leg = new THREE.Group(); leg.position.set(side * 0.09, 0.30, 0);
+    const lm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.34, 6), legM);
+    lm.position.y = -0.17; leg.add(lm);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.17), M(0x1c1620));
+    foot.position.set(0, -0.34, 0.03); leg.add(foot);
+    g.add(leg);
+    limbs.push({ arm, leg, side });
+  }
   if (hatHex !== null) {
-    const beret = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.14, 0.09, 9), M(hatHex));
-    beret.position.set(0.03, 0.86, 0); beret.rotation.z = 0.22; g.add(beret);
+    const beret = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.12, 0.08, 10), M(hatHex));
+    beret.position.set(0.02, 1.06, 0); beret.rotation.z = 0.22; g.add(beret);
   }
   g.userData.head = head;
+  g.userData.limbs = limbs;
+  g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
   return g;
+}
+// swing a person's arms and legs; call each frame with their walk speed 0..1
+function walkPerson(p, t, gait) {
+  const L = p.userData.limbs; if (!L) return;
+  const sw = Math.sin(t * 8) * gait;
+  L[0].leg.rotation.x = sw; L[1].leg.rotation.x = -sw;
+  L[0].arm.rotation.x = -sw * 0.8; L[1].arm.rotation.x = sw * 0.8;
 }
 function bandLandDir(minArc = 0.12) {   // sample near the equatorial street
   for (let i = 0; i < 60; i++) {
@@ -2119,6 +2174,262 @@ mark('bridge:start');
     alignToSurface(shade, d); scene.add(shade);
   }
 }
+
+mark('districts:start');
+// ─── OUTLYING DISTRICTS: airport, resort, mall, farms ───────────────────────
+// A local tangent frame at any anchor, so each district is laid out in metres
+// on a plane and projected back onto the sphere.
+function frameAt(anchor) {
+  const east = new THREE.Vector3(0, 1, 0).cross(anchor).normalize();
+  const north = new THREE.Vector3().crossVectors(anchor, east).normalize();
+  return (x, y) => anchor.clone().multiplyScalar(R).addScaledVector(east, x).addScaledVector(north, y).normalize();
+}
+function districtSign(anchor, label, offX, offY) {
+  const at = frameAt(anchor);
+  const d = at(offX, offY);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 1.2, 6), M(0x2d2138));
+  post.position.copy(settleOn(d, 0.3, 0)); post.translateY(0.6);
+  alignToSurface(post, d); scene.add(post);
+  tinySign(label, posOn(d, 1.6));
+}
+function simpleCar(hex) {
+  const g = new THREE.Group();
+  const b = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.42, 2.1), M(hex, { roughness: 0.5 }));
+  b.position.y = 0.4; g.add(b);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.38, 0.95), M(0xcfeef8, { roughness: 0.2 }));
+  cab.position.set(0, 0.78, -0.1); g.add(cab);
+  for (const [wx, wz] of [[-0.5, 0.66], [0.5, 0.66], [-0.5, -0.66], [0.5, -0.66]]) {
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.16, 7), M(0x2d2138));
+    w.rotation.z = Math.PI / 2; w.position.set(wx, 0.2, wz); g.add(w);
+  }
+  g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+  return g;
+}
+function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd_), M(bodyHex));
+  body.position.y = h / 2; g.add(body);
+  if (roofType === 'gable') {
+    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.001, w * 0.62, 0.5, 4, 1),
+      M(roofHex)); roof.rotation.y = Math.PI / 4; roof.position.y = h + 0.24; roof.scale.z = dd_ / w; g.add(roof);
+  } else {
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(w * 1.05, 0.12, dd_ * 1.05), M(roofHex));
+    roof.position.y = h + 0.06; g.add(roof);
+  }
+  return g;
+}
+
+// ── THE AIRPORT: a runway, a terminal, a parked plane ──
+{
+  const at = frameAt(AIRPORT);
+  // runway: a long dark ribbon with dashed centreline
+  for (const [halfW, lift, col, dash] of [[2.4, 0.05, 0x3a3a42, false], [0.14, 0.09, 0xf2ecd8, true]]) {
+    const N = 30;
+    const pos = [], idx = [];
+    for (let i = 0; i <= N; i++) {
+      const y = -18 + (36 * i / N);
+      const c = at(0, y), cl = at(-1, y), cr = at(1, y);
+      const lat = cr.clone().sub(cl).normalize();
+      const r = Math.max(radiusAt(c), SEA_R) + lift;
+      const p1 = c.clone().multiplyScalar(r).addScaledVector(lat, halfW);
+      const p2 = c.clone().multiplyScalar(r).addScaledVector(lat, -halfW);
+      pos.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+    }
+    for (let i = 0; i < N; i++) {
+      if (dash && i % 3 === 0) continue;
+      const a0 = i * 2, a1 = i * 2 + 1, b0 = (i + 1) * 2, b1 = (i + 1) * 2 + 1;
+      idx.push(a0, b0, a1, a1, b0, b1);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, M(col)); m.receiveShadow = !IS_TOUCH; scene.add(m);
+  }
+  // terminal building
+  {
+    const d = at(4.5, 0);
+    const g = new THREE.Group();
+    const hall = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.6, 7.0), M(0xdfe6ec));
+    hall.position.y = 0.8; g.add(hall);
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(3.05, 1.0, 7.05),
+      new THREE.MeshStandardMaterial({ color: 0x8fb8d8, roughness: 0.2, transparent: true, opacity: 0.55 }));
+    glass.position.y = 0.75; g.add(glass);
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.6, 0.8), M(0xcfd6de));
+    tower.position.set(1.0, 1.3, 3.0); g.add(tower);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 1.0), M(0x2d6ea8));
+    cab.position.set(1.0, 2.9, 3.0); g.add(cab);
+    g.add(foundation(3.4, 2.4, 6));
+    g.position.copy(settleOn(d, 3.4, 0.12));
+    alignToSurface(g, d, yawToFace(d, at(0, 0)));
+    g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    scene.add(g); addSolid(d, 3.4);
+  }
+  // a parked airliner
+  {
+    const d = at(-3.2, 3);
+    const g = new THREE.Group();
+    const fus = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 4.2, 6, 12), M(0xf4f6f8));
+    fus.rotation.z = Math.PI / 2; fus.position.y = 0.9; g.add(fus);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 0.8), M(0xff4d6e));
+    tail.position.set(-2.2, 1.5, 0); g.add(tail);
+    for (const s of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.1, 2.6), M(0xdfe6ec));
+      wing.position.set(0.2, 0.85, s * 1.0); wing.rotation.x = s * 0.1; g.add(wing);
+    }
+    g.position.copy(settleOn(d, 2.0, -0.1));
+    alignToSurface(g, d, yawToFace(d, at(0, 3)));
+    g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    scene.add(g); airportPlane = g;
+  }
+  districtSign(AIRPORT, '✈ Airport', 0, -19);
+}
+
+// ── THE RESORT: a hotel tower, cabanas, palms ──
+{
+  const at = frameAt(RESORT);
+  {
+    const d = at(0, 0);
+    const g = new THREE.Group();
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(2.2, 6.5, 2.2), M(0xf0e6d2));
+    tower.position.y = 3.25;
+    const uv = tower.geometry.attributes.uv;
+    g.add(tower);
+    // balcony bands
+    for (let i = 1; i <= 6; i++) {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.12, 2.35), M(0x33c9ff));
+      band.position.y = i * 0.9; g.add(band);
+    }
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.5, 0.1), M(0xff2e88));
+    sign.position.set(0, 6.7, 1.1); g.add(sign);
+    g.add(foundation(1.7, 3.0, 6));
+    g.position.copy(settleOn(d, 1.6, 0.14));
+    alignToSurface(g, d, rand() * Math.PI * 2);
+    g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    scene.add(g); addSolid(d, 1.7); resortHotel = g;
+  }
+  // cabanas + palms round the pool
+  for (let i = 0; i < 5; i++) {
+    const ang = (i / 5) * Math.PI * 2;
+    const d = at(Math.cos(ang) * 3.4, Math.sin(ang) * 3.4 - 0.5);
+    if (surfH(d) < SEA_H) continue;
+    const cab = boxHouse(1.0, 0.7, 1.0, 0xfffaf2, [0xff4d6e, 0x33c9ff, 0xffd23d][i % 3], 'gable');
+    cab.position.copy(settleOn(d, 0.7, 0.08));
+    alignToSurface(cab, d, yawToFace(d, at(0, 0)));
+    cab.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    scene.add(cab);
+    const palm = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 1.4, 6), M(0x8a6a3a));
+    trunk.position.y = 0.7; palm.add(trunk);
+    for (let f = 0; f < 5; f++) {
+      const frond = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.9, 4), M(0x2dd47b));
+      frond.position.y = 1.4; frond.rotation.set(1.1, f * 1.25, 0); frond.translateY(0.4); palm.add(frond);
+    }
+    const pd = at(Math.cos(ang) * 4.2, Math.sin(ang) * 4.2 - 0.5);
+    palm.position.copy(settleOn(pd, 0.3, 0.05)); alignToSurface(palm, pd);
+    scene.add(palm);
+  }
+  districtSign(RESORT, '🏖 Seaside Resort', 0, 5.2);
+}
+
+// ── THE MALL: a low retail block with a food court and a car park ──
+{
+  const at = frameAt(MALL);
+  const shopHues = [0xff7eb6, 0x4e8eff, 0x2dd47b, 0xffd23d, 0xff8a3d, 0xb265ff];
+  {
+    const d = at(0, 0);
+    const g = new THREE.Group();
+    const box = new THREE.Mesh(new THREE.BoxGeometry(5.0, 1.8, 3.4), M(0xe8dcc8));
+    box.position.y = 0.9; g.add(box);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(1.1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x8fd0e8, roughness: 0.25, transparent: true, opacity: 0.7 }));
+    dome.position.y = 1.8; g.add(dome);
+    // shopfront awnings
+    for (let i = 0; i < 5; i++) {
+      const aw = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.5), M(shopHues[i]));
+      aw.position.set(-1.8 + i * 0.9, 0.9, 1.75); aw.rotation.x = 0.3; g.add(aw);
+    }
+    g.add(foundation(3.0, 2.2, 6));
+    g.position.copy(settleOn(d, 3.0, 0.12));
+    alignToSurface(g, d, yawToFace(d, at(0, -6)));
+    g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    scene.add(g); addSolid(d, 2.8);
+  }
+  // a few parked cars out front
+  for (let i = 0; i < 4; i++) {
+    const d = at(-2.4 + i * 1.6, -3.2);
+    const car = simpleCar(shopHues[i]);
+    car.position.copy(settleOn(d, 0.5, 0.02)); alignToSurface(car, d, rand() * Math.PI * 2); scene.add(car);
+  }
+  districtSign(MALL, '🛍 The Galleria', 0, -4.5);
+}
+
+// ── THE FARMS: fields, a barn, a silo, a farmhouse, fences ──
+function buildFarm(anchor, label) {
+  const at = frameAt(anchor);
+  // field patches as tinted ground quads
+  for (let fx = -1; fx <= 1; fx++) {
+    for (let fy = -1; fy <= 1; fy++) {
+      if (fx === 0 && fy === 0) continue;
+      const d = at(fx * 3.2, fy * 3.2);
+      if (surfH(d) < SEA_H + 0.05) continue;
+      const crop = [0x8fae4a, 0xc9a94a, 0x6f9e4a, 0xb98a3a][(fx + fy + 2) % 4];
+      const field = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.1, 2.8), M(crop));
+      field.position.copy(settleOn(d, 1.4, 0.02));
+      alignToSurface(field, d, (fx * fy) * 0.4);
+      scene.add(field);
+    }
+  }
+  // barn
+  {
+    const d = at(0, 0);
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.5, 3.0), M(0xa83a2a));
+    body.position.y = 0.75; g.add(body);
+    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.001, 1.7, 1.0, 4, 1, false, Math.PI / 4), M(0x7a2a1e));
+    roof.scale.set(1, 1, 1.36); roof.position.y = 2.0; g.add(roof);
+    const doors = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.1), M(0xf0e6d2));
+    doors.position.set(0, 0.5, 1.52); g.add(doors);
+    g.add(foundation(1.8, 2.0, 6));
+    g.position.copy(settleOn(d, 1.8, 0.1));
+    alignToSurface(g, d, yawToFace(d, at(0, -5)));
+    g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    scene.add(g); addSolid(d, 1.7);
+  }
+  // silo
+  {
+    const d = at(1.8, 0.6);
+    const g = new THREE.Group();
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 2.4, 12), M(0xcfd6de));
+    drum.position.y = 1.2; g.add(drum);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), M(0x9aa0a8));
+    cap.position.y = 2.4; g.add(cap);
+    g.position.copy(settleOn(d, 0.6, 0.1)); alignToSurface(g, d);
+    g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    scene.add(g); addSolid(d, 0.6);
+  }
+  // farmhouse
+  {
+    const d = at(-2.4, 0.4);
+    const g = boxHouse(1.6, 1.2, 1.4, 0xf0e6d2, 0x8a5a3a, 'gable');
+    g.add(foundation(1.1, 1.8, 6));
+    g.position.copy(settleOn(d, 1.1, 0.1));
+    alignToSurface(g, d, yawToFace(d, at(0, -5)));
+    g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    scene.add(g); addSolid(d, 1.0);
+  }
+  // a run of fence posts around the plot
+  for (let i = 0; i < 20; i++) {
+    const ang = (i / 20) * Math.PI * 2;
+    const d = at(Math.cos(ang) * 4.6, Math.sin(ang) * 4.6);
+    if (surfH(d) < SEA_H) continue;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.5, 0.07), M(0x8a6a3a));
+    post.position.copy(settleOn(d, 0.2, 0)); post.translateY(0.25);
+    alignToSurface(post, d); scene.add(post);
+  }
+  districtSign(anchor, label, 0, -5.4);
+}
+buildFarm(FARM_A, '🌾 Harvest Fields');
+buildFarm(FARM_B, '🌱 West Meadows');
 
 mark('courier:start');
 // ─── the courier: one group, four possible rides. local +Z = forward ─────────
@@ -3508,8 +3819,9 @@ function updateWorldAmbient(dt, t) {
     _tM.makeBasis(_tRight, d, _tNext);
     v.obj.position.copy(_tPos);
     v.obj.quaternion.setFromRotationMatrix(_tM);
-    if (v.kind === 'ped') {                       // a little walking bounce
+    if (v.kind === 'ped') {                       // walk cycle + a little bounce
       v.obj.position.addScaledVector(d, Math.abs(Math.sin(t * 6 + v.phase)) * 0.05);
+      walkPerson(v.obj, t + v.phase, 0.5 * block);
     }
   }
 
@@ -3758,7 +4070,7 @@ function animate() {
   // npcs idle — a little breath, a little head-bob
   for (const p of npcs) {
     const ph = p.userData.phase;
-    p.userData.head.position.y = 0.72 + Math.sin(t * 2 + ph) * 0.025;
+    p.userData.head.position.y = 0.94 + Math.sin(t * 2 + ph) * 0.02;
     p.scale.y = 1.35 * (1 + Math.sin(t * 2.6 + ph) * 0.02);
   }
 
