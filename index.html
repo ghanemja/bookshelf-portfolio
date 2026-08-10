@@ -74,10 +74,15 @@
     font-size: 12px; font-weight: 600; color: rgba(45, 33, 56, 0.55); margin-top: 6px;
     opacity: 0; animation: word-appear 0.5s ease 6s forwards;
   }
-  body.title-mode #hud, body.title-mode #quest, body.title-mode #toggles,
+  body.title-mode #hud, body.title-mode #quest,
   body.title-mode #controls-hint, body.title-mode #stick, body.title-mode #card,
   body.title-mode #nav {
     opacity: 0 !important; pointer-events: none !important; transition: opacity 0.4s ease;
+  }
+  /* the art-style and vibe switchers stay reachable from the landing screen —
+     they change what you are looking at right now */
+  body.title-mode #reset-progress, body.title-mode #phone-btn {
+    display: none;
   }
 
   /* ── the phone: texts, then maps. shown at ground level ── */
@@ -450,6 +455,6 @@
     }
   }
   </script>
-  <script type="module" src="./planet.js?cb=p22"></script>
+  <script type="module" src="./planet.js?cb=p23"></script>
 </body>
 </html>

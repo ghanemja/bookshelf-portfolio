@@ -2333,12 +2333,12 @@ scene.add(courier);
 
 // how each ride handles: top speed, pickup, ride height, camera distance
 const TRANSPORT = {
-  jeep: { max: 7.2, accel: 13, hover: 0.02, camH: 2.5, camD: 7.0, emoji: '🚙', label: 'rental jeep', engine: true },
-  bike: { max: 4.8, accel: 9, hover: 0.02, camH: 2.2, camD: 6.0, emoji: '🚲', label: 'bike', engine: false },
-  walk: { max: 2.8, accel: 8, hover: 0.02, camH: 1.9, camD: 4.8, emoji: '🚶', label: 'on foot', engine: false },
-  train: { max: 8.5, accel: 6, hover: 0.10, camH: 3.0, camD: 8.6, emoji: '🚂', label: 'the Museum Express', engine: true, rail: true },
-  rocket: { max: 7.2, accel: 13, hover: 0.02, camH: 2.5, camD: 7.0, emoji: '🚀', label: 'the shuttle (space first)', engine: true },
-  boat: { max: 6.2, accel: 7, hover: -0.14, camH: 2.4, camD: 7.4, emoji: '⛵', label: 'sailboat', engine: false },
+  jeep: { max: 7.2, accel: 13, hover: 0.02, camH: 1.7, camD: 5.2, emoji: '🚙', label: 'rental jeep', engine: true },
+  bike: { max: 4.8, accel: 9, hover: 0.02, camH: 1.4, camD: 4.2, emoji: '🚲', label: 'bike', engine: false },
+  walk: { max: 2.8, accel: 8, hover: 0.02, camH: 1.05, camD: 3.0, emoji: '🚶', label: 'on foot', engine: false },
+  train: { max: 8.5, accel: 6, hover: 0.10, camH: 2.1, camD: 6.4, emoji: '🚂', label: 'the Museum Express', engine: true, rail: true },
+  rocket: { max: 7.2, accel: 13, hover: 0.02, camH: 1.7, camD: 5.2, emoji: '🚀', label: 'the shuttle (space first)', engine: true },
+  boat: { max: 6.2, accel: 7, hover: -0.14, camH: 1.6, camD: 5.4, emoji: '⛵', label: 'sailboat', engine: false },
 };
 let transport = 'jeep';
 let runTransport = 'jeep';   // the mode the run STARTED with (the train ends on foot)
@@ -2963,6 +2963,17 @@ const PAINTS = [
   { hex: 0x33c9ff, blob: new THREE.Vector3(-0.52, -0.42, 0.22) },
 ];
 
+// classic cartoon outline: the same shell, flipped and grown a touch, in black
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: 0x140f1a, side: THREE.BackSide });
+function outline(mesh, grow = 1.07) {
+  const o = new THREE.Mesh(mesh.geometry, OUTLINE_MAT);
+  o.scale.multiplyScalar(grow);
+  o.position.copy(mesh.position);
+  o.rotation.copy(mesh.rotation);
+  o.renderOrder = -1;
+  return o;
+}
+
 // ── the palette: a real kidney silhouette with a thumb hole, not a disc
 const paletteG = new THREE.Group();
 {
@@ -2978,15 +2989,19 @@ const paletteG = new THREE.Group();
   const geo = new THREE.ExtrudeGeometry(sh, { depth: 0.14, bevelEnabled: true, bevelSize: 0.05, bevelThickness: 0.05, bevelSegments: 2, curveSegments: 14 });
   const body = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xd7a879, roughness: 0.7 }));
   paletteG.add(body);
+  paletteG.add(outline(body, 1.045));
   for (const p of PAINTS) {                       // glossy mounds of wet paint
     const blob = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 10),
       new THREE.MeshStandardMaterial({ color: p.hex, roughness: 0.18, metalness: 0.05 }));
     blob.scale.set(1.25, 1.0, 0.42);
     blob.position.copy(p.blob);
     paletteG.add(blob);
+    paletteG.add(outline(blob, 1.16));
   }
-  paletteG.position.set(-7.0, -3.3, 1.8);
-  paletteG.rotation.set(-0.5, 0.5, 0.15);
+  paletteG.position.set(-7.2, -3.1, 2.0);
+  // held out to the side and tipped toward the viewer, thumb hole inboard
+  paletteG.rotation.set(-0.28, 0.62, -0.42);
+  paletteG.scale.setScalar(1.15);
   title3D.add(paletteG);
 }
 
@@ -2996,13 +3011,13 @@ let brushHair;
 {
   const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 2.6, 10),
     new THREE.MeshStandardMaterial({ color: 0xe2a35c, roughness: 0.7 }));
-  handle.position.y = 2.05; brush3D.add(handle);
+  handle.position.y = 2.05; brush3D.add(handle); brush3D.add(outline(handle, 1.09));
   const ferrule = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.14, 0.5, 10),
     new THREE.MeshStandardMaterial({ color: 0xcfd4dc, metalness: 0.5, roughness: 0.3 }));
-  ferrule.position.y = 0.7; brush3D.add(ferrule);
+  ferrule.position.y = 0.7; brush3D.add(ferrule); brush3D.add(outline(ferrule, 1.09));
   brushHair = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.015, 0.8, 10),
     new THREE.MeshStandardMaterial({ color: PAINTS[0].hex, roughness: 0.35 }));
-  brushHair.position.y = 0.3; brush3D.add(brushHair);
+  brushHair.position.y = 0.3; brush3D.add(brushHair); brush3D.add(outline(brushHair, 1.10));
   brush3D.visible = false;
   title3D.add(brush3D);
 }
@@ -3045,7 +3060,7 @@ function buildLine(text, size, y, colorHex, arc) {
   for (const ch of text) w += (GLYPH_W[ch] ?? 0.78) + 0.16;
   let x = -w * size / 2;
   // unlit: flat pigment, no plastic highlight
-  const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+  const mat = new THREE.MeshBasicMaterial({ color: colorHex, side: THREE.DoubleSide });
   for (const ch of text) {
     const adv = (GLYPH_W[ch] ?? 0.78) + 0.16;
     for (const poly of (GLYPHS[ch] || [])) {
@@ -3374,11 +3389,13 @@ function flyCameraTo(target, k, clearance = 1.2) {
   _tgtDir.copy(target).normalize();
   const ang = _camDir.angleTo(_tgtDir);
   const nd = ang > 1e-5 ? slerpDir(_camDir, _tgtDir, Math.min(1, k)) : _tgtDir.clone();
-  let r = THREE.MathUtils.lerp(curR, tgtR, Math.min(1, k));
-  // bulge outward while there is still a long way to travel, so the arc clears
-  // hills and towers rather than skimming them
-  r += Math.sin(Math.min(1, ang / 1.2) * Math.PI * 0.5) * 9;
-  camera.position.copy(nd).multiplyScalar(Math.max(r, Math.max(radiusAt(nd), SEA_R) + clearance));
+  // the bulge belongs to the TARGET, not to each frame: adding it every frame
+  // while only lerping part-way leaves a standing error of bulge/k, which is
+  // why the eye kept climbing instead of settling behind the car
+  const bulge = Math.sin(Math.min(1, ang / 1.2) * Math.PI * 0.5) * 9;
+  const goal = Math.max(tgtR + bulge, Math.max(radiusAt(_tgtDir), SEA_R) + clearance);
+  const r = THREE.MathUtils.lerp(curR, goal, Math.min(1, k));
+  camera.position.copy(nd).multiplyScalar(Math.max(r, Math.max(radiusAt(nd), SEA_R) + clearance * 0.6));
 }
 
 // ─── main loop ───────────────────────────────────────────────────────────────
