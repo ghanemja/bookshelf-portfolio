@@ -425,25 +425,28 @@ function surfH(d) {
     Math.sin(d.y * 7.3 + 0.7) * 0.10;
   const stepH = 0.55;                                    // terraced cliffs
   h = h - (h - Math.round(h / stepH) * stepH) * 0.55;
-  const aL = Math.acos(THREE.MathUtils.clamp(d.dot(LAKE), -1, 1));
-  h -= 1.5 * Math.exp(-(aL * aL) / (0.16 * 0.16));                    // a bay
-  const aM = Math.acos(THREE.MathUtils.clamp(d.dot(MTN), -1, 1));
-  h += 2.7 * Math.exp(-(aM * aM) / (0.15 * 0.15));                    // the mountain
-  for (const lm of LANDMARKS) {                                        // land under buildings
-    const a = Math.acos(THREE.MathUtils.clamp(d.dot(lm.dir), -1, 1));
-    h += (SEA_H + 0.55 - Math.min(h, SEA_H + 0.55)) * Math.exp(-(a * a) / (0.09 * 0.09));
+  // chord² = 2-2·dot ≈ angle² for the small radii below, and skips ~20 acos
+  const aL2 = 2 - 2 * d.dot(LAKE);
+  h -= 1.5 * Math.exp(-aL2 / (0.16 * 0.16));                          // a bay
+  const aM2 = 2 - 2 * d.dot(MTN);
+  h += 2.7 * Math.exp(-aM2 / (0.15 * 0.15));                          // the mountain
+  for (let i = 0; i < LANDMARKS.length; i++) {                         // land under buildings
+    const a2 = 2 - 2 * d.dot(LANDMARKS[i].dir);
+    if (a2 > 0.25) continue;                                           // far away: skip the exp
+    h += (SEA_H + 0.55 - Math.min(h, SEA_H + 0.55)) * Math.exp(-a2 / (0.09 * 0.09));
   }
-  for (const sd of STOP_PEDESTALS) {                                   // land under stations & boardwalk
-    const a = Math.acos(THREE.MathUtils.clamp(d.dot(sd), -1, 1));
-    h += (SEA_H + 0.55 - Math.min(h, SEA_H + 0.55)) * Math.exp(-(a * a) / (0.07 * 0.07));
+  for (let i = 0; i < STOP_PEDESTALS.length; i++) {                    // stations & boardwalk
+    const a2 = 2 - 2 * d.dot(STOP_PEDESTALS[i]);
+    if (a2 > 0.16) continue;
+    h += (SEA_H + 0.55 - Math.min(h, SEA_H + 0.55)) * Math.exp(-a2 / (0.07 * 0.07));
   }
   // downtown is built on a plateau — a grid can't sit on terraced hillside
   const aC = Math.acos(THREE.MathUtils.clamp(d.dot(DOWNTOWN), -1, 1));
   const kC = Math.exp(-Math.pow(aC / 0.52, 6));
   h = h * (1 - kC) + (SEA_H + 0.92) * kC;
   // the strait the bridge spans — carved AFTER the plateau or it gets filled in
-  const aS = Math.acos(THREE.MathUtils.clamp(d.dot(STRAIT), -1, 1));
-  h -= 2.6 * Math.exp(-(aS * aS) / (0.085 * 0.085));
+  const aS2 = 2 - 2 * d.dot(STRAIT);
+  h -= 2.6 * Math.exp(-aS2 / (0.085 * 0.085));
   return h;
 }
 const radiusAt = (d) => R + surfH(d) * H_AMP;
@@ -507,7 +510,7 @@ function randomWaterDir() {
 }
 
 const planet = (() => {
-  let g = new THREE.IcosahedronGeometry(R, 5).toNonIndexed();   // 4× mesh detail
+  let g = new THREE.IcosahedronGeometry(R, 4).toNonIndexed();   // 5,120 faces: plenty at this scale
   const p = g.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) {
@@ -3512,6 +3515,17 @@ applyGfx();
 applyVibe();
 updateQuestHUD();
 updateNav();
+if (new URLSearchParams(location.search).get('debug') === '1') {
+  let meshes = 0, tris = 0;
+  scene.traverse(o => {
+    if (!o.isMesh) return;
+    meshes++;
+    const idx = o.geometry.index;
+    const n = (idx ? idx.count : o.geometry.attributes.position.count) / 3;
+    tris += n * (o.isInstancedMesh ? o.count : 1);
+  });
+  console.log(`[perf] meshes=${meshes} tris=${Math.round(tris)} buildMs=${Math.round(performance.now())}`);
+}
 progress(1, 'ready!');
 animate();
 setTimeout(() => loaderEl.classList.add('hide'), 450);
