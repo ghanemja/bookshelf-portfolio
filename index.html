@@ -51,71 +51,22 @@
     transition: opacity 0.7s ease;
   }
   #title.hide { opacity: 0; }
-  /* the title is PAINTED on: each word is wiped in left-to-right by a brush
-     that flies along, dry-brush edges faked with an SVG turbulence filter */
-  /* the turbulence filter paints ~15% outside each word's box, so the gap has
-     to be wider than it looks or "Tiny" and "Planet" bleed into each other */
-  #title .t-line { display: flex; align-items: baseline; gap: 0.6em; }
-  #title .t-brushword {
-    position: relative; display: inline-block;
-    font-family: "Permanent Marker", "Fredoka", cursive;
-    font-weight: 400; letter-spacing: 0.012em; line-height: 1.02;
-    filter: url(#brushRough);
-    -webkit-text-stroke: 0;
-    opacity: 0;
-    animation: word-appear 0.01s linear forwards;
+  /* THE TITLE IS PAINTED, and you watch it happen. A cartoon brush loads
+     colour off a palette, paints a word along a curve, comes back for the
+     next colour. Choreographed in JS so the bristle tip sits exactly on the
+     paint front (see the title script at the bottom of this file). */
+  #title .t-art { width: min(94vw, 960px); height: auto; overflow: visible; }
+  #title .t-art text { font-family: "Permanent Marker", "Fredoka", cursive; font-weight: 400; }
+  #title .t-art .glyphs { filter: url(#brushRough); }
+  #title .t-art .reveal {
+    fill: none; stroke: #fff; stroke-linecap: round; stroke-linejoin: round;
+    stroke-dasharray: 1 1.02; stroke-dashoffset: 1;
   }
-  #title .t-brushword .ink {
-    display: inline-block;
-    clip-path: inset(0 100% -30% 0);
-    animation: paint-on 0.78s cubic-bezier(0.55, 0.1, 0.35, 1) forwards;
-    text-shadow: 0.05em 0.055em 0 rgba(45, 33, 56, 0.55), 0.11em 0.12em 0.06em rgba(45, 33, 56, 0.22);
-  }
-  #title .t-brushword .brush {
-    position: absolute; top: 50%; left: 0;
-    font-size: 0.5em; line-height: 1; pointer-events: none;
-    transform: translate(-46%, -78%) rotate(-32deg);
-    opacity: 0;
-    animation: brush-run 0.78s cubic-bezier(0.55, 0.1, 0.35, 1) forwards;
-    filter: drop-shadow(2px 4px 3px rgba(45, 33, 56, 0.35));
-  }
+  #title .t-art .ink-outline { stroke: #1b1420; stroke-linejoin: round; stroke-linecap: round; }
+  #title .t-art .splat { opacity: 0; }
+  #title .t-art #brush { opacity: 0; }
   @keyframes word-appear { to { opacity: 1 } }
-  @keyframes paint-on {
-    from { clip-path: inset(0 100% -30% 0) }
-    to   { clip-path: inset(0 -6% -30% 0) }
-  }
-  @keyframes brush-run {
-    0%   { left: 0%;   opacity: 0; transform: translate(-46%, -78%) rotate(-32deg) scale(0.8) }
-    12%  { opacity: 1; transform: translate(-46%, -86%) rotate(-38deg) scale(1.12) }
-    50%  { transform: translate(-46%, -70%) rotate(-26deg) scale(1.06) }
-    88%  { left: 100%; opacity: 1; transform: translate(-46%, -84%) rotate(-36deg) scale(1.02) }
-    100% { left: 108%; opacity: 0; transform: translate(-46%, -60%) rotate(-14deg) scale(0.8) }
-  }
-  /* stagger: the brush paints one word, then hops to the next */
-  #title .w1 { animation-delay: 0.25s }  #title .w1 .ink, #title .w1 .brush { animation-delay: 0.25s }
-  #title .w2 { animation-delay: 1.00s }  #title .w2 .ink, #title .w2 .brush { animation-delay: 1.00s }
-  #title .w3 { animation-delay: 1.80s }  #title .w3 .ink, #title .w3 .brush { animation-delay: 1.80s }
 
-  #title .t-kicker {
-    font-size: clamp(26px, 5vw, 54px);
-    color: #ff2e88;
-    transform: rotate(-4deg);
-  }
-  #title .t-big { font-size: clamp(46px, 10.5vw, 112px); }
-  #title .t-tiny  { color: #ffc233; transform: rotate(-2deg); }
-  #title .t-plnt  { color: #33c9ff; transform: rotate(1.5deg); }
-
-  /* paint splats behind the words */
-  #title .t-stack { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  #title .t-stack::before {
-    content: ''; position: absolute; inset: -8% -6%;
-    background:
-      radial-gradient(ellipse 38% 30% at 22% 34%, rgba(255, 46, 136, 0.16), transparent 70%),
-      radial-gradient(ellipse 34% 32% at 78% 62%, rgba(51, 201, 255, 0.16), transparent 70%),
-      radial-gradient(ellipse 30% 26% at 52% 20%, rgba(255, 194, 51, 0.15), transparent 70%);
-    filter: blur(6px); z-index: -1;
-    opacity: 0; animation: word-appear 1.4s ease 0.4s forwards;
-  }
   #enter-btn {
     pointer-events: auto; cursor: pointer; margin-top: 22px;
     opacity: 0;
@@ -125,7 +76,7 @@
     padding: 13px 54px; transform: rotate(-1.5deg);
     box-shadow: 0 6px 0 var(--ink), 0 12px 24px rgba(45, 33, 56, 0.3);
     transition: transform 0.1s ease, box-shadow 0.1s ease;
-    animation: word-appear 0.5s ease 2.75s forwards, t-pulse 2s ease-in-out 3.25s infinite;
+    animation: t-pulse 2s ease-in-out infinite;
   }
   #enter-btn:hover { transform: rotate(-1.5deg) translateY(2px); box-shadow: 0 4px 0 var(--ink), 0 8px 18px rgba(45, 33, 56, 0.3); }
   #enter-btn:active { transform: rotate(-1.5deg) translateY(5px); box-shadow: 0 1px 0 var(--ink); }
@@ -140,56 +91,90 @@
     opacity: 0 !important; pointer-events: none !important; transition: opacity 0.4s ease;
   }
 
-  /* ── the GPS phone (choose your ride) ── */
+  /* ── the phone: texts, then maps. shown at ground level ── */
   #phone {
     position: fixed; inset: 0; z-index: 45;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    display: flex; align-items: center; justify-content: center;
     opacity: 0; pointer-events: none; transition: opacity 0.5s ease;
   }
+  /* on a wide screen the phone sits to one side so you can see the critic
+     holding it up, rather than the handset covering them */
+  @media (min-width: 820px) {
+    #phone { justify-content: flex-end; padding-right: 9vw; }
+  }
   #phone.show { opacity: 1; pointer-events: auto; }
-  #phone .ph-intro {
-    font-size: clamp(14px, 2.2vw, 17px); font-weight: 700; color: var(--ink);
-    background: rgba(255, 250, 242, 0.9); padding: 7px 20px; border-radius: 999px;
-    border: 2px solid var(--panel-edge); transform: rotate(-1.5deg);
-  }
   #phone .p-frame {
-    width: min(330px, calc(100vw - 48px));
-    background: #1c1626; border-radius: 34px; padding: 14px 12px 18px;
-    border: 3px solid var(--ink);
-    box-shadow: 0 24px 60px rgba(45, 33, 56, 0.45), 0 6px 0 var(--ink);
-    transform: rotate(-2deg);
-    animation: ph-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+    position: relative; width: min(330px, calc(100vw - 40px)); height: min(660px, calc(100vh - 56px));
+    background: #14101c; border-radius: 40px; padding: 13px 11px;
+    border: 3px solid #000;
+    box-shadow: 0 30px 70px rgba(20, 12, 30, 0.55), inset 0 0 0 2px #37304a;
+    animation: ph-rise 0.8s cubic-bezier(0.22, 1, 0.36, 1);
   }
-  @keyframes ph-rise { from { transform: rotate(-4deg) translateY(60px); opacity: 0 } to { transform: rotate(-2deg) translateY(0); opacity: 1 } }
-  #phone .p-notch { width: 88px; height: 9px; background: #0d0a14; border-radius: 999px; margin: 0 auto 10px; }
-  #phone .p-app { background: var(--panel); border-radius: 22px; padding: 14px 14px 16px; }
-  #phone .p-head { font-weight: 700; font-size: 15px; color: var(--ink); }
-  #phone .p-dest {
-    margin-top: 9px; padding: 9px 12px; border-radius: 12px;
-    background: #f0eafc; font-size: 13px; color: var(--ink); line-height: 1.35;
+  @keyframes ph-rise { from { transform: translateY(80px) rotate(3deg); opacity: 0 } to { transform: none; opacity: 1 } }
+  #phone .p-notch { position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+    width: 92px; height: 8px; background: #000; border-radius: 999px; z-index: 3; }
+  #phone .p-screen {
+    position: absolute; inset: 13px 11px; border-radius: 30px; overflow: hidden;
+    background: #fff; display: none; flex-direction: column;
   }
-  #phone .p-dest span { color: var(--ink-dim); font-size: 11.5px; font-weight: 600; }
-  #phone .p-q { margin-top: 11px; font-size: 12px; font-weight: 700; color: var(--ink-dim); letter-spacing: 0.04em; }
-  #phone .p-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 7px; }
-  #phone .p-modes button {
-    font-family: inherit; cursor: pointer; text-align: left;
-    background: #fff; border: 2px solid var(--panel-edge); border-radius: 12px;
-    padding: 8px 10px; font-size: 17px; line-height: 1;
-    transition: transform 0.1s ease, border-color 0.1s ease, background 0.1s ease;
+  #phone .p-screen.on { display: flex; animation: scr-in 0.4s ease; }
+  @keyframes scr-in { from { opacity: 0; transform: translateX(22px) } to { opacity: 1; transform: none } }
+
+  /* messages */
+  .ios-bar { flex: 0 0 auto; padding: 30px 12px 9px; display: flex; align-items: center; gap: 8px;
+    background: #f7f7f9; border-bottom: 1px solid #e3e3e8; font-size: 12.5px; font-weight: 700; color: #111; }
+  .ios-back { color: #0a84ff; font-size: 21px; line-height: 1; }
+  .ios-title { flex: 1; text-align: center; }
+  .ios-thread { flex: 1; padding: 12px 11px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+  .bub { max-width: 84%; padding: 9px 13px; border-radius: 18px; font-size: 13.5px; line-height: 1.4;
+    background: #e9e9eb; color: #111; align-self: flex-start; border-bottom-left-radius: 5px;
+    opacity: 0; transform: translateY(10px); animation: bub-in 0.35s cubic-bezier(0.22,1,0.36,1) forwards; }
+  .bub b { font-weight: 800; }
+  @keyframes bub-in { to { opacity: 1; transform: none } }
+  .b1 { animation-delay: 0.35s } .b2 { animation-delay: 1.15s } .b3 { animation-delay: 2.0s }
+  .typing { align-self: flex-start; display: flex; gap: 4px; padding: 11px 14px; border-radius: 18px;
+    background: #e9e9eb; opacity: 0; animation: bub-in 0.3s ease 2.7s forwards; }
+  .typing i { width: 7px; height: 7px; border-radius: 50%; background: #9b9ba1; animation: dot 1.2s ease-in-out infinite; }
+  .typing i:nth-child(2) { animation-delay: 0.15s } .typing i:nth-child(3) { animation-delay: 0.3s }
+  @keyframes dot { 0%,60%,100% { opacity: 0.35 } 30% { opacity: 1 } }
+  .ios-reply {
+    flex: 0 0 auto; margin: 10px; padding: 13px; border: none; cursor: pointer;
+    background: #0a84ff; color: #fff; border-radius: 20px; font-family: inherit;
+    font-weight: 700; font-size: 14.5px;
+    opacity: 0; animation: bub-in 0.4s ease 3.3s forwards;
   }
-  #phone .p-modes button span { display: block; font-size: 12.5px; font-weight: 700; color: var(--ink); margin-top: 3px; }
-  #phone .p-modes button i { display: block; font-style: normal; font-size: 10px; font-weight: 600; color: var(--ink-dim); margin-top: 2px; }
-  #phone .p-modes button:hover { transform: translateY(-1px); }
-  #phone .p-modes button.sel { border-color: var(--accent); background: #fff2ea; }
-  #phone .p-route { margin-top: 9px; display: flex; flex-direction: column; gap: 2px; max-height: 108px; overflow: auto; }
-  #phone .p-stop { font-size: 11.5px; font-weight: 700; color: var(--ink); padding: 2px 4px; }
-  #phone #p-go {
-    width: 100%; margin-top: 11px; cursor: pointer;
-    font-family: inherit; font-weight: 700; font-size: 15px; color: #fff6ec;
-    background: var(--accent); border: none; border-radius: 12px; padding: 11px;
-    box-shadow: 0 3px 0 #d96a40;
+  .ios-reply:active { filter: brightness(0.92); }
+
+  /* maps */
+  .gm-search { flex: 0 0 auto; margin: 26px 9px 0; padding: 10px 13px; display: flex; align-items: center; gap: 10px;
+    background: #fff; border-radius: 999px; box-shadow: 0 2px 7px rgba(0,0,0,0.22); font-size: 13.5px; color: #202124; font-weight: 600; }
+  .gm-back { color: #5f6368; font-size: 16px; }
+  .gm-modes { flex: 0 0 auto; display: flex; gap: 5px; padding: 9px 9px 7px; background: #fff; }
+  .gm-modes button {
+    flex: 1; cursor: pointer; font-family: inherit; padding: 6px 2px 5px;
+    background: none; border: none; border-bottom: 3px solid transparent; color: #5f6368;
   }
-  #phone #p-go:disabled { opacity: 0.45; cursor: default; }
+  .gm-modes button b { display: block; font-size: 17px; line-height: 1.1; filter: grayscale(1) opacity(0.75); }
+  .gm-modes button span { display: block; font-size: 10.5px; font-weight: 700; margin-top: 2px; }
+  .gm-modes button.sel { color: #1a73e8; border-bottom-color: #1a73e8; }
+  .gm-modes button.sel b { filter: none; }
+  .gm-map { flex: 1; position: relative; background: #e8eaed; }
+  .gm-map svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #gm-route { stroke-dasharray: 400; stroke-dashoffset: 400; animation: gm-draw 0.9s ease forwards; }
+  @keyframes gm-draw { to { stroke-dashoffset: 0 } }
+  #gm-pin { animation: pin-drop 0.5s cubic-bezier(0.22, 1.6, 0.4, 1) 0.7s backwards; }
+  @keyframes pin-drop { from { transform: translate(196px, 78px); opacity: 0 } }
+  .gm-card { flex: 0 0 auto; padding: 11px 14px 14px; background: #fff; box-shadow: 0 -2px 10px rgba(0,0,0,0.12); }
+  .gm-row { display: flex; align-items: baseline; gap: 8px; }
+  .gm-row b { font-size: 19px; color: #188038; font-weight: 700; }
+  .gm-row span { font-size: 13px; color: #5f6368; font-weight: 600; }
+  .gm-sub { font-size: 11.5px; color: #5f6368; margin-top: 1px; font-weight: 600; }
+  #p-go {
+    width: 100%; margin-top: 10px; cursor: pointer; font-family: inherit;
+    background: #1a73e8; color: #fff; border: none; border-radius: 999px;
+    padding: 12px; font-size: 15px; font-weight: 700; letter-spacing: 0.02em;
+  }
+  #p-go:disabled { background: #c6c8cc; cursor: default; }
 
   /* ── corner navigator (the phone, still guiding you) ── */
   #nav {
@@ -336,44 +321,122 @@
     <p id="loader-msg">warming up the planet…</p>
   </div>
 
-  <!-- dry-brush edges: roughen the glyph outlines with turbulence -->
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-    <filter id="brushRough" x="-15%" y="-15%" width="130%" height="130%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.75" numOctaves="4" seed="7" result="n"/>
-      <feDisplacementMap in="SourceGraphic" in2="n" scale="4.5" xChannelSelector="R" yChannelSelector="G" result="d"/>
-      <feTurbulence type="fractalNoise" baseFrequency="0.11" numOctaves="3" seed="3" result="n2"/>
-      <feDisplacementMap in="d" in2="n2" scale="6" xChannelSelector="R" yChannelSelector="G"/>
-    </filter>
-  </svg>
-
   <div id="title">
-    <div class="t-stack">
-      <span class="t-brushword t-kicker w1"><span class="ink">Janelle's</span><span class="brush">🖌️</span></span>
-      <div class="t-line">
-        <span class="t-brushword t-big t-tiny w2"><span class="ink">Tiny</span><span class="brush">🖌️</span></span>
-        <span class="t-brushword t-big t-plnt w3"><span class="ink">Planet</span><span class="brush">🖌️</span></span>
-      </div>
-    </div>
+    <svg class="t-art" viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg" aria-label="Janelle's Tiny Planet">
+      <defs>
+        <filter id="brushRough" x="-20%" y="-20%" width="140%" height="140%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.72" numOctaves="4" seed="7" result="n"/>
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G" result="d"/>
+          <feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="3" seed="3" result="n2"/>
+          <feDisplacementMap in="d" in2="n2" scale="7" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+        <!-- userSpaceOnUse: the default region is the path's thin geometry bbox,
+             which clips a 330-unit stroke into a sliver and slices the letters -->
+        <filter id="maskRough" filterUnits="userSpaceOnUse" x="-40" y="-60" width="1080" height="540">
+          <feTurbulence type="fractalNoise" baseFrequency="0.055" numOctaves="3" seed="11" result="m"/>
+          <feDisplacementMap in="SourceGraphic" in2="m" scale="9" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+
+        <path id="curve-kick" d="M 268 112 Q 500 56 726 104"/>
+        <path id="curve-main" d="M 138 300 Q 500 182 862 288"/>
+
+        <mask id="paint-kick" maskUnits="userSpaceOnUse" x="-40" y="-60" width="1080" height="540">
+          <path id="mk-kick" class="reveal" d="M 268 112 Q 500 56 726 104" pathLength="1" stroke-width="200" filter="url(#maskRough)"/>
+        </mask>
+        <mask id="paint-main" maskUnits="userSpaceOnUse" x="-40" y="-60" width="1080" height="540">
+          <path id="mk-main" class="reveal" d="M 138 300 Q 500 182 862 288" pathLength="1" stroke-width="330" filter="url(#maskRough)"/>
+        </mask>
+      </defs>
+
+      <g id="splats"></g>
+
+      <g mask="url(#paint-kick)">
+        <text class="glyphs" font-size="54" fill="#ff2e88">
+          <textPath href="#curve-kick" startOffset="50%" text-anchor="middle">Janelle's</textPath>
+        </text>
+      </g>
+      <g mask="url(#paint-main)">
+        <text class="glyphs" font-size="104">
+          <textPath href="#curve-main" startOffset="50%" text-anchor="middle"><tspan fill="#ffc233">Tiny </tspan><tspan fill="#33c9ff">Planet</tspan></textPath>
+        </text>
+      </g>
+
+      <!-- the palette the brush keeps coming back to -->
+      <g id="palette" transform="translate(120 344)">
+        <path class="ink-outline" d="M-62 0 a 62 44 0 1 0 124 0 a 62 44 0 1 0 -124 0 Z M18 6 a 13 10 0 1 0 26 0 a 13 10 0 1 0 -26 0 Z"
+              fill="#e0b483" stroke-width="5" fill-rule="evenodd"/>
+        <ellipse cx="-30" cy="-16" rx="13" ry="10" fill="#ff2e88" class="ink-outline" stroke-width="4"/>
+        <ellipse cx="-2"  cy="-26" rx="13" ry="10" fill="#ffc233" class="ink-outline" stroke-width="4"/>
+        <ellipse cx="-34" cy="12"  rx="13" ry="10" fill="#33c9ff" class="ink-outline" stroke-width="4"/>
+      </g>
+
+      <!-- cartoon brush: wooden handle, ferrule, loaded bristles. black outline -->
+      <g id="brush">
+        <g id="brush-tilt">
+          <rect x="-9" y="-104" width="18" height="70" rx="9" fill="#e2a35c" class="ink-outline" stroke-width="5"/>
+          <rect x="-11" y="-42" width="22" height="20" rx="4" fill="#cfd4dc" class="ink-outline" stroke-width="5"/>
+          <path d="M-10 -24 C -12 -8 -7 0 0 0 C 7 0 12 -8 10 -24 Z" id="brush-hair" fill="#ff2e88" class="ink-outline" stroke-width="5"/>
+          <path d="M-4 -92 l0 44" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity="0.55"/>
+        </g>
+      </g>
+    </svg>
+
     <button id="enter-btn">enter</button>
     <span class="t-hint">or press ⏎</span>
   </div>
 
   <div id="phone">
-    <span class="ph-intro">🧑‍🎨 you're the art critic — the opening starts soon</span>
     <div class="p-frame">
       <div class="p-notch"></div>
-      <div class="p-app">
-        <div class="p-head">🗺️ ArtMaps</div>
-        <div class="p-dest">📍 <b>The Art Museum</b> — opening night<br><span>tonight's main event · doors close at dusk*</span></div>
-        <div class="p-q">HOW ARE YOU GETTING THERE?</div>
-        <div class="p-modes">
-          <button data-t="jeep">🚙<span>rental jeep</span><i>the grand tour · 6 stops</i></button>
-          <button data-t="train">🚂<span>train</span><i>the Museum Express · 4 stations</i></button>
-          <button data-t="bike">🚲<span>bike</span><i>coastal path · 3 stops</i></button>
-          <button data-t="walk">🚶<span>walk</span><i>over the summit · 3 stops</i></button>
+
+      <!-- SCREEN 1: the texts that start the whole night -->
+      <div class="p-screen" id="scr-msg">
+        <div class="ios-bar"><span class="ios-back">‹</span><span class="ios-title">Editor · The Chronicle</span><span class="ios-av">📰</span></div>
+        <div class="ios-thread">
+          <div class="bub in b1">Hi! Reminder — we're expecting your art critiques for <b>both</b> shows tonight.</div>
+          <div class="bub in b2">🏛️ The Downtown Museum (opening night)<br>🛰️ The Space Museum (aboard the station)</div>
+          <div class="bub in b3">Deadline is dawn. Don't be late — you know how the director gets 😬</div>
+          <div class="typing b4"><i></i><i></i><i></i></div>
         </div>
-        <div class="p-route" id="p-route"></div>
-        <button id="p-go" disabled>start navigation</button>
+        <button class="ios-reply" id="msg-reply">ok be there soon 👍</button>
+      </div>
+
+      <!-- SCREEN 2: maps, for real this time -->
+      <div class="p-screen" id="scr-map">
+        <div class="gm-search"><span class="gm-back">←</span><span class="gm-dest">The Downtown Museum</span></div>
+        <div class="gm-modes">
+          <button data-t="jeep"><b>🚗</b><span id="eta-jeep">12 min</span></button>
+          <button data-t="train"><b>🚆</b><span id="eta-train">9 min</span></button>
+          <button data-t="bike"><b>🚲</b><span id="eta-bike">21 min</span></button>
+          <button data-t="walk"><b>🚶</b><span id="eta-walk">46 min</span></button>
+        </div>
+        <div class="gm-map">
+          <svg viewBox="0 0 300 260" preserveAspectRatio="xMidYMid slice">
+            <rect width="300" height="260" fill="#e8eaed"/>
+            <g stroke="#fff" fill="none">
+              <path d="M-10 70 H310" stroke-width="9"/><path d="M-10 168 H310" stroke-width="7"/>
+              <path d="M64 -10 V270" stroke-width="8"/><path d="M196 -10 V270" stroke-width="6"/>
+              <path d="M-10 220 H310" stroke-width="5"/><path d="M132 -10 V270" stroke-width="4"/>
+            </g>
+            <g fill="#d3e8d3">
+              <rect x="200" y="80" width="70" height="70" rx="4"/>
+              <rect x="10" y="180" width="44" height="34" rx="4"/>
+            </g>
+            <rect x="0" y="228" width="300" height="40" fill="#aadaff"/>
+            <path id="gm-route" d="M64 232 L64 168 L132 168 L132 70 L196 70 L196 108" fill="none"
+                  stroke="#1a73e8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="64" cy="232" r="7" fill="#fff" stroke="#1a73e8" stroke-width="4"/>
+            <g id="gm-pin" transform="translate(196 108)">
+              <path d="M0 0 C -11 -16 -15 -20 -15 -28 A 15 15 0 1 1 15 -28 C 15 -20 11 -16 0 0 Z" fill="#ea4335"/>
+              <circle cx="0" cy="-28" r="6" fill="#fff"/>
+            </g>
+          </svg>
+        </div>
+        <div class="gm-card">
+          <div class="gm-row"><b id="gm-time">12 min</b><span id="gm-dist">3.2 km</span></div>
+          <div class="gm-sub" id="gm-via">fastest route now · via the coast road</div>
+          <button id="p-go" disabled>Go</button>
+        </div>
       </div>
     </div>
   </div>
@@ -410,6 +473,7 @@
     <button id="vibe-toggle" title="switch vibes">💖 barbie</button>
     <button id="gfx-toggle" title="switch graphics style">✏️ sketchbook</button>
     <button id="snd-toggle" title="toggle ambient sound">🔊 sound</button>
+    <button id="phone-btn" title="check your phone — change how you're travelling">📱 phone</button>
     <button id="reset-progress" title="restart all deliveries">↺ restart</button>
   </div>
 
@@ -430,6 +494,135 @@
 
   <div id="stick"><div class="knob" id="stick-knob"></div></div>
 
+  <script>
+  /* ── the title performance ────────────────────────────────────────────────
+     One brush, one palette, three colours. Every segment is a timed step; the
+     bristle tip is placed with getPointAtLength so the paint front and the
+     brush can never drift apart. Runs independently of three.js so it plays
+     while the planet is still loading. */
+  (function () {
+    const brush = document.getElementById('brush');
+    const tilt = document.getElementById('brush-tilt');
+    const hair = document.getElementById('brush-hair');
+    const splats = document.getElementById('splats');
+    const kick = document.getElementById('curve-kick');
+    const main = document.getElementById('curve-main');
+    const mkKick = document.getElementById('mk-kick');
+    const mkMain = document.getElementById('mk-main');
+    const enterBtn = document.getElementById('enter-btn');
+    const hint = document.querySelector('#title .t-hint');
+    if (!brush || !kick.getTotalLength) return;
+
+    const LK = kick.getTotalLength(), LM = main.getTotalLength();
+    const PINK = '#ff2e88', YELLOW = '#ffc233', BLUE = '#33c9ff';
+    // where the paint blobs sit on the palette (palette is translated 120,344)
+    const DIP = {
+      [PINK]:   { x: 120 - 30, y: 344 - 16 },
+      [YELLOW]: { x: 120 - 2,  y: 344 - 26 },
+      [BLUE]:   { x: 120 - 34, y: 344 + 12 },
+    };
+    const PARK = { x: 196, y: 300 };
+    const TINY_END = 0.44;            // where "Tiny " stops on the main curve
+
+    const ease = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+    const ptOn = (path, L, u) => path.getPointAtLength(Math.max(0, Math.min(1, u)) * L);
+
+    function place(x, y, angle, squash) {
+      brush.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${angle.toFixed(2)})`);
+      tilt.setAttribute('transform', `scale(1 ${(squash || 1).toFixed(3)})`);
+    }
+    function angleAlong(path, L, u) {
+      const a = ptOn(path, L, u - 0.004), b = ptOn(path, L, u + 0.004);
+      // brush leans into the stroke rather than standing straight up
+      return Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI - 62;
+    }
+    function splat(x, y, color, r) {
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+      g.setAttribute('cx', x); g.setAttribute('cy', y);
+      g.setAttribute('rx', r); g.setAttribute('ry', r * (0.6 + Math.random() * 0.5));
+      g.setAttribute('fill', color);
+      g.setAttribute('opacity', 0.85);
+      g.setAttribute('transform', `rotate(${Math.random() * 360} ${x} ${y}) scale(1)`);
+      g.style.transformOrigin = `${x}px ${y}px`;
+      g.animate([{ transform: 'scale(0)' }, { transform: 'scale(1.25)' }, { transform: 'scale(1)' }],
+        { duration: 420, easing: 'cubic-bezier(.2,1.6,.4,1)', fill: 'both' });
+      splats.appendChild(g);
+    }
+
+    // the score: each step gets a duration and a per-frame update
+    const steps = [];
+    const add = (dur, fn) => steps.push({ dur, fn });
+    let colour = PINK;
+
+    function flyTo(from, to, dur, lift) {
+      add(dur, k => {
+        const e = ease(k);
+        const x = from.x + (to.x - from.x) * e;
+        const y = from.y + (to.y - from.y) * e - Math.sin(Math.PI * e) * (lift || 40);
+        place(x, y, -18 + Math.sin(Math.PI * e) * 14, 1);
+      });
+    }
+    function dip(color, dur) {
+      const d = DIP[color];
+      add(dur, k => {
+        const press = Math.sin(Math.PI * k);
+        place(d.x, d.y + press * 9, -12 + press * 8, 1 - press * 0.16);
+        if (k > 0.5) { hair.setAttribute('fill', color); colour = color; }
+      });
+    }
+    function paint(path, L, mask, from, to, dur, color, splatEvery) {
+      add(dur, (k, live) => {
+        const u = from + (to - from) * k;
+        const p = ptOn(path, L, u);
+        place(p.x, p.y, angleAlong(path, L, u), 1 - Math.sin(Math.PI * k) * 0.05);
+        mask.style.strokeDashoffset = String(1 - u);
+        // only the live step flings paint — finished steps are replayed each
+        // frame purely to hold their reveal, and would otherwise spam splats
+        if (live && Math.random() < (splatEvery || 0.05)) {
+          splat(p.x + (Math.random() - 0.5) * 90, p.y + 26 + Math.random() * 46, color, 2 + Math.random() * 6);
+        }
+      });
+    }
+
+    const kStart = ptOn(kick, LK, 0), kEnd = ptOn(kick, LK, 1);
+    const mStart = ptOn(main, LM, 0), mMid = ptOn(main, LM, TINY_END), mEnd = ptOn(main, LM, 1);
+
+    add(260, k => { brush.style.opacity = k; place(DIP[PINK].x, DIP[PINK].y - 60 + 60 * ease(k), -18, 1); });
+    dip(PINK, 620);
+    flyTo(DIP[PINK], kStart, 700, 60);
+    paint(kick, LK, mkKick, 0, 1, 2100, PINK, 0.045);
+    flyTo(kEnd, DIP[YELLOW], 760, 80);
+    dip(YELLOW, 560);
+    flyTo(DIP[YELLOW], mStart, 700, 50);
+    paint(main, LM, mkMain, 0, TINY_END, 1750, YELLOW, 0.05);
+    flyTo(mMid, DIP[BLUE], 780, 90);
+    dip(BLUE, 560);
+    flyTo(DIP[BLUE], mMid, 720, 60);
+    paint(main, LM, mkMain, TINY_END, 1, 2250, BLUE, 0.05);
+    flyTo(mEnd, PARK, 820, 70);
+    add(320, k => { brush.style.opacity = 1 - k * 0.15; });
+
+    const TOTAL = steps.reduce((a, s) => a + s.dur, 0);
+    let t0 = null;
+    function frame(now) {
+      if (t0 === null) t0 = now;
+      let e = now - t0, i = 0;
+      while (i < steps.length && e > steps[i].dur) { e -= steps[i].dur; i++; }
+      if (i >= steps.length) { steps[steps.length - 1].fn(1, false); return; }
+      for (let j = 0; j < i; j++) steps[j].fn(1, false);   // hold finished reveals
+      steps[i].fn(Math.max(0, Math.min(1, e / steps[i].dur)), true);
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+
+    // the button shows up before the flourish finishes, so nobody has to wait
+    setTimeout(() => {
+      if (enterBtn) enterBtn.style.animation = 'word-appear 0.5s ease forwards, t-pulse 2s ease-in-out 0.5s infinite';
+      if (hint) hint.style.animation = 'word-appear 0.5s ease 0.4s forwards';
+    }, Math.max(0, TOTAL - 2600));
+  })();
+  </script>
+
   <script type="importmap">
   {
     "imports": {
@@ -438,6 +631,6 @@
     }
   }
   </script>
-  <script type="module" src="./planet.js?cb=p12"></script>
+  <script type="module" src="./planet.js?cb=p13"></script>
 </body>
 </html>

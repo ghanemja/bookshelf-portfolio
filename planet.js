@@ -390,7 +390,7 @@ const LANDMARKS = [
   { key: 'ros2', name: 'Robot Lab', tag: 'robotics', style: 'dome', color: 0xff4d6e,
     desc: 'ROS2 + depth cameras + QNX — my robotics tutorials and demos.',
     url: 'https://ghanemja.github.io/ros2_depth_camera_tutorial/', dir: ll(14, -120) },
-  { key: 'artgarden', name: 'The Art Museum', tag: 'tonight’s main event', style: 'garden', color: 0xffd23d,
+  { key: 'artgarden', name: 'The Downtown Museum', tag: 'tonight’s main event', style: 'garden', color: 0xffd23d,
     desc: 'Opening night! A sculpture garden of my real acrylics — 45 paintings hang in the gallery inside.',
     enter: './room.html', dir: ll(26, -66) },
 ];
@@ -1784,8 +1784,12 @@ defStop('farside', { dir: STOP_DIRS.farside, name: 'Far Side Station', npc: { fa
 defStop('museumst', { dir: STOP_DIRS.museumst, name: 'Museum Station', switchTo: 'walk',
   npc: { face: '🚂', name: 'Casey the conductor' },
   line: { all: 'End of the line! The museum’s just up the path — you’ll walk from here. Enjoy the opening, critic. Make it a kind review!' } });
-defStop('artgarden', { dirOf: 'artgarden', npc: { face: '🖼️', name: 'Director Vivi' },
-  line: { all: 'You MADE it! And you brought treasures from all over the planet! The opening is saved — come in, come in, the preview starts NOW!' } });
+defStop('artgarden', { dirOf: 'artgarden', npc: { face: '🖼️', name: 'Director Vivi' }, item: '📝',
+  line: { all: 'You MADE it! And you brought treasures from all over the planet! Critique filed, darling. Now — the Space Museum is expecting you too. The pad at Cape Far Side is holding a seat.' } });
+// second deadline: the Space Museum is the station, and you fly to it
+defStop('cape', { dir: padDir, name: 'Cape Far Side', npc: { face: '👩‍🚀', name: 'Ground crew' },
+  line: { all: 'Shuttle’s fuelled and the Space Museum has your press pass waiting. Strap in, critic — T-minus now.' },
+  launches: true });
 
 // the NPCs stand at their stops whether or not your route goes there
 const npcs = [];
@@ -1808,11 +1812,13 @@ const npcs = [];
   }
 }
 
+// every route files the downtown critique, then heads for the pad and the
+// Space Museum in orbit — two deadlines, one night
 const ROUTES = {
-  jeep: ['library', 'inbox', 'deckgpt', 'sinescape', 'ros2', 'artgarden'],
-  walk: ['library', 'overlook', 'artgarden'],
-  bike: ['library', 'boardwalk', 'artgarden'],
-  train: ['central', 'lakeside', 'farside', 'museumst', 'artgarden'],
+  jeep: ['library', 'inbox', 'deckgpt', 'sinescape', 'ros2', 'artgarden', 'cape'],
+  walk: ['library', 'overlook', 'artgarden', 'cape'],
+  bike: ['library', 'boardwalk', 'artgarden', 'cape'],
+  train: ['central', 'lakeside', 'farside', 'museumst', 'artgarden', 'cape'],
 };
 let route = ROUTES.jeep.map(k => STOPS[k]);
 let routeIdx = 0;
@@ -1872,17 +1878,25 @@ document.getElementById('dlg-ok').addEventListener('click', () => {
   if (stop.item) { bag.push(stop.item); ping(980, 0.12); }
   routeIdx++;
   if (stop.switchTo) setTransport(stop.switchTo);
-  if (routeIdx >= route.length) {
-    burstConfetti(posOn(stop.dir, 5), stop.dir.clone());
-    ping(680, 0.16); setTimeout(() => ping(920, 0.2), 130); setTimeout(() => ping(1240, 0.24), 280);
-    setTimeout(() => openCard({
-      name: 'Opening night! 🎉', tag: 'the main event',
-      desc: `You arrived ${runTransport === 'walk' ? 'on foot' : `by ${TRANSPORT[runTransport].label}`} carrying ${bag.length ? bag.join(' ') : 'nothing but opinions'} — and ${collectedStars.size}/${STAR_COUNT} stars. Step inside: the gallery is real, and so are the paintings.`,
-      enter: './room.html',
-    }), 600);
+  if (stop.launches) {                    // second deadline: fly to the Space Museum
+    finaleAfterLaunch = true;
+    setTimeout(startLaunch, 350);
+  } else if (routeIdx >= route.length) {
+    showFinale(stop.dir);
   }
   updateQuestHUD(); updateNav();
 });
+
+let finaleAfterLaunch = false;
+function showFinale(atDir) {
+  burstConfetti(posOn(atDir, 5), atDir.clone());
+  ping(680, 0.16); setTimeout(() => ping(920, 0.2), 130); setTimeout(() => ping(1240, 0.24), 280);
+  setTimeout(() => openCard({
+    name: 'Both critiques filed 🎉', tag: 'downtown + orbit',
+    desc: `You made the opening ${runTransport === 'walk' ? 'on foot' : `by ${TRANSPORT[runTransport].label}`}, then flew up to the Space Museum — carrying ${bag.length ? bag.join(' ') : 'nothing but opinions'} and ${collectedStars.size}/${STAR_COUNT} stars. Step inside the gallery: the paintings are real.`,
+    enter: './room.html',
+  }), 700);
+}
 
 function arriveAtStop(stop) {
   targetDir = null;                       // cancel any pending click-to-travel
@@ -2176,6 +2190,7 @@ function updateLaunch(dt) {
     rocketG.quaternion.copy(rocketHomeQ);
     introT = 0.3;
     ping(880, 0.18);
+    if (finaleAfterLaunch) { finaleAfterLaunch = false; showFinale(padDir); }
   }
 }
 
@@ -2185,31 +2200,124 @@ document.body.classList.add('title-mode');
 const titleEl = document.getElementById('title');
 const phoneEl = document.getElementById('phone');
 const pGo = document.getElementById('p-go');
-const pRoute = document.getElementById('p-route');
+
 let chosenTransport = null;
 
+// the critic stands on the ground and pulls out their phone: texts first,
+// then maps. the world keeps living behind the screen.
+const scrMsg = document.getElementById('scr-msg');
+const scrMap = document.getElementById('scr-map');
 function enterGame() {
   if (gameState !== 'title') return;
-  gameState = 'gps';
+  gameState = 'msg';
   titleEl.classList.add('hide');
   phoneEl.classList.add('show');
+  scrMsg.classList.add('on');
+  // put the critic on the pavement outside the Library, phone raised
+  setTransport('walk');
+  dir = ll(8, -22);
+  heading = new THREE.Vector3(0, 0, 1);
+  heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
+  speed = 0;
+  applyGfx();                       // ground-level fog, not the orbit fog
   startAudio();
 }
 document.getElementById('enter-btn').addEventListener('click', enterGame);
 window.addEventListener('keydown', e => { if (e.key === 'Enter' && gameState === 'title') enterGame(); });
 
-for (const btn of document.querySelectorAll('#phone .p-modes button')) {
+document.getElementById('msg-reply').addEventListener('click', () => {
+  if (gameState !== 'msg') return;
+  gameState = 'maps';
+  scrMsg.classList.remove('on');
+  scrMap.classList.add('on');
+  ping(980, 0.1);
+});
+
+// per-mode ETA/distance shown on the maps card, derived from the real routes
+const GM_INFO = {
+  jeep:  { eta: '12 min', dist: '3.2 km', via: 'fastest route now · via the coast road' },
+  train: { eta: '9 min',  dist: '4.1 km', via: 'Museum Express · 4 stations' },
+  bike:  { eta: '21 min', dist: '2.8 km', via: 'mostly flat · via the boardwalk' },
+  walk:  { eta: '46 min', dist: '2.1 km', via: 'steep · over the summit' },
+};
+const gmTime = document.getElementById('gm-time');
+const gmDist = document.getElementById('gm-dist');
+const gmVia = document.getElementById('gm-via');
+const gmRoute = document.getElementById('gm-route');
+const GM_PATHS = {
+  jeep:  'M64 232 L64 168 L132 168 L132 70 L196 70 L196 108',
+  train: 'M64 232 L64 70 L196 70 L196 108',
+  bike:  'M64 232 L196 232 L196 168 L132 168 L132 108 L196 108',
+  walk:  'M64 232 L64 220 L132 220 L132 168 L196 168 L196 108',
+};
+for (const btn of document.querySelectorAll('#phone .gm-modes button')) {
   btn.addEventListener('click', () => {
     chosenTransport = btn.dataset.t;
-    document.querySelectorAll('#phone .p-modes button').forEach(b => b.classList.toggle('sel', b === btn));
-    const names = ROUTES[chosenTransport].map(k => STOPS[k].name);
-    pRoute.innerHTML = names.map((n, i) =>
-      `<div class="p-stop">${i === names.length - 1 ? '🏛️' : '📍'} ${n}</div>`).join('');
+    document.querySelectorAll('#phone .gm-modes button').forEach(b => b.classList.toggle('sel', b === btn));
+    const info = GM_INFO[chosenTransport];
+    gmTime.textContent = info.eta; gmDist.textContent = info.dist; gmVia.textContent = info.via;
+    gmRoute.setAttribute('d', GM_PATHS[chosenTransport]);
+    gmRoute.style.animation = 'none'; void gmRoute.getBoundingClientRect();
+    gmRoute.style.animation = '';     // redraw the blue line for the new mode
     pGo.disabled = false;
     ping(880, 0.08);
   });
 }
-pGo.addEventListener('click', () => { if (chosenTransport) beginRun(chosenTransport); });
+pGo.addEventListener('click', () => {
+  if (!chosenTransport) return;
+  if (runStarted) switchRide(chosenTransport); else beginRun(chosenTransport);
+});
+
+// ── the phone stays in your pocket: pull it out mid-run to change your ride ──
+let runStarted = false;
+const gmSearchDest = document.querySelector('#phone .gm-dest');
+document.getElementById('phone-btn').addEventListener('click', () => {
+  if (gameState !== 'play' || dlgOpen) return;
+  gameState = 'maps';
+  chosenTransport = null;
+  pGo.disabled = true;
+  pGo.textContent = 'Switch';
+  const next = currentStop();
+  if (gmSearchDest) gmSearchDest.textContent = next ? next.name : 'The Downtown Museum';
+  // the Express only picks you up at a platform — no hailing it from a field
+  for (const b of document.querySelectorAll('#phone .gm-modes button')) {
+    const railFar = b.dataset.t === 'train' && !TRAIN_STATIONS.some(k => dir.angleTo(STOP_DIRS[k]) < 0.14);
+    b.disabled = railFar;
+    b.style.opacity = railFar ? 0.35 : '';
+    b.classList.remove('sel');
+  }
+  document.body.classList.add('title-mode');
+  phoneEl.classList.add('show');
+  scrMsg.classList.remove('on');
+  scrMap.classList.add('on');
+  ping(760, 0.1);
+});
+
+// swap vehicle without losing where you are or which stops you've made
+function switchRide(t) {
+  setTransport(t);
+  speed = 0;
+  targetDir = null;
+  targetRing.material.opacity = 0;
+  if (TRANSPORT[t].rail) {          // board at the nearest platform
+    let best = TRAIN_STATIONS[0], bestArc = 1e9;
+    TRAIN_STATIONS.forEach((k, i) => {
+      const a = dir.angleTo(STOP_DIRS[k]);
+      if (a < bestArc) { bestArc = a; best = k; }
+    });
+    const bi = TRAIN_STATIONS.indexOf(best);
+    dir = STOP_DIRS[best].clone();
+    trainU = stationU[bi];
+  }
+  heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
+  showHint(t);
+  phoneEl.classList.remove('show');
+  scrMap.classList.remove('on');
+  document.body.classList.remove('title-mode');
+  gameState = 'play';
+  pGo.textContent = 'Go';
+  updateNav();
+}
 
 function beginRun(t) {
   setTransport(t);
@@ -2224,10 +2332,12 @@ function beginRun(t) {
   speed = 0;
   targetDir = null;
   phoneEl.classList.remove('show');
+  scrMap.classList.remove('on');
   document.body.classList.remove('title-mode');
   gameState = 'play';
   introT = 0;
   applyGfx();          // restore driving-distance fog
+  runStarted = true;
   updateQuestHUD(); updateNav();
 }
 
@@ -2245,8 +2355,9 @@ let navAcc = 0;
     const lp = _qs.get('launch');
     if (lp !== null) { startLaunch(); launchT = Math.min(0.99, parseFloat(lp) || 0); }
     if (_qs.get('sail') === '1') boardBoat();
-  } else if (_qs.get('gps') === '1') {
+  } else if (_qs.get('gps')) {
     enterGame();   // jump straight to the phone (testing)
+    if (_qs.get('gps') === 'maps') document.getElementById('msg-reply').click();
   }
 }
 let nearLm = null;
@@ -2341,13 +2452,36 @@ function animate() {
     return;
   }
 
-  // title + GPS phone: slow orbit of the whole planet, world alive behind the UI
-  if (gameState !== 'play') {
+  // title: slow orbit of the whole planet, world alive behind the logo
+  if (gameState === 'title') {
     const a = t * 0.055;
     camera.position.set(Math.sin(a) * 92, 34, Math.cos(a) * 92);
     camera.up.set(0, 1, 0);
     camera.lookAt(0, 0, 0);
     scene.fog.near = 260; scene.fog.far = 520;   // whole planet crisp from space
+    updateWorldAmbient(dt, t);
+    sky.position.copy(camera.position);
+    if (gfxInked) renderInked(); else renderer.render(scene, camera);
+    return;
+  }
+
+  // phone flow: down on the pavement, over the critic's shoulder while they
+  // read their texts and pick a route
+  if (gameState === 'msg' || gameState === 'maps') {
+    const groundR0 = Math.max(radiusAt(dir), SEA_R);
+    courier.position.copy(dir.clone().multiplyScalar(groundR0 + TRANSPORT.walk.hover));
+    _right.crossVectors(dir, heading);
+    _m.makeBasis(_right, dir, heading);
+    courier.quaternion.setFromRotationMatrix(_m);
+    // drift slowly around them so the street stays alive behind the phone
+    const orbit = Math.sin(t * 0.16) * 0.5 + 2.4;
+    const off = heading.clone().multiplyScalar(-Math.cos(orbit) * 4.2)
+      .addScaledVector(_right, Math.sin(orbit) * 4.2);
+    // slide the eye sideways so the critic sits clear of the phone, not behind it
+    off.addScaledVector(_right, -3.1);
+    camera.position.lerp(courier.position.clone().addScaledVector(dir, 2.0).add(off), 0.05);
+    camera.up.lerp(dir, 0.08).normalize();
+    camera.lookAt(courier.position.clone().addScaledVector(dir, 1.0));
     updateWorldAmbient(dt, t);
     sky.position.copy(camera.position);
     if (gfxInked) renderInked(); else renderer.render(scene, camera);
