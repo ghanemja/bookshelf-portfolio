@@ -396,6 +396,8 @@ const LANDMARKS = [
 ];
 const LAKE = ll(-40, 62);
 const MTN = ll(55, -50);
+// the city sits between the Library and the Downtown Museum
+const DOWNTOWN = ll(20, -36);
 
 // extra route stops (train stations, the overlook, the boardwalk) — these are
 // part of the world whether or not your route uses them
@@ -409,6 +411,10 @@ const STOP_DIRS = {
 };
 // stops that get flat land pedestals like landmarks do (not the overlook — it clings to the mountain)
 const STOP_PEDESTALS = [STOP_DIRS.central, STOP_DIRS.lakeside, STOP_DIRS.farside, STOP_DIRS.museumst, STOP_DIRS.boardwalk];
+// a channel of open water south-west of downtown, spanned by the big bridge
+const STRAIT = DOWNTOWN.clone().multiplyScalar(0.4)
+  .addScaledVector(STOP_DIRS.boardwalk, 0.6).normalize();
+
 
 // ─── terrain: continents + ocean + lake bay + mountain + land pedestals ─────
 function surfH(d) {
@@ -431,6 +437,13 @@ function surfH(d) {
     const a = Math.acos(THREE.MathUtils.clamp(d.dot(sd), -1, 1));
     h += (SEA_H + 0.55 - Math.min(h, SEA_H + 0.55)) * Math.exp(-(a * a) / (0.07 * 0.07));
   }
+  // downtown is built on a plateau — a grid can't sit on terraced hillside
+  const aC = Math.acos(THREE.MathUtils.clamp(d.dot(DOWNTOWN), -1, 1));
+  const kC = Math.exp(-Math.pow(aC / 0.235, 6));
+  h = h * (1 - kC) + (SEA_H + 0.92) * kC;
+  // the strait the bridge spans — carved AFTER the plateau or it gets filled in
+  const aS = Math.acos(THREE.MathUtils.clamp(d.dot(STRAIT), -1, 1));
+  h -= 2.6 * Math.exp(-(aS * aS) / (0.085 * 0.085));
   return h;
 }
 const radiusAt = (d) => R + surfH(d) * H_AMP;
@@ -446,11 +459,24 @@ function settleOn(dirVec, halfExtent = 1.2, sink = 0.1) {
   if (axisA.lengthSq() < 1e-6) axisA.set(1, 0, 0);
   const axisB = new THREE.Vector3().crossVectors(dirVec, axisA).normalize();
   const arc = halfExtent / R;
-  for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [0.7, -0.7], [-0.7, 0.7], [-0.7, -0.7]]) {
-    const d2 = dirVec.clone().applyAxisAngle(axisA, a * arc).applyAxisAngle(axisB, b * arc).normalize();
-    r = Math.min(r, radiusAt(d2));
+  // corners reach 1.41x further than the edge midpoints, and a terrace step can
+  // hide between probes, so sample the full square at two radii
+  for (const ring of [1, 1.42]) {
+    for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [0.7, -0.7], [-0.7, 0.7], [-0.7, -0.7]]) {
+      const d2 = dirVec.clone().applyAxisAngle(axisA, a * arc * ring).applyAxisAngle(axisB, b * arc * ring).normalize();
+      r = Math.min(r, radiusAt(d2));
+    }
   }
   return dirVec.clone().multiplyScalar(Math.max(r, SEA_R) - sink);
+}
+
+// a plinth that continues underground: whatever the terrain does beneath a
+// building, you see foundation instead of a gap of sky
+function foundation(radius, depth = 2.6, sides = 10) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.06, depth, sides),
+    new THREE.MeshStandardMaterial({ color: 0xbdb2a2, flatShading: true, roughness: 0.95 }));
+  m.position.y = -depth / 2 + 0.12;
+  return m;
 }
 
 const UP_Y = new THREE.Vector3(0, 1, 0);
@@ -594,6 +620,7 @@ function makeBuilding(lm) {
   const trim = M(0xfff4e0);
   const plat = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.4, 0.5, 10), M(0xd8cbb2));
   plat.position.y = 0.1; g.add(plat);
+  g.add(foundation(2.35));
 
   if (lm.style === 'library') {
     const main = new THREE.Mesh(new THREE.BoxGeometry(3.0, 2.2, 2.2), body);
@@ -891,6 +918,9 @@ function makeStation(dir, name) {
   const g = new THREE.Group();
   const plat = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.34, 1.7), M(0xd8cbb2));
   plat.position.y = 0.17; g.add(plat);
+  const skirt = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.6, 1.7),
+    new THREE.MeshStandardMaterial({ color: 0xbdb2a2, flatShading: true, roughness: 0.95 }));
+  skirt.position.y = -1.18; g.add(skirt);
   for (const s of [-1, 1]) {
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.25, 6), WOOD);
     post.position.set(s * 1.2, 0.95, -0.45); g.add(post);
@@ -1083,6 +1113,7 @@ function bandLandDir(minArc = 0.12) {   // sample near the equatorial street
   }
   return randomLandDir(minArc);
 }
+const cityWindowMats = [];
 const lampBulbMat = new THREE.MeshStandardMaterial({
   color: 0xfff2c8, emissive: 0xffd98a, emissiveIntensity: 0.5,
 });
@@ -1119,6 +1150,7 @@ function cottage() {
   roof.position.y = 1.45 * s; roof.rotation.y = Math.PI / 4; g.add(roof);
   const door = new THREE.Mesh(new THREE.BoxGeometry(0.3 * s, 0.55 * s, 0.06), M(0x6b4a3a));
   door.position.set(0, 0.32 * s, 0.62 * s); g.add(door);
+  g.add(foundation(0.95 * s, 1.8, 6));
   const win = new THREE.Mesh(new THREE.BoxGeometry(0.3 * s, 0.28 * s, 0.05), lampBulbMat);
   win.position.set(0.42 * s, 0.62 * s, 0.62 * s); g.add(win);
   return g;
@@ -1395,6 +1427,379 @@ const starItems = [];
 }
 function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...collectedStars])); }
 
+// ─── DOWNTOWN: a real street grid, blocks, and towers ───────────────────────
+// Local tangent frame at the plateau: everything below is laid out in metres
+// on that plane and then projected back onto the sphere.
+{
+  const cEast = new THREE.Vector3(0, 1, 0).cross(DOWNTOWN).normalize();
+  const cNorth = new THREE.Vector3().crossVectors(DOWNTOWN, cEast).normalize();
+  const at = (x, y) => DOWNTOWN.clone().multiplyScalar(R)
+    .addScaledVector(cEast, x).addScaledVector(cNorth, y).normalize();
+
+  const BLOCK = 5.4;          // block pitch, centre to centre
+  const ROAD_W = 1.15;        // half-width of the asphalt
+  const N = 3;                // blocks out from centre, each way
+
+  // streets: an open ribbon, same construction as the highway
+  function street(a, b, halfW, lift, key) {
+    const pts = [];
+    const STEPS = 18;
+    for (let i = 0; i <= STEPS; i++) pts.push(slerpDir(a, b, i / STEPS));
+    const pos = [], idx = [];
+    const lat = new THREE.Vector3();
+    for (let i = 0; i < pts.length; i++) {
+      const d = pts[i], dn = pts[Math.min(i + 1, pts.length - 1)], dp = pts[Math.max(i - 1, 0)];
+      const tang = dn.clone().sub(dp.clone().multiplyScalar(dp.dot(dn))).normalize();
+      lat.crossVectors(d, tang).normalize();
+      const r = Math.max(radiusAt(d), SEA_R) + lift;
+      const p1 = d.clone().multiplyScalar(r).addScaledVector(lat, halfW);
+      const p2 = d.clone().multiplyScalar(r).addScaledVector(lat, -halfW);
+      pos.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+    }
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a0 = i * 2, a1 = i * 2 + 1, b0 = (i + 1) * 2, b1 = (i + 1) * 2 + 1;
+      idx.push(a0, b0, a1, a1, b0, b1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ roughness: 0.96, flatShading: true }));
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    roadParts.push({ mesh, key });
+  }
+
+  const SUB = N + 2;                       // suburbs reach two blocks further
+  const SPAN = BLOCK * (SUB + 0.55);
+  for (let i = -SUB; i <= SUB; i++) {
+    const o = i * BLOCK;
+    const w = Math.abs(i) <= N ? ROAD_W : ROAD_W * 0.72;   // lanes narrow outward
+    const ext = Math.abs(i) <= N ? SPAN : BLOCK * (SUB + 0.2);
+    if (Math.abs(i) <= N) {                       // kerbs downtown only
+      street(at(o, -ext), at(o, ext), w + 0.3, 0.05, 'roadLine');
+      street(at(-ext, o), at(ext, o), w + 0.3, 0.05, 'roadLine');
+    }
+    street(at(o, -ext), at(o, ext), w, 0.07, 'road');
+    street(at(-ext, o), at(ext, o), w, 0.07, 'road');
+  }
+
+  // windows, baked once into a texture — 40 buildings of window boxes would
+  // be thousands of meshes for no visual gain
+  function windowTexture(lit) {
+    const cv = document.createElement('canvas');
+    cv.width = 64; cv.height = 64;
+    const c = cv.getContext('2d');
+    c.fillStyle = lit ? '#0d0a14' : '#ffffff';
+    c.fillRect(0, 0, 64, 64);
+    for (let y = 6; y < 60; y += 13) {
+      for (let x = 6; x < 60; x += 13) {
+        const on = Math.random() > 0.42;
+        c.fillStyle = lit ? (on ? '#ffe9a8' : '#151020') : '#8fa3b8';
+        c.fillRect(x, y, 8, 8);
+      }
+    }
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  }
+  const winMap = windowTexture(false), winEmis = windowTexture(true);
+  const TOWER_COLORS = [0xd9cdbd, 0xc9b7a6, 0xe0d3c2, 0xb9a894, 0xd2c2b8];
+  const towerMats = TOWER_COLORS.map(hex => new THREE.MeshStandardMaterial({
+    color: hex, map: winMap, emissive: 0xffffff, emissiveMap: winEmis,
+    emissiveIntensity: 0.0, roughness: 0.9, flatShading: false,
+  }));
+  cityWindowMats.push(...towerMats);
+
+  const ROOF = M(0x8d8477);
+  function tower(x, y, h, w, d, mat, rot) {
+    const g = new THREE.Group();
+    const geo = new THREE.BoxGeometry(w, h, d);
+    // one texture tile per storey, so windows stay the same size on every tower
+    const uv = geo.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (w / 2.2), uv.getY(i) * (h / 2.2));
+    uv.needsUpdate = true;
+    const body = new THREE.Mesh(geo, mat);
+    body.position.y = h / 2 - 0.5; g.add(body);   // sunk, so short blocks need no plinth
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(w * 1.08, 0.28, d * 1.08), ROOF);
+    cap.position.y = h + 0.14; g.add(cap);
+    // rooftop clutter, the detail that sells a lived-in city
+    if (h > 3.2 && rand() > 0.45) {
+      const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.5, 8), M(0x9a6b4f));
+      tank.position.set((rand() - 0.5) * w * 0.5, h + 0.5, (rand() - 0.5) * d * 0.5); g.add(tank);
+    }
+    if (h > 3.2 && rand() > 0.5) {
+      const ac = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.42), M(0xa8adb5));
+      ac.position.set((rand() - 0.5) * w * 0.5, h + 0.42, (rand() - 0.5) * d * 0.5); g.add(ac);
+    }
+    if (h > 3.2) g.add(foundation(Math.max(w, d) * 0.6, 3.0, 6));
+    const dd = at(x, y);
+    g.position.copy(settleOn(dd, Math.max(w, d) * 0.6, 0.14));
+    alignToSurface(g, dd, rot);
+    g.traverse(m => { if (m.isMesh && !IS_TOUCH) { m.castShadow = true; m.receiveShadow = true; } });
+    scene.add(g);
+  }
+
+  // Density falls off with distance: glass core -> midrise -> houses with
+  // gardens. Cities read as cities because of the gradient, not the towers.
+  const museumDir = LANDMARKS.find(l => l.key === 'artgarden').dir;
+  let mi = 0;
+  for (let bx = -SUB; bx < SUB; bx++) {
+    for (let by = -SUB; by < SUB; by++) {
+      const cx = bx * BLOCK + BLOCK / 2, cy = by * BLOCK + BLOCK / 2;
+      const ring = Math.max(Math.abs(bx + 0.5), Math.abs(by + 0.5));   // Chebyshev = square rings
+      const dd0 = at(cx, cy);
+      if (dd0.angleTo(museumDir) < 0.075) continue;
+      if (!isLand(dd0, 0.05)) continue;               // don't build into the strait
+      const fromCentre = ring / SUB;
+
+      if (ring <= N * 0.55) {                          // ── core: towers
+        if (rand() < 0.08) { park(cx, cy, 5); continue; }
+        const per = 1 + Math.floor(rand() * 2);
+        for (let k = 0; k < per; k++) {
+          const h = (4.6 + rand() * 3.4) * (1.25 - fromCentre * 0.5);
+          tower(cx + (rand() - 0.5) * (BLOCK - 3.4), cy + (rand() - 0.5) * (BLOCK - 3.4),
+            Math.max(3.4, h), 1.5 + rand() * 1.0, 1.5 + rand() * 1.0,
+            towerMats[(mi++) % towerMats.length], Math.round(rand() * 4) * Math.PI / 2);
+        }
+      } else if (ring <= N) {                          // ── midrise: shops + flats
+        if (rand() < 0.12) { park(cx, cy, 4); continue; }
+        const per = 1 + Math.floor(rand() * 2);
+        for (let k = 0; k < per; k++) {
+          const h = 1.7 + rand() * 1.9;
+          tower(cx + (rand() - 0.5) * (BLOCK - 3.0), cy + (rand() - 0.5) * (BLOCK - 3.0),
+            h, 1.5 + rand() * 0.9, 1.5 + rand() * 0.9,
+            towerMats[(mi++) % towerMats.length], Math.round(rand() * 4) * Math.PI / 2);
+        }
+      } else {                                         // ── suburbs: houses + yards
+        if (rand() < 0.2) { park(cx, cy, 3); continue; }
+        const homes = 1 + Math.floor(rand() * 2);
+        for (let k = 0; k < homes; k++) {
+          const ox = (rand() - 0.5) * (BLOCK - 1.8), oy = (rand() - 0.5) * (BLOCK - 1.8);
+          const dd = at(cx + ox, cy + oy);
+          if (!isLand(dd, 0.05)) continue;
+          const h = cottage();
+          h.position.copy(settleOn(dd, 1.0, 0.12));
+          alignToSurface(h, dd, yawToFace(dd, at(cx + ox * 2.2, cy + oy * 2.2)));
+          h.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+          deco.add(h);
+          if (rand() > 0.5) {                          // a tree in the yard
+            const tr = roundTree();
+            const td = at(cx + ox + (rand() - 0.5) * 2, cy + oy + (rand() - 0.5) * 2);
+            tr.position.copy(settleOn(td, 0.4, 0.1));
+            alignToSurface(tr, td, rand() * Math.PI * 2);
+            deco.add(tr);
+          }
+        }
+      }
+    }
+  }
+
+  function park(cx, cy, n) {
+    for (let k = 0; k < n; k++) {
+      const dd = at(cx + (rand() - 0.5) * 3.4, cy + (rand() - 0.5) * 3.4);
+      if (!isLand(dd, 0.05)) continue;
+      const tr = rand() > 0.5 ? pineTree() : roundTree();
+      tr.position.copy(settleOn(dd, 0.5, 0.1));
+      alignToSurface(tr, dd, rand() * Math.PI * 2);
+      deco.add(tr);
+    }
+  }
+
+  // street furniture at the intersections
+  for (let i = -N; i <= N; i++) {
+    for (let j = -N; j <= N; j++) {
+      if ((i + j) % 3) continue;
+      const dd = at(i * BLOCK + 1.6, j * BLOCK + 1.6);
+      const lamp = streetLamp();
+      lamp.position.copy(settleOn(dd, 0.4, 0.1));
+      alignToSurface(lamp, dd, rand() * Math.PI * 2);
+      deco.add(lamp);
+    }
+  }
+}
+
+// ─── the big red bridge, and the working waterfront ─────────────────────────
+{
+  const INTL_ORANGE = M(0xd8492a, { roughness: 0.72 });
+  const CABLE = M(0x8f2f18, { roughness: 0.6 });
+  const DECK_M = M(0x8d8f96, { roughness: 0.95 });
+  const RAIL_M = M(0xb8452a, { roughness: 0.7 });
+
+  // span the strait: walk the arc from downtown toward the boardwalk and take
+  // the stretch that is actually open water
+  const A = DOWNTOWN, B = STOP_DIRS.boardwalk;
+  let t0 = null, t1 = null;
+  for (let i = 0; i <= 100; i++) {
+    const t = i / 100;
+    const wet = !isLand(slerpDir(A, B, t), 0.02);
+    if (wet && t0 === null) t0 = t;
+    if (wet) t1 = t;
+  }
+  if (t0 !== null && t1 - t0 > 0.02) {
+    const pad = 0.035;                       // land the abutments on dry ground
+    const s0 = Math.max(0, t0 - pad), s1 = Math.min(1, t1 + pad);
+    const DECK_R = SEA_R + 1.9;              // deck rides well clear of the water
+    const N = 30;
+    const pts = [];
+    for (let i = 0; i <= N; i++) pts.push(slerpDir(A, B, s0 + (s1 - s0) * i / N));
+
+    // deck + kerbs, built like the roads so it tints with the vibe
+    function deckRibbon(halfW, lift, mat) {
+      const pos = [], idx = [];
+      const lat = new THREE.Vector3();
+      for (let i = 0; i < pts.length; i++) {
+        const d = pts[i], dn = pts[Math.min(i + 1, N)], dp = pts[Math.max(i - 1, 0)];
+        const tang = dn.clone().sub(dp.clone().multiplyScalar(dp.dot(dn))).normalize();
+        lat.crossVectors(d, tang).normalize();
+        // ends dip down to meet the shore
+        const edge = Math.min(i, N - i) / 6;
+        const r = DECK_R + lift - (1 - Math.min(1, edge)) * 1.25;
+        const p1 = d.clone().multiplyScalar(r).addScaledVector(lat, halfW);
+        const p2 = d.clone().multiplyScalar(r).addScaledVector(lat, -halfW);
+        pos.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+      }
+      for (let i = 0; i < N; i++) {
+        const a0 = i * 2, a1 = i * 2 + 1, b0 = (i + 1) * 2, b1 = (i + 1) * 2 + 1;
+        idx.push(a0, b0, a1, a1, b0, b1);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      const mesh = new THREE.Mesh(g, mat);
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+      return mesh;
+    }
+    deckRibbon(1.55, 0, DECK_M);
+    deckRibbon(1.62, -0.12, INTL_ORANGE);    // the deck's underside beam
+
+    const towerAt = [0.28, 0.72];
+    const tops = [];
+    for (const f of towerAt) {
+      const d = pts[Math.round(f * N)];
+      const dn = pts[Math.min(Math.round(f * N) + 1, N)];
+      const tang = dn.clone().sub(d.clone().multiplyScalar(d.dot(dn))).normalize();
+      const lat = new THREE.Vector3().crossVectors(d, tang).normalize();
+      const base = d.clone().multiplyScalar(SEA_R - 0.6);
+      const H = 9.0;
+      const g = new THREE.Group();
+      for (const sgn of [-1, 1]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.42, H, 0.42), INTL_ORANGE);
+        leg.position.set(sgn * 1.35, H / 2, 0);
+        g.add(leg);
+      }
+      for (const hy of [0.42, 0.66, 0.9]) {                 // crossbeams
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.34, 0.36), INTL_ORANGE);
+        bar.position.set(0, H * hy, 0); g.add(bar);
+      }
+      const _m2 = new THREE.Matrix4().makeBasis(lat, d, tang);
+      g.position.copy(base);
+      g.quaternion.setFromRotationMatrix(_m2);
+      g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+      scene.add(g);
+      tops.push(d.clone().multiplyScalar(SEA_R - 0.6 + H));
+    }
+
+    // main cables: a sag through midspan, plus suspenders down to the deck
+    for (const sgn of [-1, 1]) {
+      const cablePts = [];
+      for (let i = 0; i <= N; i++) {
+        const f = i / N;
+        const d = pts[i];
+        const dn = pts[Math.min(i + 1, N)], dp = pts[Math.max(i - 1, 0)];
+        const tang = dn.clone().sub(dp.clone().multiplyScalar(dp.dot(dn))).normalize();
+        const lat = new THREE.Vector3().crossVectors(d, tang).normalize();
+        let hgt;
+        if (f < towerAt[0]) hgt = THREE.MathUtils.lerp(1.2, 8.4, f / towerAt[0]);
+        else if (f > towerAt[1]) hgt = THREE.MathUtils.lerp(8.4, 1.2, (f - towerAt[1]) / (1 - towerAt[1]));
+        else {
+          const k = (f - towerAt[0]) / (towerAt[1] - towerAt[0]);
+          hgt = 8.4 - Math.sin(k * Math.PI) * 6.2;        // the sag
+        }
+        cablePts.push(d.clone().multiplyScalar(SEA_R - 0.6 + hgt).addScaledVector(lat, sgn * 1.35));
+      }
+      const curve = new THREE.CatmullRomCurve3(cablePts);
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 46, 0.11, 5, false), CABLE);
+      scene.add(tube);
+      for (let i = 3; i < N - 2; i += 2) {                  // suspender ropes
+        const top = cablePts[i];
+        const d = pts[i];
+        const dn = pts[Math.min(i + 1, N)], dp = pts[Math.max(i - 1, 0)];
+        const tang = dn.clone().sub(dp.clone().multiplyScalar(dp.dot(dn))).normalize();
+        const lat = new THREE.Vector3().crossVectors(d, tang).normalize();
+        const bot = d.clone().multiplyScalar(DECK_R).addScaledVector(lat, sgn * 1.35);
+        const len = top.distanceTo(bot);
+        if (len < 0.25) continue;
+        const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, len, 4), CABLE);
+        rope.position.copy(top).lerp(bot, 0.5);
+        rope.quaternion.setFromUnitVectors(UP_Y, top.clone().sub(bot).normalize());
+        scene.add(rope);
+      }
+      for (let i = 0; i < N; i += 2) {                      // deck railing
+        const d = pts[i];
+        const dn = pts[Math.min(i + 1, N)], dp = pts[Math.max(i - 1, 0)];
+        const tang = dn.clone().sub(dp.clone().multiplyScalar(dp.dot(dn))).normalize();
+        const lat = new THREE.Vector3().crossVectors(d, tang).normalize();
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.42, 0.09), RAIL_M);
+        post.position.copy(d.clone().multiplyScalar(DECK_R + 0.2).addScaledVector(lat, sgn * 1.5));
+        alignToSurface(post, d);
+        scene.add(post);
+      }
+    }
+  }
+
+  // ── the working waterfront: a fishing pier off the boardwalk ──
+  {
+    const shore = STOP_DIRS.boardwalk;
+    // head out to sea, perpendicular-ish to the coast
+    let best = null, bestScore = -1;
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 12) {
+      const axis = new THREE.Vector3(0, 1, 0).cross(shore).normalize().applyAxisAngle(shore, a);
+      const probe = shore.clone().applyAxisAngle(axis, 0.055).normalize();
+      const score = SEA_H - surfH(probe);
+      if (score > bestScore) { bestScore = score; best = axis; }
+    }
+    if (bestScore > 0) {
+      const PLANKS = 9;
+      for (let i = 1; i <= PLANKS; i++) {
+        const d = shore.clone().applyAxisAngle(best, 0.011 * i).normalize();
+        const plank = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.12, 0.62), WOOD);
+        plank.position.copy(d.clone().multiplyScalar(SEA_R + 0.42));
+        alignToSurface(plank, d, yawToFace(d, shore));
+        scene.add(plank);
+        for (const sgn of [-1, 1]) {                        // pilings
+          const axis2 = new THREE.Vector3().crossVectors(d, best).normalize();
+          const pd = d.clone().applyAxisAngle(axis2, sgn * 0.008).normalize();
+          const pile = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 1.5, 5), M(0x6b4a2b));
+          pile.position.copy(pd.clone().multiplyScalar(SEA_R - 0.3));
+          alignToSurface(pile, pd);
+          scene.add(pile);
+        }
+        if (i === PLANKS) {                                  // the fisherman
+          const f = makePerson(0x2d6ea8, 0xffd23d);
+          f.scale.setScalar(1.3);
+          f.position.copy(d.clone().multiplyScalar(SEA_R + 0.48));
+          alignToSurface(f, d, yawToFace(d, shore));
+          scene.add(f);
+          const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 1.5, 4), WOOD);
+          rod.position.copy(d.clone().multiplyScalar(SEA_R + 1.35));
+          alignToSurface(rod, d);
+          rod.rotateX(0.9);
+          scene.add(rod);
+        }
+        if (i === 4 || i === 7) {                            // crates + creels
+          const crate = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.36), M(0xc9a06a));
+          crate.position.copy(d.clone().multiplyScalar(SEA_R + 0.68));
+          alignToSurface(crate, d, rand() * Math.PI);
+          scene.add(crate);
+        }
+      }
+    }
+  }
+}
+
 // ─── the courier: one group, four possible rides. local +Z = forward ─────────
 const courier = new THREE.Group();
 // the Tuscadero jeep — hot pink, doors off, parcel in the back
@@ -1611,6 +2016,7 @@ const TRANSPORT = {
   bike: { max: 4.8, accel: 9, hover: 0.12, camH: 2.2, camD: 6.0, emoji: '🚲', label: 'bike', engine: false },
   walk: { max: 2.8, accel: 8, hover: 0.03, camH: 1.9, camD: 4.8, emoji: '🚶', label: 'on foot', engine: false },
   train: { max: 8.5, accel: 6, hover: 0.16, camH: 3.0, camD: 8.6, emoji: '🚂', label: 'the Museum Express', engine: true, rail: true },
+  rocket: { max: 7.2, accel: 13, hover: 0.36, camH: 2.5, camD: 7.0, emoji: '🚀', label: 'the shuttle (space first)', engine: true },
   boat: { max: 6.2, accel: 7, hover: 0.1, camH: 2.4, camD: 7.4, emoji: '⛵', label: 'sailboat', engine: false },
 };
 let transport = 'jeep';
@@ -1819,7 +2225,11 @@ const ROUTES = {
   walk: ['library', 'overlook', 'artgarden', 'cape'],
   bike: ['library', 'boardwalk', 'artgarden', 'cape'],
   train: ['central', 'lakeside', 'farside', 'museumst', 'artgarden', 'cape'],
+  boat: ['boardwalk', 'library', 'artgarden', 'cape'],
+  rocket: ['cape', 'artgarden'],
 };
+// a chosen mode picks a route AND a vehicle — the shuttle run is driven
+const MODE_VEHICLE = { jeep: 'jeep', train: 'train', bike: 'bike', walk: 'walk', boat: 'boat', rocket: 'jeep' };
 let route = ROUTES.jeep.map(k => STOPS[k]);
 let routeIdx = 0;
 let bag = [];
@@ -1878,8 +2288,8 @@ document.getElementById('dlg-ok').addEventListener('click', () => {
   if (stop.item) { bag.push(stop.item); ping(980, 0.12); }
   routeIdx++;
   if (stop.switchTo) setTransport(stop.switchTo);
-  if (stop.launches) {                    // second deadline: fly to the Space Museum
-    finaleAfterLaunch = true;
+  if (stop.launches) {                    // fly up to the Space Museum
+    finaleAfterLaunch = routeIdx >= route.length;   // only the finale if it's last
     setTimeout(startLaunch, 350);
   } else if (routeIdx >= route.length) {
     showFinale(stop.dir);
@@ -2239,6 +2649,8 @@ const GM_INFO = {
   train: { eta: '9 min',  dist: '4.1 km', via: 'Museum Express · 4 stations' },
   bike:  { eta: '21 min', dist: '2.8 km', via: 'mostly flat · via the boardwalk' },
   walk:  { eta: '46 min', dist: '2.1 km', via: 'steep · over the summit' },
+  boat:  { eta: '28 min', dist: '3.6 km', via: 'coastal waters · moor at the boardwalk' },
+  rocket:{ eta: '6 min',  dist: '410 km', via: 'Space Museum first · pad at Cape Far Side' },
 };
 const gmTime = document.getElementById('gm-time');
 const gmDist = document.getElementById('gm-dist');
@@ -2249,6 +2661,8 @@ const GM_PATHS = {
   train: 'M64 232 L64 70 L196 70 L196 108',
   bike:  'M64 232 L196 232 L196 168 L132 168 L132 108 L196 108',
   walk:  'M64 232 L64 220 L132 220 L132 168 L196 168 L196 108',
+  boat:  'M40 248 C 90 268 150 250 196 236 L196 168 L196 108',
+  rocket:'M64 232 C 40 150 150 40 230 66 L214 96 L196 108',
 };
 for (const btn of document.querySelectorAll('#phone .gm-modes button')) {
   btn.addEventListener('click', () => {
@@ -2310,7 +2724,7 @@ function switchRide(t) {
     trainU = stationU[bi];
   }
   heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
-  showHint(t);
+  showHint(MODE_VEHICLE[t] || t);
   phoneEl.classList.remove('show');
   scrMap.classList.remove('on');
   document.body.classList.remove('title-mode');
@@ -2320,12 +2734,14 @@ function switchRide(t) {
 }
 
 function beginRun(t) {
-  setTransport(t);
+  setTransport(MODE_VEHICLE[t] || t);
   runTransport = t;
   route = ROUTES[t].map(k => STOPS[k]);
   routeIdx = 0; bag = []; trainU = 0;
-  showHint(t);
+  showHint(MODE_VEHICLE[t] || t);
   if (t === 'train') dir = STOP_DIRS.central.clone();
+  else if (t === 'boat') dir = moorDir.clone();
+  else if (t === 'rocket') dir = padDir.clone();
   else dir = ll(8, -22);
   heading = new THREE.Vector3(0, 0, 1);
   heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
@@ -2390,6 +2806,9 @@ function updateWorldAmbient(dt, t) {
   scene.fog.color.copy(_fogNight).lerp(_fogDay, dayK);
   skyStars.material.opacity = 0.15 + 0.75 * (1 - dayK);
   lampBulbMat.emissiveIntensity = 0.5 + (1 - dayK) * 1.9;
+  // downtown windows come on after dark
+  const winGlow = (1 - dayK) * 1.15;
+  for (const m of cityWindowMats) m.emissiveIntensity = winGlow;
 
   // animals
   for (const f of birdFlocks) {

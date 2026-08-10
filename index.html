@@ -149,13 +149,13 @@
   .gm-search { flex: 0 0 auto; margin: 26px 9px 0; padding: 10px 13px; display: flex; align-items: center; gap: 10px;
     background: #fff; border-radius: 999px; box-shadow: 0 2px 7px rgba(0,0,0,0.22); font-size: 13.5px; color: #202124; font-weight: 600; }
   .gm-back { color: #5f6368; font-size: 16px; }
-  .gm-modes { flex: 0 0 auto; display: flex; gap: 5px; padding: 9px 9px 7px; background: #fff; }
+  .gm-modes { flex: 0 0 auto; display: flex; gap: 2px; padding: 9px 6px 7px; background: #fff; }
   .gm-modes button {
     flex: 1; cursor: pointer; font-family: inherit; padding: 6px 2px 5px;
     background: none; border: none; border-bottom: 3px solid transparent; color: #5f6368;
   }
-  .gm-modes button b { display: block; font-size: 17px; line-height: 1.1; filter: grayscale(1) opacity(0.75); }
-  .gm-modes button span { display: block; font-size: 10.5px; font-weight: 700; margin-top: 2px; }
+  .gm-modes button b { display: block; font-size: 15px; line-height: 1.1; filter: grayscale(1) opacity(0.75); }
+  .gm-modes button span { display: block; font-size: 9px; font-weight: 700; margin-top: 2px; }
   .gm-modes button.sel { color: #1a73e8; border-bottom-color: #1a73e8; }
   .gm-modes button.sel b { filter: none; }
   .gm-map { flex: 1; position: relative; background: #e8eaed; }
@@ -409,6 +409,8 @@
           <button data-t="train"><b>🚆</b><span id="eta-train">9 min</span></button>
           <button data-t="bike"><b>🚲</b><span id="eta-bike">21 min</span></button>
           <button data-t="walk"><b>🚶</b><span id="eta-walk">46 min</span></button>
+          <button data-t="boat"><b>⛵</b><span id="eta-boat">28 min</span></button>
+          <button data-t="rocket"><b>🚀</b><span id="eta-rocket">6 min</span></button>
         </div>
         <div class="gm-map">
           <svg viewBox="0 0 300 260" preserveAspectRatio="xMidYMid slice">
@@ -525,14 +527,24 @@
     const TINY_END = 0.44;            // where "Tiny " stops on the main curve
 
     const ease = t => t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
-    const ptOn = (path, L, u) => path.getPointAtLength(Math.max(0, Math.min(1, u)) * L);
+    const rawPt = (path, L, u) => path.getPointAtLength(Math.max(0, Math.min(1, u)) * L);
+    // the curve IS the text baseline, so a brush riding it only ever touches
+    // the letters' feet. lift it perpendicular to the middle of the glyph body.
+    function ptOn(path, L, u, lift) {
+      const p = rawPt(path, L, u);
+      if (!lift) return p;
+      const a = rawPt(path, L, u - 0.004), b = rawPt(path, L, u + 0.004);
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const n = Math.hypot(dx, dy) || 1;
+      return { x: p.x + (dy / n) * lift, y: p.y - (dx / n) * lift };
+    }
 
     function place(x, y, angle, squash) {
       brush.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${angle.toFixed(2)})`);
       tilt.setAttribute('transform', `scale(1 ${(squash || 1).toFixed(3)})`);
     }
     function angleAlong(path, L, u) {
-      const a = ptOn(path, L, u - 0.004), b = ptOn(path, L, u + 0.004);
+      const a = rawPt(path, L, u - 0.004), b = rawPt(path, L, u + 0.004);
       // brush leans into the stroke rather than standing straight up
       return Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI - 62;
     }
@@ -570,10 +582,10 @@
         if (k > 0.5) { hair.setAttribute('fill', color); colour = color; }
       });
     }
-    function paint(path, L, mask, from, to, dur, color, splatEvery) {
+    function paint(path, L, mask, from, to, dur, color, splatEvery, lift) {
       add(dur, (k, live) => {
         const u = from + (to - from) * k;
-        const p = ptOn(path, L, u);
+        const p = ptOn(path, L, u, lift);
         place(p.x, p.y, angleAlong(path, L, u), 1 - Math.sin(Math.PI * k) * 0.05);
         mask.style.strokeDashoffset = String(1 - u);
         // only the live step flings paint — finished steps are replayed each
@@ -584,21 +596,23 @@
       });
     }
 
-    const kStart = ptOn(kick, LK, 0), kEnd = ptOn(kick, LK, 1);
-    const mStart = ptOn(main, LM, 0), mMid = ptOn(main, LM, TINY_END), mEnd = ptOn(main, LM, 1);
+    const KICK_LIFT = 20, MAIN_LIFT = 38;   // ~38% of each line's font size
+    const kStart = ptOn(kick, LK, 0, KICK_LIFT), kEnd = ptOn(kick, LK, 1, KICK_LIFT);
+    const mStart = ptOn(main, LM, 0, MAIN_LIFT), mMid = ptOn(main, LM, TINY_END, MAIN_LIFT),
+          mEnd = ptOn(main, LM, 1, MAIN_LIFT);
 
     add(260, k => { brush.style.opacity = k; place(DIP[PINK].x, DIP[PINK].y - 60 + 60 * ease(k), -18, 1); });
     dip(PINK, 620);
     flyTo(DIP[PINK], kStart, 700, 60);
-    paint(kick, LK, mkKick, 0, 1, 2100, PINK, 0.045);
+    paint(kick, LK, mkKick, 0, 1, 2100, PINK, 0.045, KICK_LIFT);
     flyTo(kEnd, DIP[YELLOW], 760, 80);
     dip(YELLOW, 560);
     flyTo(DIP[YELLOW], mStart, 700, 50);
-    paint(main, LM, mkMain, 0, TINY_END, 1750, YELLOW, 0.05);
+    paint(main, LM, mkMain, 0, TINY_END, 1750, YELLOW, 0.05, MAIN_LIFT);
     flyTo(mMid, DIP[BLUE], 780, 90);
     dip(BLUE, 560);
     flyTo(DIP[BLUE], mMid, 720, 60);
-    paint(main, LM, mkMain, TINY_END, 1, 2250, BLUE, 0.05);
+    paint(main, LM, mkMain, TINY_END, 1, 2250, BLUE, 0.05, MAIN_LIFT);
     flyTo(mEnd, PARK, 820, 70);
     add(320, k => { brush.style.opacity = 1 - k * 0.15; });
 
@@ -613,7 +627,12 @@
       steps[i].fn(Math.max(0, Math.min(1, e / steps[i].dur)), true);
       requestAnimationFrame(frame);
     }
-    requestAnimationFrame(frame);
+    const start = () => requestAnimationFrame(frame);
+    if (document.fonts && document.fonts.ready) {
+      // wait for Permanent Marker: if it lands mid-paint the glyphs re-lay out
+      // under the mask and the whole title visibly jumps
+      Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 2500))]).then(start);
+    } else start();
 
     // the button shows up before the flourish finishes, so nobody has to wait
     setTimeout(() => {
@@ -631,6 +650,6 @@
     }
   }
   </script>
-  <script type="module" src="./planet.js?cb=p13"></script>
+  <script type="module" src="./planet.js?cb=p14"></script>
 </body>
 </html>
