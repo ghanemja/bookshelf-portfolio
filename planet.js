@@ -150,6 +150,7 @@ function ensureInk() {
       camNear: { value: camera.near },
       camFar: { value: camera.far },
       time: { value: 0 },
+      wasteland: { value: 0 },
     },
     vertexShader: `
       varying vec2 vUv;
@@ -158,7 +159,7 @@ function ensureInk() {
       varying vec2 vUv;
       uniform sampler2D tColor, tDepth, tNormal, tPaper;
       uniform vec2 res;
-      uniform float camNear, camFar, time;
+      uniform float camNear, camFar, time, wasteland;
 
       float readDepth(vec2 uv) {
         float z = texture2D(tDepth, uv).x;
@@ -172,6 +173,7 @@ function ensureInk() {
       // edge strength at uv with stroke width o (pixels)
       float edgeAt(vec2 uv, float o, float d0ref) {
         vec2 px = 1.0 / res;
+        // wasteland: graphite + ink wash, near monochrome (Epic Mickey's Wasteland)
         float dN = readDepth(uv + vec2(0.0, px.y * o));
         float dS = readDepth(uv - vec2(0.0, px.y * o));
         float dE = readDepth(uv + vec2(px.x * o, 0.0));
@@ -188,6 +190,7 @@ function ensureInk() {
       }
       void main() {
         vec2 px = 1.0 / res;
+        // wasteland: graphite + ink wash, near monochrome (Epic Mickey's Wasteland)
         // "line boil": time stepped at 8fps, like hand-painted animation frames
         float tq = floor(time * 8.0) / 8.0;
         vec2 pj = hash22(vec2(tq * 7.3, tq * 3.1)) * 0.012;
@@ -233,6 +236,32 @@ function ensureInk() {
         vec3 inkCol = vec3(0.07, 0.07, 0.10);
         col = mix(col, inkCol, ink * 0.9);
 
+        // ── WASTELAND: graphite and ink wash. Colour is drained to a warm
+        // grey, hatching bites everywhere rather than only in shadow, the ink
+        // gets heavier, and a grimy vignette closes in at the edges.
+        if (wasteland > 0.5) {
+          vec3 raw = texture2D(tColor, vUv).rgb;
+          float g = dot(raw, vec3(0.299, 0.587, 0.114));
+          g = pow(clamp(g, 0.0, 1.0), 1.22);
+          g = clamp((g - 0.5) * 1.38 + 0.46, 0.0, 1.0);      // crush toward ink and paper
+          // graphite is never neutral: warm in the lights, cold in the darks
+          vec3 warm = vec3(0.92, 0.88, 0.80), cool = vec3(0.30, 0.33, 0.38);
+          vec3 gr = mix(cool, warm, g);
+          // pencil tone: two hatch sets, angled, biting hardest in the mids
+          float h1 = step(0.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 5.0));
+          float h2 = step(0.62, fract((gl_FragCoord.x - gl_FragCoord.y) / 9.0));
+          float tone = smoothstep(0.85, 0.15, g);
+          gr *= 1.0 - (1.0 - h1) * tone * 0.26;
+          gr *= 1.0 - (1.0 - h2) * smoothstep(0.6, 0.05, g) * 0.30;
+          gr *= 0.86 + 0.22 * paper;                          // tooth of the paper
+          gr = mix(gr, gr * 0.55, e1 * 0.5 * skyMask);        // wash pools at the lines
+          gr = mix(gr, vec3(0.05, 0.05, 0.07), clamp(ink * 1.15, 0.0, 1.0));
+          vec2 vc = vUv - 0.5;                                // grimy vignette
+          gr *= 1.0 - smoothstep(0.28, 0.78, dot(vc, vc) * 2.2) * 0.55;
+          gr = mix(gr, vec3(dot(gr, vec3(0.33))), 0.25);      // last of the colour goes
+          col = gr;
+        }
+
         // grain washes over the sky
         col = mix(col * (0.95 + 0.08 * paper), col, skyMask);
 
@@ -248,6 +277,7 @@ function ensureInk() {
 function renderInked() {
   ensureInk();
   inkQuad.material.uniforms.time.value = clock.elapsedTime;
+  inkQuad.material.uniforms.wasteland.value = gfxMode === 'wasteland' ? 1 : 0;
   // pass 1: color + depth
   renderer.setRenderTarget(rtColor);
   renderer.render(scene, camera);
@@ -268,16 +298,22 @@ function renderInked() {
 const gfxParam = new URLSearchParams(location.search).get('gfx');
 let stored = gfxParam ?? localStorage.getItem('planet-gfx') ?? (IS_TOUCH ? 'classic' : 'inked');
 if (['dreamy', 'inked', 'watercolor'].includes(stored)) stored = 'sketch';   // migrate old settings
-let gfxInked = stored === 'sketch';
+if (stored !== 'sketch' && stored !== 'classic' && stored !== 'wasteland') stored = 'sketch';
+let gfxMode = stored;                       // 'sketch' | 'wasteland' | 'classic'
+const GFX_CYCLE = ['sketch', 'wasteland', 'classic'];
+const GFX_LABEL = { sketch: '✏️ sketchbook', wasteland: '🖤 wasteland', classic: '🧊 classic' };
+let gfxInked = gfxMode !== 'classic';       // both painted modes use the 3-pass pipeline
 const gfxBtn = document.getElementById('gfx-toggle');
 function applyGfx() {
-  gfxBtn.textContent = gfxInked ? '✏️ sketchbook' : '🧊 classic';
-  scene.fog.near = gfxInked ? 40 : 42;
-  scene.fog.far = gfxInked ? 145 : 155;
+  gfxBtn.textContent = GFX_LABEL[gfxMode];
+  gfxInked = gfxMode !== 'classic';
+  // the wasteland is smoggy: haze closes in a lot sooner
+  scene.fog.near = gfxMode === 'wasteland' ? 26 : gfxInked ? 40 : 42;
+  scene.fog.far = gfxMode === 'wasteland' ? 105 : gfxInked ? 145 : 155;
 }
 gfxBtn.addEventListener('click', () => {
-  gfxInked = !gfxInked;
-  localStorage.setItem('planet-gfx', gfxInked ? 'sketch' : 'classic');
+  gfxMode = GFX_CYCLE[(GFX_CYCLE.indexOf(gfxMode) + 1) % GFX_CYCLE.length];
+  localStorage.setItem('planet-gfx', gfxMode);
   applyGfx();
 });
 
@@ -2896,9 +2932,10 @@ function updateLaunch(dt) {
 mark('title3d:start');
 // ─── THE TITLE, PAINTED IN 3D ────────────────────────────────────────────────
 // Letters are not a font: each glyph is a set of polyline strokes in a unit em
-// box, exactly the path a brush would take. That gives real waypoints across
-// the tops and bottoms of every letter for the brush to follow, and lets the
-// stroke be revealed progressively as it is painted.
+// box - the path a hand actually takes - which gives real waypoints across the
+// tops and bottoms for the brush to follow. Each stroke is a FLAT ribbon whose
+// width swells in the middle and tapers at both ends, the way a loaded brush
+// lays paint down. Unlit material, so it reads as flat pigment, not plastic.
 const GLYPHS = {
   A: [[[0.02, 0], [0.5, 1], [0.98, 0]], [[0.19, 0.38], [0.81, 0.38]]],
   E: [[[0.88, 1], [0.06, 1], [0.06, 0], [0.9, 0]], [[0.06, 0.52], [0.66, 0.52]]],
@@ -2916,106 +2953,145 @@ const GLYPHS = {
 const GLYPH_W = { I: 0.42, "'": 0.34, ' ': 0.45 };
 
 const title3D = new THREE.Group();
-title3D.position.set(0, 0.4, -17);
+title3D.position.set(0, 0.6, -17);
 camera.add(title3D);
-scene.add(camera);              // camera children only render if it's in the graph
+scene.add(camera);
 
 const PAINTS = [
-  { hex: 0xff2e88, blob: new THREE.Vector3(-1.05, -0.32, 0.30) },   // pink
-  { hex: 0xffc233, blob: new THREE.Vector3(-0.10, -0.10, 0.30) },   // yellow
-  { hex: 0x33c9ff, blob: new THREE.Vector3(-1.20, 0.55, 0.30) },    // blue
+  { hex: 0xff2e88, blob: new THREE.Vector3(-0.78, 0.34, 0.22) },
+  { hex: 0xffc233, blob: new THREE.Vector3(0.12, 0.52, 0.22) },
+  { hex: 0x33c9ff, blob: new THREE.Vector3(-0.52, -0.42, 0.22) },
 ];
 
-// ── the palette, down in the corner where a painter would hold it
+// ── the palette: a real kidney silhouette with a thumb hole, not a disc
 const paletteG = new THREE.Group();
 {
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(1.75, 1.75, 0.16, 22),
-    new THREE.MeshStandardMaterial({ color: 0xe0b483, flatShading: true, roughness: 0.85 }));
-  body.rotation.x = Math.PI / 2;
-  body.scale.set(1, 1, 0.72);
+  const sh = new THREE.Shape();
+  sh.moveTo(-1.9, 0.15);
+  sh.bezierCurveTo(-1.95, 1.15, -0.7, 1.5, 0.35, 1.25);
+  sh.bezierCurveTo(1.5, 1.0, 2.05, 0.25, 1.85, -0.5);
+  sh.bezierCurveTo(1.65, -1.2, 0.55, -1.5, -0.5, -1.25);
+  sh.bezierCurveTo(-1.35, -1.05, -1.85, -0.5, -1.9, 0.15);
+  const hole = new THREE.Path();
+  hole.absarc(0.95, -0.55, 0.3, 0, Math.PI * 2, true);
+  sh.holes.push(hole);
+  const geo = new THREE.ExtrudeGeometry(sh, { depth: 0.14, bevelEnabled: true, bevelSize: 0.05, bevelThickness: 0.05, bevelSegments: 2, curveSegments: 14 });
+  const body = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xd7a879, roughness: 0.7 }));
   paletteG.add(body);
-  const hole = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.09, 6, 14),
-    new THREE.MeshStandardMaterial({ color: 0xc39468, flatShading: true }));
-  hole.position.set(0.85, -0.42, 0.09);
-  paletteG.add(hole);
-  for (const p of PAINTS) {
-    const blob = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 8),
-      new THREE.MeshStandardMaterial({ color: p.hex, roughness: 0.45, flatShading: true }));
-    blob.scale.set(1, 1, 0.42);
+  for (const p of PAINTS) {                       // glossy mounds of wet paint
+    const blob = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 10),
+      new THREE.MeshStandardMaterial({ color: p.hex, roughness: 0.18, metalness: 0.05 }));
+    blob.scale.set(1.25, 1.0, 0.42);
     blob.position.copy(p.blob);
     paletteG.add(blob);
   }
-  paletteG.position.set(-6.6, -3.5, 1.6);
-  paletteG.rotation.set(-0.35, 0.42, 0.12);
+  paletteG.position.set(-7.0, -3.3, 1.8);
+  paletteG.rotation.set(-0.5, 0.5, 0.15);
   title3D.add(paletteG);
 }
 
-// ── the brush: handle, ferrule, bristles. Tip sits at the group origin.
+// ── the brush
 const brush3D = new THREE.Group();
 let brushHair;
 {
-  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, 2.5, 8),
-    new THREE.MeshStandardMaterial({ color: 0xe2a35c, flatShading: true, roughness: 0.75 }));
-  handle.position.y = 2.0; brush3D.add(handle);
-  const ferrule = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.55, 8),
-    new THREE.MeshStandardMaterial({ color: 0xcfd4dc, metalness: 0.35, roughness: 0.35, flatShading: true }));
-  ferrule.position.y = 0.72; brush3D.add(ferrule);
-  brushHair = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.02, 0.85, 8),
-    new THREE.MeshStandardMaterial({ color: PAINTS[0].hex, roughness: 0.5, flatShading: true }));
-  brushHair.position.y = 0.32; brush3D.add(brushHair);
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.14, 2.6, 10),
+    new THREE.MeshStandardMaterial({ color: 0xe2a35c, roughness: 0.7 }));
+  handle.position.y = 2.05; brush3D.add(handle);
+  const ferrule = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.14, 0.5, 10),
+    new THREE.MeshStandardMaterial({ color: 0xcfd4dc, metalness: 0.5, roughness: 0.3 }));
+  ferrule.position.y = 0.7; brush3D.add(ferrule);
+  brushHair = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.015, 0.8, 10),
+    new THREE.MeshStandardMaterial({ color: PAINTS[0].hex, roughness: 0.35 }));
+  brushHair.position.y = 0.3; brush3D.add(brushHair);
   brush3D.visible = false;
   title3D.add(brush3D);
 }
 
-// ── lay out the two lines, and build every stroke as a revealable tube
+// ── a flat brush stroke: width swells mid-stroke, tapers to nothing at the ends
+function strokeRibbon(curve, size, mat) {
+  const SEG = Math.max(20, Math.round(curve.getLength() * 9));
+  const pos = [], idx = [];
+  const a = new THREE.Vector3(), b = new THREE.Vector3();
+  for (let i = 0; i <= SEG; i++) {
+    const t = i / SEG;
+    curve.getPoint(t, a);
+    curve.getPoint(Math.min(1, t + 0.01), b);
+    let tx = b.x - a.x, ty = b.y - a.y;
+    const len = Math.hypot(tx, ty) || 1;
+    tx /= len; ty /= len;
+    // pressure profile: light in, heavy through the middle, lifted off at the end
+    const taper = Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, t))), 0.42);
+    const wobble = 0.9 + Math.sin(t * 11 + curve.points[0].x) * 0.1;
+    const hw = size * 0.115 * taper * wobble + size * 0.012;
+    pos.push(a.x - ty * hw, a.y + tx * hw, a.z, a.x + ty * hw, a.y - tx * hw, a.z);
+  }
+  for (let i = 0; i < SEG; i++) {
+    const p0 = i * 2, p1 = i * 2 + 1, q0 = (i + 1) * 2, q1 = (i + 1) * 2 + 1;
+    idx.push(p0, q0, p1, p1, q0, q1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const mesh = new THREE.Mesh(g, mat);
+  mesh.frustumCulled = false;
+  g.setDrawRange(0, 0);
+  return { mesh, total: idx.length };
+}
+
 function buildLine(text, size, y, colorHex, arc) {
   const strokes = [];
   let w = 0;
   for (const ch of text) w += (GLYPH_W[ch] ?? 0.78) + 0.16;
   let x = -w * size / 2;
-  const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.62, flatShading: true });
+  // unlit: flat pigment, no plastic highlight
+  const mat = new THREE.MeshBasicMaterial({ color: colorHex });
   for (const ch of text) {
     const adv = (GLYPH_W[ch] ?? 0.78) + 0.16;
     for (const poly of (GLYPHS[ch] || [])) {
       const pts = poly.map(([px, py]) => {
         const wx = x + px * size;
-        const t = (wx + w * size / 2) / (w * size);            // 0..1 across the line
-        const lift = arc * (1 - Math.pow(2 * t - 1, 2));       // gentle arc, ends low
-        return new THREE.Vector3(wx, y + py * size + lift, Math.sin(t * 3.1) * 0.25);
+        const t = (wx + w * size / 2) / (w * size);
+        const lift = arc * (1 - Math.pow(2 * t - 1, 2));
+        return new THREE.Vector3(wx, y + py * size + lift, 0);
       });
-      const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
-      const segs = Math.max(14, Math.round(curve.getLength() * 11));
-      const geo = new THREE.TubeGeometry(curve, segs, size * 0.088, 6, false);
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.frustumCulled = false;
-      geo.setDrawRange(0, 0);
+      const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.35);
+      const { mesh, total } = strokeRibbon(curve, size, mat);
       title3D.add(mesh);
-      strokes.push({ mesh, curve, total: geo.index.count });
+      strokes.push({ mesh, curve, total });
     }
     x += adv * size;
   }
   return strokes;
 }
 
-const LINE_A = buildLine("JANELLE'S", 0.85, 2.15, PAINTS[0].hex, 0.42);
+const LINE_A = buildLine("JANELLE'S", 0.85, 2.2, PAINTS[0].hex, 0.42);
 const LINE_B = buildLine('TINY', 1.75, -0.9, PAINTS[1].hex, 0.55);
 const LINE_C = buildLine('PLANET', 1.75, -0.9, PAINTS[2].hex, 0.55);
-// nudge the two big words apart so they read as separate words
 for (const s of LINE_B) s.mesh.position.x -= 4.9;
 for (const s of LINE_C) s.mesh.position.x += 4.2;
 
-// ── paint that flies at the lens
+// ── splatters: flat irregular flecks, not beads
 const splashes = [];
 {
-  const geo = new THREE.SphereGeometry(0.2, 8, 6);
-  for (let i = 0; i < 26; i++) {
-    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-      color: 0xffffff, roughness: 0.4, flatShading: true, transparent: true, opacity: 0,
+  function fleckGeo(seed) {
+    const sh = new THREE.Shape();
+    const N = 9;
+    for (let i = 0; i <= N; i++) {
+      const a = (i / N) * Math.PI * 2;
+      const r = 0.16 * (0.55 + ((Math.sin(seed + i * 2.7) + 1) / 2) * 0.9);
+      const px = Math.cos(a) * r, py = Math.sin(a) * r * 0.8;
+      i ? sh.lineTo(px, py) : sh.moveTo(px, py);
+    }
+    return new THREE.ShapeGeometry(sh, 8);
+  }
+  for (let i = 0; i < 30; i++) {
+    const m = new THREE.Mesh(fleckGeo(i * 1.7), new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide,
     }));
-    m.visible = false;
-    m.frustumCulled = false;
+    m.visible = false; m.frustumCulled = false;
     title3D.add(m);
-    splashes.push({ mesh: m, life: 0, vel: new THREE.Vector3() });
+    splashes.push({ mesh: m, life: 0, vel: new THREE.Vector3(), spin: 0, scale: 1 });
   }
 }
 function fling(at, hex) {
@@ -3023,15 +3099,13 @@ function fling(at, hex) {
   if (!s) return;
   s.mesh.material.color.setHex(hex);
   s.mesh.position.copy(at);
-  // straight at the camera, which sits at title3D-local +z
-  s.vel.set((Math.random() - 0.5) * 5.5, (Math.random() - 0.5) * 5.5, 7 + Math.random() * 9);
-  s.life = 1;
-  s.mesh.visible = true;
-  s.spin = new THREE.Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6);
-  s.scale = 0.5 + Math.random() * 1.2;
+  s.vel.set((Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7, 9 + Math.random() * 12);
+  s.life = 1; s.mesh.visible = true;
+  s.spin = (Math.random() - 0.5) * 9;
+  s.scale = 0.7 + Math.random() * 1.5;
 }
 
-// ── the score: dip, paint each stroke, come back when the colour changes
+// ── the score. Brisk: a title, not a short film.
 const TITLE_STEPS = [];
 {
   const lines = [
@@ -3040,32 +3114,34 @@ const TITLE_STEPS = [];
     { strokes: LINE_C, paint: PAINTS[2] },
   ];
   for (const ln of lines) {
-    TITLE_STEPS.push({ kind: 'dip', dur: 0.85, paint: ln.paint });
+    TITLE_STEPS.push({ kind: 'dip', dur: 0.30, paint: ln.paint });
     for (const st of ln.strokes) {
-      TITLE_STEPS.push({ kind: 'fly', dur: 0.32, to: st.curve.getPoint(0), paint: ln.paint });
-      TITLE_STEPS.push({ kind: 'paint', dur: Math.max(0.42, st.curve.getLength() * 0.115), stroke: st, paint: ln.paint });
+      TITLE_STEPS.push({ kind: 'fly', dur: 0.10, to: st.curve.getPoint(0), paint: ln.paint });
+      TITLE_STEPS.push({ kind: 'paint', dur: Math.max(0.16, st.curve.getLength() * 0.05), stroke: st, paint: ln.paint });
     }
   }
-  TITLE_STEPS.push({ kind: 'park', dur: 0.9 });
+  TITLE_STEPS.push({ kind: 'park', dur: 0.35 });
 }
 let tiStep = 0, tiT = 0, tiDone = false;
 const _tiPrev = new THREE.Vector3(999, 999, 999);
 const _tiTmp = new THREE.Vector3();
 
+function finishTitleNow() {                        // used when you skip ahead
+  for (const ln of [LINE_A, LINE_B, LINE_C]) for (const st of ln) st.mesh.geometry.setDrawRange(0, st.total);
+  brush3D.visible = false;
+  tiDone = true;
+}
+
 function updateTitle3D(dt) {
-  for (const s of splashes) {                       // paint travelling at the lens
+  for (const s of splashes) {
     if (s.life <= 0) continue;
-    s.life -= dt * 0.85;
+    s.life -= dt * 1.5;
     s.mesh.position.addScaledVector(s.vel, dt);
-    s.mesh.rotation.x += s.spin.x * dt;
-    s.mesh.rotation.y += s.spin.y * dt;
-    const grow = 1 + (1 - s.life) * 2.6;            // looms as it nears the glass
-    s.mesh.scale.setScalar(s.scale * grow);
-    s.mesh.material.opacity = Math.min(1, s.life * 1.6);
+    s.mesh.rotation.z += s.spin * dt;
+    s.mesh.scale.setScalar(s.scale * (1 + (1 - s.life) * 3.2));
+    s.mesh.material.opacity = Math.min(1, s.life * 1.8);
     if (s.life <= 0) s.mesh.visible = false;
   }
-  paletteG.rotation.z = Math.sin(performance.now() / 1400) * 0.05 + 0.12;
-
   if (tiDone) return;
   const step = TITLE_STEPS[tiStep];
   tiT += dt / step.dur;
@@ -3076,24 +3152,23 @@ function updateTitle3D(dt) {
     const blob = _tiTmp.copy(step.paint.blob).applyMatrix4(paletteG.matrix);
     brush3D.visible = true;
     brush3D.position.lerpVectors(_tiPrev.x > 900 ? blob : _tiPrev, blob, ease);
-    brush3D.position.y += Math.sin(Math.PI * k) * -0.25;      // press into the paint
-    brush3D.rotation.set(0.5, 0, -0.55 + Math.sin(Math.PI * k) * 0.2);
-    if (k > 0.55) brushHair.material.color.setHex(step.paint.hex);
+    brush3D.position.y -= Math.sin(Math.PI * k) * 0.22;
+    brush3D.rotation.set(0.5, 0, -0.55);
+    if (k > 0.5) brushHair.material.color.setHex(step.paint.hex);
   } else if (step.kind === 'fly') {
     brush3D.position.lerpVectors(_tiPrev, step.to, ease);
-    brush3D.position.y += Math.sin(Math.PI * ease) * 1.5;      // arc through the air
-    brush3D.rotation.set(0.32, 0, -0.3);
+    brush3D.position.y += Math.sin(Math.PI * ease) * 1.1;
+    brush3D.rotation.set(0.3, 0, -0.28);
   } else if (step.kind === 'paint') {
     const st = step.stroke;
     const p = st.curve.getPoint(k);
     brush3D.position.copy(p).add(st.mesh.position);
-    const ahead = st.curve.getPoint(Math.min(1, k + 0.06));
-    brush3D.rotation.set(0.3, 0, -Math.atan2(ahead.x - p.x, ahead.y - p.y) * 0.5);
-    st.mesh.geometry.setDrawRange(0, Math.ceil(st.total * k));
-    if (Math.random() < 0.16) fling(brush3D.position, step.paint.hex);
-  } else if (step.kind === 'park') {
-    const home = _tiTmp.set(-5.4, -2.6, 2.2);
-    brush3D.position.lerpVectors(_tiPrev, home, ease);
+    const ahead = st.curve.getPoint(Math.min(1, k + 0.08));
+    brush3D.rotation.set(0.28, 0, -Math.atan2(ahead.x - p.x, ahead.y - p.y) * 0.45);
+    st.mesh.geometry.setDrawRange(0, Math.ceil(st.total * k / 6) * 6);
+    if (Math.random() < 0.12) fling(brush3D.position, step.paint.hex);
+  } else {
+    brush3D.position.lerpVectors(_tiPrev, _tiTmp.set(-5.6, -2.4, 2.4), ease);
     brush3D.rotation.set(0.4, 0, -0.5);
   }
 
@@ -3101,7 +3176,7 @@ function updateTitle3D(dt) {
     if (step.kind === 'paint') step.stroke.mesh.geometry.setDrawRange(0, step.stroke.total);
     _tiPrev.copy(brush3D.position);
     tiStep++; tiT = 0;
-    if (tiStep >= TITLE_STEPS.length) tiDone = true;
+    if (tiStep >= TITLE_STEPS.length) { tiDone = true; brush3D.visible = false; }
   }
 }
 
@@ -3288,6 +3363,24 @@ function collide() {
   }
 }
 
+// A straight lerp between two points on a sphere cuts THROUGH it, which sends
+// the camera up out of the crust and shows every building's foundations from
+// below. Fly an arc instead: slerp the direction, lerp the radius, and never
+// let the eye drop under the ground it is passing over.
+const _camDir = new THREE.Vector3(), _tgtDir = new THREE.Vector3();
+function flyCameraTo(target, k, clearance = 1.2) {
+  const curR = camera.position.length(), tgtR = target.length();
+  _camDir.copy(camera.position).normalize();
+  _tgtDir.copy(target).normalize();
+  const ang = _camDir.angleTo(_tgtDir);
+  const nd = ang > 1e-5 ? slerpDir(_camDir, _tgtDir, Math.min(1, k)) : _tgtDir.clone();
+  let r = THREE.MathUtils.lerp(curR, tgtR, Math.min(1, k));
+  // bulge outward while there is still a long way to travel, so the arc clears
+  // hills and towers rather than skimming them
+  r += Math.sin(Math.min(1, ang / 1.2) * Math.PI * 0.5) * 9;
+  camera.position.copy(nd).multiplyScalar(Math.max(r, Math.max(radiusAt(nd), SEA_R) + clearance));
+}
+
 // ─── main loop ───────────────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let introT = 0;
@@ -3468,7 +3561,7 @@ function animate() {
       .addScaledVector(_right, Math.sin(orbit) * 8.5);
     // slide the eye sideways so the critic sits clear of the phone, not behind it
     off.addScaledVector(_right, -3.1);
-    camera.position.lerp(courier.position.clone().addScaledVector(dir, 4.2).add(off), 0.05);
+    flyCameraTo(courier.position.clone().addScaledVector(dir, 4.2).add(off), 0.05, 2.2);
     camera.up.lerp(dir, 0.08).normalize();
     camera.lookAt(courier.position.clone().addScaledVector(dir, 1.0));
     updateWorldAmbient(dt, t);
@@ -3576,7 +3669,7 @@ function animate() {
   const camPos = courier.position.clone()
     .addScaledVector(dir, TR.camH)
     .addScaledVector(heading, -TR.camD);
-  camera.position.lerp(camPos, (0.02 + 0.05 * ease));
+  flyCameraTo(camPos, (0.02 + 0.05 * ease), 0.9);
   camera.up.lerp(dir, 0.06).normalize();
   camera.lookAt(courier.position.clone().addScaledVector(dir, 1.1));
 
