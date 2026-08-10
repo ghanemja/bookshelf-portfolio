@@ -776,6 +776,7 @@ function makeLabel(lm) {
 
 for (const lm of LANDMARKS) {
   const b = makeBuilding(lm);
+  addSolid(lm.dir, 1.9);
   b.position.copy(settleOn(lm.dir, 2.2, 0.14));
   alignToSurface(b, lm.dir, rand() * Math.PI * 2);
   landmarkGroup.add(b);
@@ -1105,12 +1106,12 @@ function makeVehicleSigns() {
 function makePerson(bodyHex, hatHex = null) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.55, 8), M(bodyHex));
-  body.position.y = 0.45; g.add(body);
+  body.position.y = 0.28; g.add(body);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), M(0xffd9b8));
-  head.position.y = 0.9; g.add(head);
+  head.position.y = 0.72; g.add(head);
   if (hatHex !== null) {
     const beret = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.14, 0.09, 9), M(hatHex));
-    beret.position.set(0.03, 1.04, 0); beret.rotation.z = 0.22; g.add(beret);
+    beret.position.set(0.03, 0.86, 0); beret.rotation.z = 0.22; g.add(beret);
   }
   g.userData.head = head;
   return g;
@@ -1126,6 +1127,9 @@ function bandLandDir(minArc = 0.12) {   // sample near the equatorial street
 }
 const cityWindowMats = [];
 const traffic = [];   // cars and pedestrians that actually move
+// solid footprints: {dir, r} where r is an ARC radius in radians
+const solids = [];
+function addSolid(dirVec, worldRadius) { solids.push({ dir: dirVec.clone(), r: worldRadius / R }); }
 const lampBulbMat = new THREE.MeshStandardMaterial({
   color: 0xfff2c8, emissive: 0xffd98a, emissiveIntensity: 0.5,
 });
@@ -1529,23 +1533,24 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
     const geo = new THREE.BoxGeometry(w, h, d);
     // one texture tile per storey, so windows stay the same size on every tower
     const uv = geo.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (w / 2.2), uv.getY(i) * (h / 2.2));
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (w / 4.5), uv.getY(i) * (h / 4.5));
     uv.needsUpdate = true;
     const body = new THREE.Mesh(geo, mat);
     body.position.y = h / 2 - 0.5; g.add(body);   // sunk, so short blocks need no plinth
     const cap = new THREE.Mesh(new THREE.BoxGeometry(w * 1.08, 0.28, d * 1.08), ROOF);
     cap.position.y = h + 0.14; g.add(cap);
     // rooftop clutter, the detail that sells a lived-in city
-    if (h > 3.2 && rand() > 0.45) {
+    if (h > 5.0 && rand() > 0.45) {
       const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.5, 8), M(0x9a6b4f));
       tank.position.set((rand() - 0.5) * w * 0.5, h + 0.5, (rand() - 0.5) * d * 0.5); g.add(tank);
     }
-    if (h > 3.2 && rand() > 0.5) {
+    if (h > 5.0 && rand() > 0.5) {
       const ac = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.42), M(0xa8adb5));
       ac.position.set((rand() - 0.5) * w * 0.5, h + 0.42, (rand() - 0.5) * d * 0.5); g.add(ac);
     }
-    if (h > 3.2) g.add(foundation(Math.max(w, d) * 0.6, 3.0, 6));
+    if (h > 5.0) g.add(foundation(Math.max(w, d) * 0.6, 3.0, 6));
     const dd = at(x, y);
+    addSolid(dd, Math.max(w, d) * 0.62);
     g.position.copy(settleOn(dd, Math.max(w, d) * 0.6, 0.14));
     alignToSurface(g, dd, rot);
     g.traverse(m => { if (m.isMesh && !IS_TOUCH) { m.castShadow = true; m.receiveShadow = true; } });
@@ -1569,16 +1574,16 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
         if (rand() < 0.06) { plaza(cx, cy); continue; }   // a square, not a wood
         const per = 1 + Math.floor(rand() * 2);
         for (let k = 0; k < per; k++) {
-          const h = (4.6 + rand() * 3.4) * (1.25 - fromCentre * 0.5);
+          const h = (7.5 + rand() * 6.5) * (1.15 - fromCentre * 0.35);
           tower(cx + (rand() - 0.5) * (BLOCK - 3.4), cy + (rand() - 0.5) * (BLOCK - 3.4),
-            Math.max(3.4, h), 1.5 + rand() * 1.0, 1.5 + rand() * 1.0,
+            Math.max(6.0, h), 1.6 + rand() * 1.0, 1.6 + rand() * 1.0,
             towerMats[(mi++) % towerMats.length], Math.round(rand() * 4) * Math.PI / 2);
         }
       } else if (ring <= N) {                          // ── midrise: shops + flats
         if (rand() < 0.1) { plaza(cx, cy); continue; }
         const per = 1 + Math.floor(rand() * 2);
         for (let k = 0; k < per; k++) {
-          const h = 1.7 + rand() * 1.9;
+          const h = 2.7 + rand() * 2.2;
           tower(cx + (rand() - 0.5) * (BLOCK - 3.0), cy + (rand() - 0.5) * (BLOCK - 3.0),
             h, 1.5 + rand() * 0.9, 1.5 + rand() * 0.9,
             towerMats[(mi++) % towerMats.length], Math.round(rand() * 4) * Math.PI / 2);
@@ -1591,6 +1596,7 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
           const dd = at(cx + ox, cy + oy);
           if (!isLand(dd, 0.05)) continue;
           const h = cottage();
+          addSolid(dd, 0.85);
           h.position.copy(settleOn(dd, 1.0, 0.12));
           alignToSurface(h, dd, yawToFace(dd, at(cx + ox * 2.2, cy + oy * 2.2)));
           h.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
@@ -1694,13 +1700,13 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
   const carBody = [0xff4d6e, 0x4e8eff, 0xffd23d, 0xfffaf2, 0x2dd47b, 0x8f7ae8];
   function makeCar(hex) {
     const g = new THREE.Group();
-    const b = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.26, 1.0), M(hex, { roughness: 0.5 }));
-    b.position.y = 0.26; g.add(b);
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.22, 0.46), M(0xcfeef8, { roughness: 0.2 }));
-    cab.position.set(0, 0.48, -0.05); g.add(cab);
-    for (const [wx, wz] of [[-0.26, 0.32], [0.26, 0.32], [-0.26, -0.32], [0.26, -0.32]]) {
-      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.08, 6), M(0x2d2138));
-      w.rotation.z = Math.PI / 2; w.position.set(wx, 0.12, wz); g.add(w);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.42, 2.1), M(hex, { roughness: 0.5 }));
+    b.position.y = 0.4; g.add(b);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.38, 0.95), M(0xcfeef8, { roughness: 0.2 }));
+    cab.position.set(0, 0.78, -0.1); g.add(cab);
+    for (const [wx, wz] of [[-0.5, 0.66], [0.5, 0.66], [-0.5, -0.66], [0.5, -0.66]]) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.16, 7), M(0x2d2138));
+      w.rotation.z = Math.PI / 2; w.position.set(wx, 0.2, wz); g.add(w);
     }
     return g;
   }
@@ -1727,7 +1733,7 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
     const a = axis ? at(-ext * dirSign, line + off) : at(line + off, -ext * dirSign);
     const b = axis ? at(ext * dirSign, line + off) : at(line + off, ext * dirSign);
     const ped = makePerson(carBody[(n + 3) % carBody.length], n % 3 === 0 ? 0x2d2138 : null);
-    ped.scale.setScalar(1.15);
+    ped.scale.setScalar(0.72);
     scene.add(ped);
     traffic.push({ obj: ped, a, b, t: rand(), speed: 0.016 + rand() * 0.01, kind: 'ped', phase: n });
   }
@@ -1905,7 +1911,7 @@ function saveStars() { localStorage.setItem('planet-stars', JSON.stringify([...c
         }
         if (i === PLANKS) {                                  // the fisherman
           const f = makePerson(0x2d6ea8, 0xffd23d);
-          f.scale.setScalar(1.3);
+          f.scale.setScalar(0.78);
           f.position.copy(d.clone().multiplyScalar(SEA_R + 0.48));
           alignToSurface(f, d, yawToFace(d, shore));
           scene.add(f);
@@ -2008,19 +2014,19 @@ function buildJeep() {
 function buildCritic() {
   const g = new THREE.Group();
   const p = makePerson(0x2d2138, 0xff4d6e);
-  p.scale.setScalar(1.5);
+  p.scale.setScalar(0.8);
   g.add(p);
   const scarf = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.29, 0.16, 8), M(0xffd23d));
-  scarf.position.y = 1.13; g.add(scarf);
+  scarf.position.y = 0.95; g.add(scarf);
   const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.62, 6), M(0x2d2138));
-  arm.position.set(0.36, 1.3, 0.1); arm.rotation.z = -0.85; g.add(arm);
+  arm.position.set(0.36, 1.12, 0.1); arm.rotation.z = -0.85; g.add(arm);
   const phone = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.32, 0.04), M(0x1c1626));
-  phone.position.set(0.62, 1.62, 0.1); phone.rotation.z = -0.2; g.add(phone);
+  phone.position.set(0.62, 1.44, 0.1); phone.rotation.z = -0.2; g.add(phone);
   const phoneGlow = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.27, 0.015),
     new THREE.MeshStandardMaterial({ color: 0xbfe8ff, emissive: 0x9fd8ff, emissiveIntensity: 0.9 }));
-  phoneGlow.position.set(0.62, 1.62, 0.125); phoneGlow.rotation.z = -0.2; g.add(phoneGlow);
+  phoneGlow.position.set(0.62, 1.44, 0.125); phoneGlow.rotation.z = -0.2; g.add(phoneGlow);
   const satchel = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.28, 0.14), M(0x9a6b4f));
-  satchel.position.set(-0.36, 0.72, -0.05); g.add(satchel);
+  satchel.position.set(-0.36, 0.55, -0.05); g.add(satchel);
   g.userData.wheels = [];
   g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
   return g;
@@ -2138,12 +2144,12 @@ scene.add(courier);
 
 // how each ride handles: top speed, pickup, ride height, camera distance
 const TRANSPORT = {
-  jeep: { max: 7.2, accel: 13, hover: 0.36, camH: 2.5, camD: 7.0, emoji: '🚙', label: 'rental jeep', engine: true },
-  bike: { max: 4.8, accel: 9, hover: 0.12, camH: 2.2, camD: 6.0, emoji: '🚲', label: 'bike', engine: false },
-  walk: { max: 2.8, accel: 8, hover: 0.03, camH: 1.9, camD: 4.8, emoji: '🚶', label: 'on foot', engine: false },
-  train: { max: 8.5, accel: 6, hover: 0.16, camH: 3.0, camD: 8.6, emoji: '🚂', label: 'the Museum Express', engine: true, rail: true },
-  rocket: { max: 7.2, accel: 13, hover: 0.36, camH: 2.5, camD: 7.0, emoji: '🚀', label: 'the shuttle (space first)', engine: true },
-  boat: { max: 6.2, accel: 7, hover: 0.1, camH: 2.4, camD: 7.4, emoji: '⛵', label: 'sailboat', engine: false },
+  jeep: { max: 7.2, accel: 13, hover: 0.02, camH: 2.5, camD: 7.0, emoji: '🚙', label: 'rental jeep', engine: true },
+  bike: { max: 4.8, accel: 9, hover: 0.02, camH: 2.2, camD: 6.0, emoji: '🚲', label: 'bike', engine: false },
+  walk: { max: 2.8, accel: 8, hover: 0.02, camH: 1.9, camD: 4.8, emoji: '🚶', label: 'on foot', engine: false },
+  train: { max: 8.5, accel: 6, hover: 0.10, camH: 3.0, camD: 8.6, emoji: '🚂', label: 'the Museum Express', engine: true, rail: true },
+  rocket: { max: 7.2, accel: 13, hover: 0.02, camH: 2.5, camD: 7.0, emoji: '🚀', label: 'the shuttle (space first)', engine: true },
+  boat: { max: 6.2, accel: 7, hover: -0.14, camH: 2.4, camD: 7.4, emoji: '⛵', label: 'sailboat', engine: false },
 };
 let transport = 'jeep';
 let runTransport = 'jeep';   // the mode the run STARTED with (the train ends on foot)
@@ -2334,7 +2340,7 @@ const npcs = [];
     const nd = s.dir.clone().applyAxisAngle(axis, 0.055).normalize();
     const p = makePerson(palette[pi % palette.length], pi % 3 === 0 ? 0x2d2138 : null);
     pi++;
-    p.scale.setScalar(1.35);
+    p.scale.setScalar(0.78);
     p.position.copy(settleOn(nd, 0.3, 0.05));
     alignToSurface(p, nd, yawToFace(nd, s.dir));
     p.userData.phase = pi * 1.7;
@@ -2374,13 +2380,17 @@ function updateQuestHUD() {
 const navMode = document.getElementById('nav-mode');
 const navEta = document.getElementById('nav-eta');
 const navNext = document.getElementById('nav-next');
-const navDots = document.getElementById('nav-dots');
+const navRoute = document.getElementById('nav-route');
 const navBag = document.getElementById('nav-bag');
 function updateNav() {
   navMode.textContent = TRANSPORT[transport].emoji;
   const s = currentStop();
   navNext.textContent = s ? `→ ${s.name}` : '🏛️ you have arrived';
-  navDots.textContent = route.map((_, i) => (i < routeIdx ? '●' : i === routeIdx ? '◉' : '○')).join(' ');
+  navRoute.innerHTML = route.map((st, i) => {
+    const cls = i < routeIdx ? 'done' : i === routeIdx ? 'now' : '';
+    const last = i === route.length - 1 ? ' last' : '';
+    return `<li class="${cls}${last}">${st.name}</li>`;
+  }).join('');
   navBag.textContent = bag.length ? `carrying: ${bag.join(' ')}` : 'carrying: (nothing yet)';
 }
 
@@ -2730,6 +2740,218 @@ function updateLaunch(dt) {
   }
 }
 
+
+// ─── THE TITLE, PAINTED IN 3D ────────────────────────────────────────────────
+// Letters are not a font: each glyph is a set of polyline strokes in a unit em
+// box, exactly the path a brush would take. That gives real waypoints across
+// the tops and bottoms of every letter for the brush to follow, and lets the
+// stroke be revealed progressively as it is painted.
+const GLYPHS = {
+  A: [[[0.02, 0], [0.5, 1], [0.98, 0]], [[0.19, 0.38], [0.81, 0.38]]],
+  E: [[[0.88, 1], [0.06, 1], [0.06, 0], [0.9, 0]], [[0.06, 0.52], [0.66, 0.52]]],
+  I: [[[0.5, 0], [0.5, 1]]],
+  J: [[[0.82, 1], [0.82, 0.24], [0.6, 0.02], [0.28, 0.04], [0.12, 0.26]]],
+  L: [[[0.12, 1], [0.12, 0], [0.92, 0]]],
+  N: [[[0.05, 0], [0.05, 1], [0.95, 0], [0.95, 1]]],
+  P: [[[0.08, 0], [0.08, 1], [0.72, 1], [0.92, 0.79], [0.7, 0.56], [0.08, 0.56]]],
+  S: [[[0.92, 0.86], [0.5, 1], [0.12, 0.86], [0.13, 0.63], [0.78, 0.43], [0.83, 0.16], [0.46, 0], [0.07, 0.16]]],
+  T: [[[0.5, 0], [0.5, 1]], [[0.04, 1], [0.96, 1]]],
+  Y: [[[0.04, 1], [0.5, 0.52], [0.96, 1]], [[0.5, 0.52], [0.5, 0]]],
+  "'": [[[0.55, 1], [0.42, 0.7]]],
+  ' ': [],
+};
+const GLYPH_W = { I: 0.42, "'": 0.34, ' ': 0.45 };
+
+const title3D = new THREE.Group();
+title3D.position.set(0, 0.4, -17);
+camera.add(title3D);
+scene.add(camera);              // camera children only render if it's in the graph
+
+const PAINTS = [
+  { hex: 0xff2e88, blob: new THREE.Vector3(-1.05, -0.32, 0.30) },   // pink
+  { hex: 0xffc233, blob: new THREE.Vector3(-0.10, -0.10, 0.30) },   // yellow
+  { hex: 0x33c9ff, blob: new THREE.Vector3(-1.20, 0.55, 0.30) },    // blue
+];
+
+// ── the palette, down in the corner where a painter would hold it
+const paletteG = new THREE.Group();
+{
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(1.75, 1.75, 0.16, 22),
+    new THREE.MeshStandardMaterial({ color: 0xe0b483, flatShading: true, roughness: 0.85 }));
+  body.rotation.x = Math.PI / 2;
+  body.scale.set(1, 1, 0.72);
+  paletteG.add(body);
+  const hole = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.09, 6, 14),
+    new THREE.MeshStandardMaterial({ color: 0xc39468, flatShading: true }));
+  hole.position.set(0.85, -0.42, 0.09);
+  paletteG.add(hole);
+  for (const p of PAINTS) {
+    const blob = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 8),
+      new THREE.MeshStandardMaterial({ color: p.hex, roughness: 0.45, flatShading: true }));
+    blob.scale.set(1, 1, 0.42);
+    blob.position.copy(p.blob);
+    paletteG.add(blob);
+  }
+  paletteG.position.set(-6.6, -3.5, 1.6);
+  paletteG.rotation.set(-0.35, 0.42, 0.12);
+  title3D.add(paletteG);
+}
+
+// ── the brush: handle, ferrule, bristles. Tip sits at the group origin.
+const brush3D = new THREE.Group();
+let brushHair;
+{
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.15, 2.5, 8),
+    new THREE.MeshStandardMaterial({ color: 0xe2a35c, flatShading: true, roughness: 0.75 }));
+  handle.position.y = 2.0; brush3D.add(handle);
+  const ferrule = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.55, 8),
+    new THREE.MeshStandardMaterial({ color: 0xcfd4dc, metalness: 0.35, roughness: 0.35, flatShading: true }));
+  ferrule.position.y = 0.72; brush3D.add(ferrule);
+  brushHair = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.02, 0.85, 8),
+    new THREE.MeshStandardMaterial({ color: PAINTS[0].hex, roughness: 0.5, flatShading: true }));
+  brushHair.position.y = 0.32; brush3D.add(brushHair);
+  brush3D.visible = false;
+  title3D.add(brush3D);
+}
+
+// ── lay out the two lines, and build every stroke as a revealable tube
+function buildLine(text, size, y, colorHex, arc) {
+  const strokes = [];
+  let w = 0;
+  for (const ch of text) w += (GLYPH_W[ch] ?? 0.78) + 0.16;
+  let x = -w * size / 2;
+  const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.62, flatShading: true });
+  for (const ch of text) {
+    const adv = (GLYPH_W[ch] ?? 0.78) + 0.16;
+    for (const poly of (GLYPHS[ch] || [])) {
+      const pts = poly.map(([px, py]) => {
+        const wx = x + px * size;
+        const t = (wx + w * size / 2) / (w * size);            // 0..1 across the line
+        const lift = arc * (1 - Math.pow(2 * t - 1, 2));       // gentle arc, ends low
+        return new THREE.Vector3(wx, y + py * size + lift, Math.sin(t * 3.1) * 0.25);
+      });
+      const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
+      const segs = Math.max(14, Math.round(curve.getLength() * 11));
+      const geo = new THREE.TubeGeometry(curve, segs, size * 0.088, 6, false);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.frustumCulled = false;
+      geo.setDrawRange(0, 0);
+      title3D.add(mesh);
+      strokes.push({ mesh, curve, total: geo.index.count });
+    }
+    x += adv * size;
+  }
+  return strokes;
+}
+
+const LINE_A = buildLine("JANELLE'S", 0.85, 2.15, PAINTS[0].hex, 0.42);
+const LINE_B = buildLine('TINY', 1.75, -0.9, PAINTS[1].hex, 0.55);
+const LINE_C = buildLine('PLANET', 1.75, -0.9, PAINTS[2].hex, 0.55);
+// nudge the two big words apart so they read as separate words
+for (const s of LINE_B) s.mesh.position.x -= 4.9;
+for (const s of LINE_C) s.mesh.position.x += 4.2;
+
+// ── paint that flies at the lens
+const splashes = [];
+{
+  const geo = new THREE.SphereGeometry(0.2, 8, 6);
+  for (let i = 0; i < 26; i++) {
+    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: 0xffffff, roughness: 0.4, flatShading: true, transparent: true, opacity: 0,
+    }));
+    m.visible = false;
+    m.frustumCulled = false;
+    title3D.add(m);
+    splashes.push({ mesh: m, life: 0, vel: new THREE.Vector3() });
+  }
+}
+function fling(at, hex) {
+  const s = splashes.find(s => s.life <= 0);
+  if (!s) return;
+  s.mesh.material.color.setHex(hex);
+  s.mesh.position.copy(at);
+  // straight at the camera, which sits at title3D-local +z
+  s.vel.set((Math.random() - 0.5) * 5.5, (Math.random() - 0.5) * 5.5, 7 + Math.random() * 9);
+  s.life = 1;
+  s.mesh.visible = true;
+  s.spin = new THREE.Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+  s.scale = 0.5 + Math.random() * 1.2;
+}
+
+// ── the score: dip, paint each stroke, come back when the colour changes
+const TITLE_STEPS = [];
+{
+  const lines = [
+    { strokes: LINE_A, paint: PAINTS[0] },
+    { strokes: LINE_B, paint: PAINTS[1] },
+    { strokes: LINE_C, paint: PAINTS[2] },
+  ];
+  for (const ln of lines) {
+    TITLE_STEPS.push({ kind: 'dip', dur: 0.85, paint: ln.paint });
+    for (const st of ln.strokes) {
+      TITLE_STEPS.push({ kind: 'fly', dur: 0.32, to: st.curve.getPoint(0), paint: ln.paint });
+      TITLE_STEPS.push({ kind: 'paint', dur: Math.max(0.42, st.curve.getLength() * 0.115), stroke: st, paint: ln.paint });
+    }
+  }
+  TITLE_STEPS.push({ kind: 'park', dur: 0.9 });
+}
+let tiStep = 0, tiT = 0, tiDone = false;
+const _tiPrev = new THREE.Vector3(999, 999, 999);
+const _tiTmp = new THREE.Vector3();
+
+function updateTitle3D(dt) {
+  for (const s of splashes) {                       // paint travelling at the lens
+    if (s.life <= 0) continue;
+    s.life -= dt * 0.85;
+    s.mesh.position.addScaledVector(s.vel, dt);
+    s.mesh.rotation.x += s.spin.x * dt;
+    s.mesh.rotation.y += s.spin.y * dt;
+    const grow = 1 + (1 - s.life) * 2.6;            // looms as it nears the glass
+    s.mesh.scale.setScalar(s.scale * grow);
+    s.mesh.material.opacity = Math.min(1, s.life * 1.6);
+    if (s.life <= 0) s.mesh.visible = false;
+  }
+  paletteG.rotation.z = Math.sin(performance.now() / 1400) * 0.05 + 0.12;
+
+  if (tiDone) return;
+  const step = TITLE_STEPS[tiStep];
+  tiT += dt / step.dur;
+  const k = Math.min(1, tiT);
+  const ease = k * k * (3 - 2 * k);
+
+  if (step.kind === 'dip') {
+    const blob = _tiTmp.copy(step.paint.blob).applyMatrix4(paletteG.matrix);
+    brush3D.visible = true;
+    brush3D.position.lerpVectors(_tiPrev.x > 900 ? blob : _tiPrev, blob, ease);
+    brush3D.position.y += Math.sin(Math.PI * k) * -0.25;      // press into the paint
+    brush3D.rotation.set(0.5, 0, -0.55 + Math.sin(Math.PI * k) * 0.2);
+    if (k > 0.55) brushHair.material.color.setHex(step.paint.hex);
+  } else if (step.kind === 'fly') {
+    brush3D.position.lerpVectors(_tiPrev, step.to, ease);
+    brush3D.position.y += Math.sin(Math.PI * ease) * 1.5;      // arc through the air
+    brush3D.rotation.set(0.32, 0, -0.3);
+  } else if (step.kind === 'paint') {
+    const st = step.stroke;
+    const p = st.curve.getPoint(k);
+    brush3D.position.copy(p).add(st.mesh.position);
+    const ahead = st.curve.getPoint(Math.min(1, k + 0.06));
+    brush3D.rotation.set(0.3, 0, -Math.atan2(ahead.x - p.x, ahead.y - p.y) * 0.5);
+    st.mesh.geometry.setDrawRange(0, Math.ceil(st.total * k));
+    if (Math.random() < 0.16) fling(brush3D.position, step.paint.hex);
+  } else if (step.kind === 'park') {
+    const home = _tiTmp.set(-5.4, -2.6, 2.2);
+    brush3D.position.lerpVectors(_tiPrev, home, ease);
+    brush3D.rotation.set(0.4, 0, -0.5);
+  }
+
+  if (k >= 1) {
+    if (step.kind === 'paint') step.stroke.mesh.geometry.setDrawRange(0, step.stroke.total);
+    _tiPrev.copy(brush3D.position);
+    tiStep++; tiT = 0;
+    if (tiStep >= TITLE_STEPS.length) tiDone = true;
+  }
+}
+
 // ─── title screen → GPS phone → play ─────────────────────────────────────────
 let gameState = 'title';
 document.body.classList.add('title-mode');
@@ -2747,6 +2969,7 @@ function enterGame() {
   if (gameState !== 'title') return;
   gameState = 'msg';
   titleEl.classList.add('hide');
+  title3D.visible = false;
   phoneEl.classList.add('show');
   scrMsg.classList.add('on');
   // put the critic on the pavement outside the Library, phone raised
@@ -2883,6 +3106,25 @@ function beginRun(t) {
   updateQuestHUD(); updateNav();
 }
 
+// walls are walls: if we ended up inside a footprint, slide back out to its
+// edge along the great circle we came in on
+const _colAxis = new THREE.Vector3();
+function collide() {
+  const rider = TRANSPORT[transport].hover < 0.2 ? 0.3 : 0.55;   // on foot you fit through more
+  for (const so of solids) {
+    const a = dir.angleTo(so.dir);
+    const rr = so.r + rider / R;
+    if (a >= rr || a < 1e-6) continue;
+    _colAxis.crossVectors(so.dir, dir);
+    if (_colAxis.lengthSq() < 1e-12) continue;
+    _colAxis.normalize();
+    dir.copy(so.dir).applyAxisAngle(_colAxis, rr).normalize();
+    heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
+    speed *= 0.45;                                 // a bump, not a wall of jelly
+    targetDir = null;                              // cancel autopilot into a wall
+  }
+}
+
 // ─── main loop ───────────────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let introT = 0;
@@ -2974,7 +3216,7 @@ function updateWorldAmbient(dt, t) {
     if (v.t > 1) v.t -= 1;
     const d = slerpDir(v.a, v.b, v.t);
     const dn = slerpDir(v.a, v.b, (v.t + 0.004) % 1);
-    _tPos.copy(d).multiplyScalar(Math.max(radiusAt(d), SEA_R) + (v.kind === 'car' ? 0.08 : 0.16));
+    _tPos.copy(d).multiplyScalar(Math.max(radiusAt(d), SEA_R) + (v.kind === 'car' ? 0.09 : 0.10));
     _tNext.copy(dn).sub(d.clone().multiplyScalar(d.dot(dn))).normalize();
     _tRight.crossVectors(d, _tNext);
     _tM.makeBasis(_tRight, d, _tNext);
@@ -3023,6 +3265,7 @@ function animate() {
     camera.up.set(0, 1, 0);
     camera.lookAt(0, 0, 0);
     scene.fog.near = 260; scene.fog.far = 520;   // whole planet crisp from space
+    updateTitle3D(dt);
     updateWorldAmbient(dt, t);
     sky.position.copy(camera.position);
     if (gfxInked) renderInked(); else renderer.render(scene, camera);
@@ -3039,11 +3282,11 @@ function animate() {
     courier.quaternion.setFromRotationMatrix(_m);
     // drift slowly around them so the street stays alive behind the phone
     const orbit = Math.sin(t * 0.16) * 0.5 + 2.4;
-    const off = heading.clone().multiplyScalar(-Math.cos(orbit) * 4.2)
-      .addScaledVector(_right, Math.sin(orbit) * 4.2);
+    const off = heading.clone().multiplyScalar(-Math.cos(orbit) * 8.5)
+      .addScaledVector(_right, Math.sin(orbit) * 8.5);
     // slide the eye sideways so the critic sits clear of the phone, not behind it
     off.addScaledVector(_right, -3.1);
-    camera.position.lerp(courier.position.clone().addScaledVector(dir, 2.0).add(off), 0.05);
+    camera.position.lerp(courier.position.clone().addScaledVector(dir, 4.2).add(off), 0.05);
     camera.up.lerp(dir, 0.08).normalize();
     camera.lookAt(courier.position.clone().addScaledVector(dir, 1.0));
     updateWorldAmbient(dt, t);
@@ -3103,6 +3346,7 @@ function animate() {
     if (speed > 0.001) {
       dir.multiplyScalar(R).addScaledVector(heading, speed * dt).normalize();
       heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
+      collide();
     }
 
     // sailing ends at the shoreline — beach the boat and hop out
@@ -3222,7 +3466,7 @@ function animate() {
   // npcs idle — a little breath, a little head-bob
   for (const p of npcs) {
     const ph = p.userData.phase;
-    p.userData.head.position.y = 0.9 + Math.sin(t * 2 + ph) * 0.025;
+    p.userData.head.position.y = 0.72 + Math.sin(t * 2 + ph) * 0.025;
     p.scale.y = 1.35 * (1 + Math.sin(t * 2.6 + ph) * 0.02);
   }
 
