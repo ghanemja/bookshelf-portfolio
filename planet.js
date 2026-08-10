@@ -415,6 +415,8 @@ const STOP_DIRS = {
 };
 // stops that get flat land pedestals like landmarks do (not the overlook — it clings to the mountain)
 const STOP_PEDESTALS = [STOP_DIRS.central, STOP_DIRS.lakeside, STOP_DIRS.farside, STOP_DIRS.museumst, STOP_DIRS.boardwalk];
+// a wide sandy bay on the south coast, for the beach, the dock and the fishing
+const BEACH = ll(-16, -60);
 // a channel of open water south-west of downtown, spanned by the big bridge
 const STRAIT = DOWNTOWN.clone().multiplyScalar(0.4)
   .addScaledVector(STOP_DIRS.boardwalk, 0.6).normalize();
@@ -446,11 +448,17 @@ function surfH(d) {
   }
   // downtown is built on a plateau — a grid can't sit on terraced hillside
   const aC = Math.acos(THREE.MathUtils.clamp(d.dot(DOWNTOWN), -1, 1));
-  const kC = Math.exp(-Math.pow(aC / 0.52, 6));
+  const kC = Math.exp(-Math.pow(aC / 0.70, 6));
   h = h * (1 - kC) + (SEA_H + 0.92) * kC;
   // the strait the bridge spans — carved AFTER the plateau or it gets filled in
   const aS2 = 2 - 2 * d.dot(STRAIT);
   h -= 2.6 * Math.exp(-aS2 / (0.085 * 0.085));
+  // the beach: flatten a broad shelf so the land wades gently into the water
+  const aB2 = 2 - 2 * d.dot(BEACH);
+  if (aB2 < 0.35) {
+    const kB = Math.exp(-aB2 / (0.17 * 0.17));
+    h = h * (1 - kB) + (SEA_H - 0.10) * kB;
+  }
   return h;
 }
 const radiusAt = (d) => R + surfH(d) * H_AMP;
@@ -487,7 +495,12 @@ function foundation(radius, depth = 2.6, sides = 10) {
 }
 
 // solid footprints: {dir, r} where r is an ARC radius in radians
-const solids = [];
+const solids = [];            // {dir, r} footprints you cannot walk through
+const roadParts = [];         // road meshes, retinted by the vibe toggle
+const cityWindowMats = [];    // tower window materials, lit after dark
+const traffic = [];           // cars and pedestrians that actually move
+const bobbers = [];           // moored boats that rock on the swell
+const npcs = [];              // everyone standing around the world
 function addSolid(dirVec, worldRadius) { solids.push({ dir: dirVec.clone(), r: worldRadius / R }); }
 
 const UP_Y = new THREE.Vector3(0, 1, 0);
@@ -564,8 +577,8 @@ function paintTerrain(T) {
     for (let k = 0; k < 3; k++) { const q = new THREE.Vector3().fromBufferAttribute(p, f + k); v.add(q); }
     v.normalize();
     const aCity = v.angleTo(DOWNTOWN);
-    if (aCity < 0.54 && h > SEA_H + 0.05) {
-      const k2 = THREE.MathUtils.smoothstep(aCity, 0.40, 0.54);   // fades into grass
+    if (aCity < 0.72 && h > SEA_H + 0.05) {
+      const k2 = THREE.MathUtils.smoothstep(aCity, 0.56, 0.72);   // fades into grass
       c.lerp(CONCRETE, 1 - k2);
     }
     const jit = 0.965 + jr() * 0.07;
@@ -823,7 +836,6 @@ function slerpDir(a, b, t) {
   return a.clone().multiplyScalar(Math.sin((1 - t) * th) / s)
     .addScaledVector(b, Math.sin(t * th) / s).normalize();
 }
-const roadParts = [];   // tinted by the vibe toggle
 {
   const pts = [];
   for (let i = 0; i < LANDMARKS.length; i++) {
@@ -1136,8 +1148,6 @@ function bandLandDir(minArc = 0.12) {   // sample near the equatorial street
   }
   return randomLandDir(minArc);
 }
-const cityWindowMats = [];
-const traffic = [];   // cars and pedestrians that actually move
 const lampBulbMat = new THREE.MeshStandardMaterial({
   color: 0xfff2c8, emissive: 0xffd98a, emissiveIntensity: 0.5,
 });
@@ -1461,8 +1471,14 @@ mark('downtown:start');
   const at = (x, y) => DOWNTOWN.clone().multiplyScalar(R)
     .addScaledVector(cEast, x).addScaledVector(cNorth, y).normalize();
 
-  const BLOCK = 4.0;          // block pitch, centre to centre
-  const ROAD_W = 0.85;        // half-width of the asphalt
+  // Every dimension below is derived, not guessed. A person is 0.6 wide and a
+  // jeep 1.5, so the carriageway and footway are sized from those and the
+  // buildable area is whatever is left. Nothing may be built outside it.
+  const BLOCK = 5.5;          // block pitch, centre to centre
+  const ROAD_W = 1.0;         // half-width of asphalt (2.0 total: a jeep is 1.5)
+  const WALK_W = 0.7;         // footway width (a person is 0.6 across)
+  const EDGE = ROAD_W + WALK_W;                 // kerb outer edge from centreline
+  const BUILDABLE = BLOCK / 2 - EDGE - 0.05;    // half-width of the plot
   const N = 2;                // blocks out from centre, each way
 
   // streets: an open ribbon, same construction as the highway
@@ -1584,24 +1600,20 @@ mark('downtown:start');
         const per = 1 + Math.floor(rand() * 2);
         for (let k = 0; k < per; k++) {
           const h = (7.5 + rand() * 6.5) * (1.15 - fromCentre * 0.35);
-          tower(cx + (rand() - 0.5) * (BLOCK - 3.4), cy + (rand() - 0.5) * (BLOCK - 3.4),
-            Math.max(6.0, h), 1.6 + rand() * 1.0, 1.6 + rand() * 1.0,
-            towerMats[(mi++) % towerMats.length], Math.round(rand() * 4) * Math.PI / 2);
+          plot(cx, cy, Math.max(6.0, h), 1.2 + rand() * 0.5, mi++);
         }
       } else if (ring <= N) {                          // ── midrise: shops + flats
         if (rand() < 0.1) { plaza(cx, cy); continue; }
         const per = 1 + Math.floor(rand() * 2);
         for (let k = 0; k < per; k++) {
-          const h = 2.7 + rand() * 2.2;
-          tower(cx + (rand() - 0.5) * (BLOCK - 3.0), cy + (rand() - 0.5) * (BLOCK - 3.0),
-            h, 1.5 + rand() * 0.9, 1.5 + rand() * 0.9,
-            towerMats[(mi++) % towerMats.length], Math.round(rand() * 4) * Math.PI / 2);
+          plot(cx, cy, 2.7 + rand() * 2.2, 1.2 + rand() * 0.5, mi++);
         }
       } else {                                         // ── suburbs: houses + yards
         if (rand() < 0.2) { park(cx, cy, 3); continue; }
         const homes = 1 + Math.floor(rand() * 2);
         for (let k = 0; k < homes; k++) {
-          const ox = (rand() - 0.5) * (BLOCK - 1.8), oy = (rand() - 0.5) * (BLOCK - 1.8);
+          const room = Math.max(0, BUILDABLE - 0.85);
+          const ox = (rand() - 0.5) * 2 * room, oy = (rand() - 0.5) * 2 * room;
           const dd = at(cx + ox, cy + oy);
           if (!isLand(dd, 0.05)) continue;
           const h = cottage();
@@ -1620,6 +1632,16 @@ mark('downtown:start');
         }
       }
     }
+  }
+
+  // the only way a building gets placed: size and jitter are clamped so the
+  // footprint always stays inside the plot, clear of footway and carriageway
+  function plot(cx, cy, h, halfW, idx) {
+    const hw = Math.min(halfW, BUILDABLE * 0.86);
+    const room = Math.max(0, BUILDABLE - hw);
+    const ox = (rand() - 0.5) * 2 * room, oy = (rand() - 0.5) * 2 * room;
+    tower(cx + ox, cy + oy, h, hw * 2, hw * 2,
+      towerMats[idx % towerMats.length], Math.round(rand() * 4) * Math.PI / 2);
   }
 
   function plaza(cx, cy) {
@@ -1656,11 +1678,11 @@ mark('downtown:start');
   for (let i = -N; i <= N; i++) {
     for (const axis of [0, 1]) {
       for (const side of [-1, 1]) {
-        const o = i * BLOCK + side * (ROAD_W + 0.42);
+        const o = i * BLOCK + side * (ROAD_W + WALK_W / 2);
         const ext = BLOCK * (N + 0.5);
         const a = axis ? at(-ext, o) : at(o, -ext);
         const b = axis ? at(ext, o) : at(o, ext);
-        street(a, b, 0.42, 0.14, 'roadLine');
+        street(a, b, WALK_W / 2, 0.14, 'roadLine');
       }
     }
   }
@@ -1939,6 +1961,126 @@ mark('bridge:start');
         }
       }
     }
+  }
+}
+
+// ─── THE BAY: beach, dock, fishing boats and the people who use them ────────
+{
+  const bEast = new THREE.Vector3(0, 1, 0).cross(BEACH).normalize();
+  const bNorth = new THREE.Vector3().crossVectors(BEACH, bEast).normalize();
+  const bAt = (x, y) => BEACH.clone().multiplyScalar(R)
+    .addScaledVector(bEast, x).addScaledVector(bNorth, y).normalize();
+
+  // find which way is out to sea, so the dock runs the right direction
+  let seaSign = 1, best = -1e9;
+  for (const sgn of [-1, 1]) {
+    const depth = SEA_H - surfH(bAt(0, sgn * 7));
+    if (depth > best) { best = depth; seaSign = sgn; }
+  }
+
+  // ── the dock: a long jetty on pilings, with a shack and moored boats
+  const DOCK_LEN = 13;
+  for (let i = 0; i < DOCK_LEN; i++) {
+    const y = seaSign * (1.5 + i * 1.05);
+    const d = bAt(0, y);
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.14, 1.05), WOOD);
+    deck.position.copy(d.clone().multiplyScalar(SEA_R + 0.55));
+    alignToSurface(deck, d, yawToFace(d, BEACH));
+    deck.receiveShadow = !IS_TOUCH;
+    scene.add(deck);
+    if (i % 2 === 0) {
+      for (const sx of [-1.05, 1.05]) {
+        const pd = bAt(sx, y);
+        const pile = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.2, 6), M(0x6b4a2b));
+        pile.position.copy(pd.clone().multiplyScalar(SEA_R - 0.35));
+        alignToSurface(pile, pd);
+        scene.add(pile);
+      }
+    }
+    if (i % 4 === 1) {                       // lamp posts down the jetty
+      const pd = bAt(1.05, y);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.5, 6), M(0x2d2138));
+      post.position.copy(pd.clone().multiplyScalar(SEA_R + 1.35));
+      alignToSurface(post, pd); scene.add(post);
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), lampBulbMat);
+      bulb.position.copy(pd.clone().multiplyScalar(SEA_R + 2.15));
+      scene.add(bulb);
+    }
+  }
+  // the bait shack at the head of the jetty
+  {
+    const d = bAt(-2.2, seaSign * 2.0);
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.25, 1.5), M(0xdfe6ec));
+    body.position.y = 0.62; g.add(body);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(1.55, 0.7, 4), M(0xc7572a));
+    roof.position.y = 1.6; roof.rotation.y = Math.PI / 4; g.add(roof);
+    const door = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.8, 0.08), M(0x6b4a2b));
+    door.position.set(0, 0.4, 0.78); g.add(door);
+    g.add(foundation(1.1, 2.0, 6));
+    g.position.copy(settleOn(d, 1.1, 0.1));
+    alignToSurface(g, d, yawToFace(d, bAt(0, seaSign * 8)));
+    scene.add(g);
+    addSolid(d, 1.1);
+  }
+
+  // ── people fishing: some on the jetty, some down on the sand
+  const anglerSpots = [
+    [1.15, seaSign * 6.3], [-1.15, seaSign * 9.5], [1.15, seaSign * 12.0],
+    [-1.15, seaSign * 4.2], [3.4, seaSign * 1.2], [-4.1, seaSign * 0.6],
+  ];
+  anglerSpots.forEach(([x, y], i) => {
+    const d = bAt(x, y);
+    const onDock = Math.abs(x) < 1.6 && Math.abs(y) > 2;
+    const p = makePerson([0x2d6ea8, 0xff7eb6, 0xffd23d, 0x2dd47b][i % 4], i % 2 ? 0x2d2138 : null);
+    p.scale.setScalar(0.78);
+    p.position.copy(onDock ? d.clone().multiplyScalar(SEA_R + 0.62) : settleOn(d, 0.3, 0.02));
+    alignToSurface(p, d, yawToFace(d, bAt(x, y + seaSign * 4)));
+    scene.add(p);
+    npcs.push(Object.assign(p, { userData: { head: p.userData.head, phase: i * 2.1 } }));
+    // the rod, angled out over the water
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.03, 1.7, 4), WOOD);
+    rod.position.copy((onDock ? d.clone().multiplyScalar(SEA_R + 1.2) : posOn(d, 0.62)));
+    alignToSurface(rod, d, yawToFace(d, bAt(x, y + seaSign * 4)));
+    rod.rotateX(-0.95);
+    scene.add(rod);
+    // a bucket for the catch
+    const bucket = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.1, 0.22, 7), M(0xc7572a));
+    bucket.position.copy(onDock ? d.clone().multiplyScalar(SEA_R + 0.6) : settleOn(d, 0.2, 0.0));
+    bucket.translateOnAxis(new THREE.Vector3(1, 0, 0), 0.4);
+    scene.add(bucket);
+  });
+
+  // ── moored fishing boats along the jetty
+  for (const [x, y, hue] of [[2.1, seaSign * 5.0, 0xff4d6e], [-2.1, seaSign * 8.0, 0x4e8eff], [2.1, seaSign * 11.0, 0xffd23d]]) {
+    const d = bAt(x, y);
+    const g = new THREE.Group();
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.42, 2.2), M(hue));
+    hull.position.y = 0.2; g.add(hull);
+    const bow = new THREE.Mesh(new THREE.ConeGeometry(0.48, 0.7, 4), M(hue));
+    bow.rotation.x = Math.PI / 2; bow.rotation.z = Math.PI / 4;
+    bow.position.set(0, 0.2, 1.4); g.add(bow);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.7), M(0xfffaf2));
+    cabin.position.set(0, 0.62, -0.5); g.add(cabin);
+    const mastB = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.6, 5), WOOD);
+    mastB.position.set(0, 1.0, 0.3); g.add(mastB);
+    g.position.copy(d.clone().multiplyScalar(SEA_R - 0.08));
+    alignToSurface(g, d, yawToFace(d, bAt(x, y + seaSign * 3)));
+    scene.add(g);
+    bobbers.push(g);
+  }
+
+  // ── beach clutter: umbrellas, towels, a rowboat pulled up on the sand
+  for (let i = 0; i < 7; i++) {
+    const d = bAt(-9 + i * 3.1 + rand() * 1.4, -seaSign * (1.2 + rand() * 2.6));
+    if (surfH(d) < SEA_H) continue;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.15, 5), M(0xfffaf2));
+    pole.position.copy(settleOn(d, 0.2, 0)); pole.translateY(0.55);
+    alignToSurface(pole, d); scene.add(pole);
+    const shade = new THREE.Mesh(new THREE.ConeGeometry(0.85, 0.42, 9),
+      M([0xff4d6e, 0xffd23d, 0x33c9ff][i % 3]));
+    shade.position.copy(posOn(d, 1.15));
+    alignToSurface(shade, d); scene.add(shade);
   }
 }
 
@@ -2341,7 +2483,6 @@ defStop('cape', { dir: padDir, name: 'Cape Far Side', npc: { face: '👩‍🚀'
   launches: true });
 
 // the NPCs stand at their stops whether or not your route goes there
-const npcs = [];
 {
   const palette = [0xff7eb6, 0x4e8eff, 0x2dd47b, 0xb265ff, 0xff8a3d, 0x33c9ff, 0xffd23d, 0xff4d6e];
   let pi = 0;
@@ -3122,7 +3263,17 @@ function beginRun(t) {
 // edge along the great circle we came in on
 const _colAxis = new THREE.Vector3();
 function collide() {
-  const rider = TRANSPORT[transport].hover < 0.2 ? 0.3 : 0.55;   // on foot you fit through more
+  const rider = transport === 'walk' ? 0.3 : 0.62;
+  for (const v of traffic) {                       // vehicles are solid too
+    if (!v.pos) continue;
+    const rr = (rider + (v.kind === 'car' ? 0.7 : 0.3)) / R;
+    const a = dir.angleTo(v.pos);
+    if (a >= rr || a < 1e-6) continue;
+    _colAxis.crossVectors(v.pos, dir);
+    if (_colAxis.lengthSq() < 1e-12) continue;
+    dir.copy(v.pos).applyAxisAngle(_colAxis.normalize(), rr).normalize();
+    speed *= 0.5;
+  }
   for (const so of solids) {
     const a = dir.angleTo(so.dir);
     const rr = so.r + rider / R;
@@ -3224,9 +3375,22 @@ function updateWorldAmbient(dt, t) {
   const _tPos = new THREE.Vector3(), _tNext = new THREE.Vector3(), _tRight = new THREE.Vector3();
   const _tM = new THREE.Matrix4();
   for (const v of traffic) {
-    v.t += v.speed * dt;
+    // slow for whatever is in front: the player, or the vehicle ahead
+    let block = 1;
+    if (v.pos) {
+      const gap = dir.angleTo(v.pos) * R;
+      if (gap < 2.2) block = Math.max(0, (gap - 0.9) / 1.3);
+      for (const o of traffic) {
+        if (o === v || o.kind !== v.kind || !o.pos) continue;
+        if (Math.abs(o.t - v.t) > 0.08) continue;             // same stretch of road
+        const ahead = o.pos.angleTo(v.pos) * R;
+        if (ahead < 1.8 && o.t > v.t) block = Math.min(block, Math.max(0, (ahead - 0.8) / 1.0));
+      }
+    }
+    v.t += v.speed * dt * block;
     if (v.t > 1) v.t -= 1;
     const d = slerpDir(v.a, v.b, v.t);
+    v.pos = d;
     const dn = slerpDir(v.a, v.b, (v.t + 0.004) % 1);
     _tPos.copy(d).multiplyScalar(Math.max(radiusAt(d), SEA_R) + (v.kind === 'car' ? 0.09 : 0.10));
     _tNext.copy(dn).sub(d.clone().multiplyScalar(d.dot(dn))).normalize();
@@ -3237,6 +3401,12 @@ function updateWorldAmbient(dt, t) {
     if (v.kind === 'ped') {                       // a little walking bounce
       v.obj.position.addScaledVector(d, Math.abs(Math.sin(t * 6 + v.phase)) * 0.05);
     }
+  }
+
+  for (let i = 0; i < bobbers.length; i++) {          // boats rock at their moorings
+    const b = bobbers[i];
+    b.rotation.z = Math.sin(t * 1.1 + i) * 0.05;
+    b.rotation.x = Math.sin(t * 0.8 + i * 2) * 0.035;
   }
 
   // ambient motion
