@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -2864,12 +2865,13 @@ function buildFarm(anchor, label) {
   const shopRoof = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.12, 1.35), M(0xc7572a));
   shopRoof.position.set(0, 1.28, -1.4); g.add(shopRoof);
   g.add(foundation(2.0, 2.2, 6));
-  g.position.copy(settleOn(GAS_DIR, 2.0, 0.1));
+  g.scale.setScalar(1.7);                                // limo-scale, not toy-scale
+  g.position.copy(settleOn(GAS_DIR, 3.3, 0.1));
   alignToSurface(g, GAS_DIR, yawToFace(GAS_DIR, mid));   // pumps face the road
   g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
   scene.add(g);
-  addSolid(GAS_DIR, 1.9, g);
-  tinySign('⛽ Gas-N-Go', posOn(GAS_DIR, 3.4));
+  addSolid(GAS_DIR, 3.2, g);
+  tinySign('⛽ Gas-N-Go', posOn(GAS_DIR, 5.2));
 }
 
 buildFarm(FARM_A, '🌾 Harvest Fields');
@@ -3102,6 +3104,7 @@ function buildBike() {
   const basket = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.26, 0.3), M(0xc9a06a));
   basket.position.set(0, 0.86, 0.62); g.add(basket);
   const rider = makePerson(0x2d2138, 0xff4d6e);
+  rider.name = 'riderSlot';
   rider.position.set(0, 0.5, -0.35);
   g.add(rider);
   g.userData.wheels = wheels;
@@ -3138,6 +3141,7 @@ function buildBoat() {
   jib.rotation.y = Math.PI / 2 - 0.5;
   jib.position.set(-0.14, 1.5, 0.85); g.add(jib);
   const rider = makePerson(0x2d2138, 0xff4d6e);
+  rider.name = 'riderSlot';
   rider.position.set(0, 0.72, -0.75);   // sits ON the deck, not in it
   g.add(rider);
   g.userData.wheels = [];
@@ -3175,6 +3179,7 @@ function buildTrain() {
     w.position.set(wx, 0.28, wz); g.add(w); wheels.push(w);
   }
   const rider = makePerson(0x2d2138, 0xff4d6e);
+  rider.name = 'riderSlot';
   rider.position.set(0, 0.8, -0.75);
   g.add(rider);
   g.userData.wheels = wheels;
@@ -3183,21 +3188,82 @@ function buildTrain() {
 }
 
 const bodies = { jeep: buildJeep(), walk: buildCritic(), bike: buildBike(), train: buildTrain(), boat: buildBoat() };
-// the Blender-rigged critic replaces the procedural one once the GLB lands
-let walkMixer = null, walkAction = null;
-const CRITIC_S = 0.136;                            // 9.19 blender units → ~1.25 game height
+// ── the Blender-rigged critic IS the main character — one skinned instance per
+// body, each looping the pose baked for that ride, with mount/dismount intros ──
+const FACE_Y = -Math.PI / 2;                       // model faces +X → turn to face +Z (travel dir)
+// frame ranges (0-based, 24 fps) carved out of the single baked timeline in critic.glb
+const SUBCLIPS = {
+  Walk: [0, 23], RideBike: [24, 47], Sail: [48, 71], SitDrive: [72, 83], RideTrain: [84, 107],
+  MountBike: [108, 119], DismountBike: [120, 131], BoardBoat: [132, 143], LeaveBoat: [144, 155],
+};
+const RIDE_CLIP = { walk: 'Walk', jeep: 'SitDrive', bike: 'RideBike', boat: 'Sail', train: 'RideTrain' };
+// how she sits in each body. yRig centres the model on the holder; holder pos is
+// the seat in body-space. These are eyeball starting points — easy to nudge.
+const RIDER_XF = {
+  walk:  { pos: [0, 0, 0],       s: 0.136, yRig: 4.593 * 0.136 },  // feet on the ground
+  jeep:  { pos: [0.30, 0.62, -0.05], s: 0.11,  yRig: 0 },
+  bike:  { pos: [0, 0.66, -0.32], s: 0.115, yRig: 0 },
+  boat:  { pos: [0, 0.74, -0.70], s: 0.12,  yRig: 0 },
+  train: { pos: [0, 0.84, -0.75], s: 0.12,  yRig: 0 },
+};
+const CRITIC = { clips: {}, insts: {} };           // insts[key] = { holder, mixer, cur, intro, actions }
+let criticReady = false;
+
+function playClip(inst, name, { loop = true, fade = 0.18, then = null } = {}) {
+  const act = inst.actions[name]; if (!act) return;
+  act.reset();
+  act.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+  act.clampWhenFinished = !loop;
+  act.timeScale = 1;
+  act.enabled = true;
+  if (inst.cur && inst.cur !== act) { act.play(); act.crossFadeFrom(inst.cur, fade, false); }
+  else act.play();
+  inst.cur = act;
+  if (then) {
+    const mx = inst.mixer;
+    const onFin = (e) => { if (e.action === act) { mx.removeEventListener('finished', onFin); then(); } };
+    mx.addEventListener('finished', onFin);
+  }
+}
+// pick the clip for a mode, with a get-on / get-off intro when entering on the ground
+function playRide(t, prev) {
+  const inst = CRITIC.insts[t]; if (!inst) return;
+  const ride = RIDE_CLIP[t] || 'Walk';
+  let intro = null;
+  if (t === 'bike') intro = 'MountBike';
+  else if (t === 'boat') intro = 'BoardBoat';
+  else if (t === 'walk' && prev === 'bike') intro = 'DismountBike';
+  else if (t === 'walk' && prev === 'boat') intro = 'LeaveBoat';
+  if (intro) { inst.intro = true; playClip(inst, intro, { loop: false, then: () => { inst.intro = false; playClip(inst, ride); } }); }
+  else { inst.intro = false; playClip(inst, ride); }
+}
+
 new GLTFLoader().load('./models/critic.glb', (glb) => {
-  const rig = glb.scene;
-  rig.scale.setScalar(CRITIC_S);
-  rig.position.y = 4.593 * CRITIC_S;              // drop feet onto the ground plane (y=0)
-  rig.rotation.y = -Math.PI / 2;                  // model faces +X → turn to face +Z (travel dir)
-  rig.traverse(m => { if (m.isMesh) { m.castShadow = !IS_TOUCH; m.frustumCulled = false; } });
-  bodies.walk.clear();                            // out with the pose-rigged boxes
-  bodies.walk.add(rig);
-  bodies.walk.userData.wheels = [];
-  walkMixer = new THREE.AnimationMixer(rig);
-  const clip = THREE.AnimationClip.findByName(glb.animations, 'Walk') || glb.animations[0];
-  if (clip) { walkAction = walkMixer.clipAction(clip); walkAction.play(); }
+  const base = glb.animations[0];
+  for (const [n, [a, b]] of Object.entries(SUBCLIPS))
+    CRITIC.clips[n] = THREE.AnimationUtils.subclip(base.clone(), n, a, b, 24);
+  for (const key of Object.keys(RIDER_XF)) {
+    const rig = skeletonClone(glb.scene);
+    rig.traverse(m => { if (m.isMesh) { m.castShadow = !IS_TOUCH; m.frustumCulled = false; } });
+    const xf = RIDER_XF[key];
+    rig.scale.setScalar(xf.s);
+    rig.position.set(0, xf.yRig, 0);
+    rig.rotation.y = FACE_Y;
+    const holder = new THREE.Group();
+    holder.position.set(...xf.pos);
+    holder.add(rig);
+    const mixer = new THREE.AnimationMixer(rig);
+    const inst = { holder, mixer, cur: null, intro: false, actions: {} };
+    for (const n of Object.keys(CRITIC.clips)) inst.actions[n] = mixer.clipAction(CRITIC.clips[n]);
+    CRITIC.insts[key] = inst;
+    const body = bodies[key];
+    if (key === 'walk') body.clear();                          // out with the pose-rigged boxes
+    else { const old = body.getObjectByName('riderSlot'); if (old) old.removeFromParent(); }
+    body.add(holder);
+    body.userData.wheels = body.userData.wheels || [];
+  }
+  criticReady = true;
+  playRide(transport, null);
 }, undefined, (e) => console.warn('critic GLB failed, keeping procedural rig:', e?.message || e));
 for (const k of Object.keys(bodies)) { bodies[k].visible = (k === 'jeep'); courier.add(bodies[k]); }
 let courierBody = bodies.jeep;
@@ -4119,6 +4185,15 @@ function buildArrPath() {
     out.push(pts[pts.length - 1]);
     pts = out;
   }
+  // extra corner-softening over the whole assembled route
+  for (let pass = 0; pass < 4; pass++) {
+    const out = [pts[0]];
+    for (let i = 1; i < pts.length - 1; i++) {
+      out.push(pts[i].clone().multiplyScalar(2).add(pts[i - 1]).add(pts[i + 1]).normalize());
+    }
+    out.push(pts[pts.length - 1]);
+    pts = out;
+  }
   arrPath = pts;
   arrArcs = [0];
   for (let i = 1; i < pts.length; i++) arrArcs.push(arrArcs[i - 1] + pts[i - 1].angleTo(pts[i]));
@@ -4255,7 +4330,10 @@ function drawCabinPainting() {
 
 // grease-pencil pass over a PHOTO: sobel edges become hand-inked strokes,
 // and a paper tint pulls the photo toward the drawn world
-function greaseOverPhoto(img) {
+function greaseOverPhoto(img, seed) {
+  // PROPER line work: sparse, thin strokes traced along strong CONTOURS only,
+  // sampled on a stride so lines read as drawn edges, not confetti. Two
+  // seeds give two slightly different drawings — swapped at ~6fps = boil.
   const W = 1024, H = Math.round(1024 * img.height / img.width);
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
@@ -4268,35 +4346,41 @@ function greaseOverPhoto(img) {
   d2.drawImage(img, 0, 0, dW, dH);
   const px = d2.getImageData(0, 0, dW, dH).data;
   const lum = (i) => px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114;
-  c.strokeStyle = 'rgba(24, 18, 28, 0.85)';
+  c.strokeStyle = 'rgba(30, 22, 32, 0.6)';
   c.lineCap = 'round';
-  const jr = mulberry32(9);
-  for (let y = 1; y < dH - 1; y++) {
-    for (let x = 1; x < dW - 1; x++) {
+  const jr = mulberry32(seed);
+  for (let y = 2; y < dH - 2; y += 3) {            // stride: sparse, not dense
+    for (let x = 2; x < dW - 2; x += 3) {
       const i = (y * dW + x) * 4;
       const gx = lum(i + 4) - lum(i - 4);
       const gy = lum(i + dW * 4) - lum(i - dW * 4);
       const mag = Math.hypot(gx, gy);
-      if (mag > 46 && jr() > 0.35) {
-        const ang = Math.atan2(gy, gx) + Math.PI / 2;   // stroke ALONG the edge
-        const sx = (x / dW) * W + (jr() - 0.5) * 3;
-        const sy = (y / dH) * H + (jr() - 0.5) * 3;
-        const ln = 3 + jr() * 6;
-        c.lineWidth = 1.2 + jr() * 1.8;
-        c.beginPath();
-        c.moveTo(sx - Math.cos(ang) * ln, sy - Math.sin(ang) * ln);
-        c.lineTo(sx + Math.cos(ang) * ln, sy + Math.sin(ang) * ln);
-        c.stroke();
+      if (mag < 88) continue;                      // strong contours only
+      // follow the contour a few steps: one continuous stroke, not a tick
+      let ang = Math.atan2(gy, gx) + Math.PI / 2 + (jr() - 0.5) * 0.15;
+      let sx = (x / dW) * W, sy = (y / dH) * H;
+      c.lineWidth = 1.1 + jr() * 0.9;
+      c.beginPath();
+      c.moveTo(sx, sy);
+      for (let st = 0; st < 3; st++) {
+        sx += Math.cos(ang) * (7 + jr() * 5);
+        sy += Math.sin(ang) * (7 + jr() * 5);
+        ang += (jr() - 0.5) * 0.35;                // hand wander
+        c.lineTo(sx, sy);
       }
+      c.stroke();
     }
   }
-  c.globalCompositeOperation = 'multiply';           // paper tint
-  c.fillStyle = 'rgba(244, 236, 218, 0.55)';
+  c.globalCompositeOperation = 'multiply';         // paper tint
+  c.fillStyle = 'rgba(246, 239, 224, 0.5)';
   c.fillRect(0, 0, W, H);
   c.globalCompositeOperation = 'source-over';
   return cv;
 }
 
+// the cabin is a PAINTING: a hand-drawn NetJets-style interior on one
+// billboard (the critic never walks, so it reads as a room), plus a real
+// porthole to the left that the camera turns to for the planet-below shot
 function buildCabin() {
   const g = new THREE.Group();
   const tex = new THREE.CanvasTexture(drawCabinPainting());
@@ -4309,10 +4393,12 @@ function buildCabin() {
   // the REAL NetJets photo takes over the moment models/cabin.jpg exists
   const photo = new Image();
   photo.onload = () => {
-    const gt = new THREE.CanvasTexture(greaseOverPhoto(photo));
-    gt.colorSpace = THREE.SRGBColorSpace;
-    board.material.map = gt;
+    const gtA = new THREE.CanvasTexture(greaseOverPhoto(photo, 9));
+    const gtB = new THREE.CanvasTexture(greaseOverPhoto(photo, 71));
+    gtA.colorSpace = gtB.colorSpace = THREE.SRGBColorSpace;
+    board.material.map = gtA;
     board.material.needsUpdate = true;
+    board.userData.boil = [gtA, gtB];              // two drawings of the same lines
     board.scale.set(1, (photo.height / photo.width) * (7.2 / 4.5), 1);
   };
   photo.src = './models/cabin.jpg';
@@ -4361,7 +4447,7 @@ function startArrival() {
 }
 
 function updateArrival(dt) {
-  arrivalT += dt / 26;
+  arrivalT += dt / 36;   // an unhurried scene, not a chase
   const T = arrivalT;
   const airAt = frameAt(AIRPORT);
   const limoWait = airAt(2.2, 12).normalize();
@@ -4382,6 +4468,14 @@ function updateArrival(dt) {
     airportPlane.visible = false;
     // turbulence: the whole frame trembles like cruise altitude
     const tt = performance.now() / 1000;
+    const brd = cabin.userData.board;
+    if (brd?.userData.boil) {                      // the line boil: alternate drawings
+      const which = Math.floor(tt * 6) % 2;
+      if (brd.material.map !== brd.userData.boil[which]) {
+        brd.material.map = brd.userData.boil[which];
+        brd.material.needsUpdate = true;
+      }
+    }
     const jx = Math.sin(tt * 23.1) * 0.014 + Math.sin(tt * 13.7) * 0.02;
     const jy = Math.cos(tt * 19.3) * 0.012 + Math.sin(tt * 7.9) * 0.016;
     _aTmp.copy(cabin.localToWorld(new THREE.Vector3(jx, 1.1 + jy, 0)));
@@ -4397,8 +4491,11 @@ function updateArrival(dt) {
       const k = Math.min(1, (T - 0.065) / 0.035);
       const e = k * k * (3 - 2 * k);
       // gaze swings from the cabin down through the floor of sky to the world
+      // out the LEFT window: sideways and a little down — the planet's curve
+      // fills the glass like a view from cruise altitude, not a hole in the floor
+      const sideDir = new THREE.Vector3(-1, 0, 0).applyQuaternion(cabin.quaternion).normalize();
       const lookTarget = _aTmp2.copy(cabin.localToWorld(new THREE.Vector3(0, 1.1, 3.0)))
-        .lerp(cabin.position.clone().addScaledVector(up, -40), e);
+        .lerp(cabin.position.clone().addScaledVector(sideDir, 13).addScaledVector(up, -32), e);
       camera.lookAt(lookTarget);
       // the porthole hangs on that exact sight line, so the planet — clouds,
       // coasts, the whole map from above — is seen through its glass
@@ -4443,14 +4540,17 @@ function updateArrival(dt) {
     const LEG1 = 0.42, STOP = 0.60;                // fractions of K
     let u, driving = true;
     if (K < LEG1) {                                // airport → gas station
-      const k = K / LEG1, e = k * k * (3 - 2 * k);
+      const k = K / LEG1;
+      // constant road speed with a soft start and stop, not a whole-leg ease
+      const e = k < 0.12 ? (k / 0.12) * (k / 0.12) * 0.12 : k > 0.88 ? 1 - ((1 - k) / 0.12) * ((1 - k) / 0.12) * 0.12 : k;
       u = uGas * e;
       if (arrCaption) arrCaption.textContent = '🚘 Heading into town…';
     } else if (K < STOP) {                         // filling up
       u = uGas; driving = false;
       if (arrCaption) arrCaption.textContent = '⛽ Quick stop — topping up the tank';
     } else {                                       // gas → downtown → hotel
-      const k = (K - STOP) / (1 - STOP), e = k * k * (3 - 2 * k);
+      const k = (K - STOP) / (1 - STOP);
+      const e = k < 0.1 ? (k / 0.1) * (k / 0.1) * 0.1 : k > 0.9 ? 1 - ((1 - k) / 0.1) * ((1 - k) / 0.1) * 0.1 : k;
       u = uGas + (1 - uGas) * e;
       if (arrCaption) arrCaption.textContent = '🚘 Into the city…';
     }
@@ -4458,7 +4558,7 @@ function updateArrival(dt) {
     limo.visible = true;
     limo.position.copy(dbl(_apDir));
     alignToSurface(limo, _apDir, yawToFace(_apDir, _apDir.clone().multiplyScalar(R).addScaledVector(_apTan, 2).normalize()));
-    if (driving) for (const w of limo.userData.wheels || []) w.rotation.x += dt * 9;
+    if (driving) for (const w of limo.userData.wheels || []) w.rotation.x += dt * 5;
     // the chauffeur hops out at the pumps
     if (!driving) {
       gasDriver.visible = true;
@@ -4474,8 +4574,8 @@ function updateArrival(dt) {
     _aTmp.copy(limo.position).addScaledVector(_apDir, driving ? 3.2 : 2.4)
       .addScaledVector(_aTmp2.copy(_apTan).negate(), driving ? 6.5 : 3.5);
     if (!driving) _aTmp.addScaledVector(_aTmp2.crossVectors(_apDir, _apTan).normalize(), 4.5);
-    camera.position.lerp(_aTmp, 0.09);
-    camera.up.lerp(_apDir, 0.1).normalize();
+    camera.position.lerp(_aTmp, 0.055);
+    camera.up.lerp(_apDir, 0.08).normalize();
     camera.lookAt(limo.position.clone().addScaledVector(_apDir, 0.6));
   } else if (T < 1.0) {                            // 4. check in at the hotel
     gasDriver.visible = false;
