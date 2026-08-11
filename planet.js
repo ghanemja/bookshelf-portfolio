@@ -1653,8 +1653,23 @@ mark('downtown:start');
     uv.needsUpdate = true;
     const body = new THREE.Mesh(geo, mat);
     body.position.y = h / 2 - 0.5; g.add(body);   // sunk, so short blocks need no plinth
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(w * 1.08, 0.28, d * 1.08), ROOF);
-    cap.position.y = h + 0.14; g.add(cap);
+    // ground-floor: a darker stone base with a doorway
+    const base = new THREE.Mesh(new THREE.BoxGeometry(w * 1.04, 0.9, d * 1.04), M(0x9a8f80));
+    base.position.y = -0.05; g.add(base);
+    const doorw = new THREE.Mesh(new THREE.BoxGeometry(w * 0.3, 0.7, 0.06), M(0x2d2138));
+    doorw.position.set(0, 0.05, d / 2 + 0.02); g.add(doorw);
+    // a cornice lip, then the roof slab
+    const cornice = new THREE.Mesh(new THREE.BoxGeometry(w * 1.12, 0.16, d * 1.12), M(0x746a5e));
+    cornice.position.y = h - 0.5; g.add(cornice);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(w * 1.06, 0.22, d * 1.06), ROOF);
+    cap.position.y = h - 0.36; g.add(cap);
+    // a stepped penthouse on the taller towers
+    if (h > 7 && rand() > 0.4) {
+      const pent = new THREE.Mesh(new THREE.BoxGeometry(w * 0.6, 0.9, d * 0.6), mat);
+      pent.position.y = h - 0.05; g.add(pent);
+      const pcap = new THREE.Mesh(new THREE.BoxGeometry(w * 0.66, 0.14, d * 0.66), ROOF);
+      pcap.position.y = h + 0.42; g.add(pcap);
+    }
     // rooftop clutter, the detail that sells a lived-in city
     if (h > 5.0 && rand() > 0.45) {
       const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.5, 8), M(0x9a6b4f));
@@ -2431,6 +2446,107 @@ function buildFarm(anchor, label) {
 buildFarm(FARM_A, '🌾 Harvest Fields');
 buildFarm(FARM_B, '🌱 West Meadows');
 
+mark('heist:start');
+// ─── THE HEIST: clues in the world, a notebook, and a whodunit ──────────────
+// The critic's rounds turn into a mystery. Every gallery frame is empty; the
+// answer is hidden in things you pass on the way. Drive near a clue to note it.
+const SUSPECTS = [
+  { id: 'valet',   name: 'The Hotel Valet',   face: '🧳', tell: 'someone in a hotel uniform' },
+  { id: 'cyclist', name: 'The Courier',       face: '🚴', tell: 'a bike / a courier' },
+  { id: 'driver',  name: 'The Van Driver',    face: '🚐', tell: 'a white van' },
+];
+const CULPRIT = 'driver';   // the clues below all point at the van
+// each clue: where it sits (lat,lon), the icon, what you witness, who it implicates
+const CLUES = [
+  { at: ll(16, -18), icon: '🏃', text: 'A figure sprinted across the road clutching a flat parcel.', points: 'driver' },
+  { at: ll(20, 10),  icon: '🚲', text: '“Someone stole my bike!” a courier shouts — but his hands are covered in paint.', points: 'cyclist' },
+  { at: ll(6, 34),   icon: '🚐', text: 'A white van idles in a loading zone, engine running, no plates.', points: 'driver' },
+  { at: ll(24, -52), icon: '🧤', text: 'A dropped work glove near the museum service door.', points: 'driver' },
+  { at: ll(-4, 60),  icon: '🪜', text: 'A ladder leans against a wall below an open skylight.', points: 'driver' },
+  { at: ll(14, -96), icon: '🎨', text: 'A smear of fresh varnish on the kerb — still tacky.', points: 'cyclist' },
+];
+const foundClues = new Set(JSON.parse(localStorage.getItem('heist-clues') || '[]'));
+let heistSolved = localStorage.getItem('heist-solved') === '1';
+
+// a little marker at each clue: an evidence cone that bobs and glints
+CLUES.forEach((c, i) => {
+  const g = new THREE.Group();
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.7, 4),
+    new THREE.MeshStandardMaterial({ color: 0xffd23d, emissive: 0xffb800, emissiveIntensity: 0.7, flatShading: true }));
+  cone.position.y = 0.55; g.add(cone);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.12, 4), M(0x2d2138));
+  band.position.y = 0.4; g.add(band);
+  g.position.copy(posOn(c.at, 0.2));
+  alignToSurface(g, c.at);
+  g.visible = !foundClues.has(i);
+  scene.add(g);
+  c.marker = g;
+});
+
+const noteBtn = document.getElementById('note-btn');
+const noteCount = document.getElementById('note-count');
+const notebook = document.getElementById('notebook');
+const noteList = document.getElementById('note-list');
+const toast = document.getElementById('toast');
+function updateNoteBadge() {
+  const n = foundClues.size;
+  if (noteCount) { noteCount.textContent = n; noteCount.style.display = n ? '' : 'none'; }
+}
+function showToast(txt) {
+  if (!toast) return;
+  toast.textContent = txt;
+  toast.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => toast.classList.remove('show'), 3200);
+}
+function collectClue(i) {
+  if (foundClues.has(i)) return;
+  foundClues.add(i);
+  localStorage.setItem('heist-clues', JSON.stringify([...foundClues]));
+  if (CLUES[i].marker) CLUES[i].marker.visible = false;
+  ping(1180, 0.12); setTimeout(() => ping(1480, 0.1), 90);
+  showToast('🔍 Clue noted: ' + CLUES[i].text);
+  updateNoteBadge();
+}
+function renderNotebook() {
+  if (!noteList) return;
+  const items = CLUES.map((c, i) => foundClues.has(i)
+    ? `<li><span class="ni-ic">${c.icon}</span>${c.text}</li>`
+    : `<li class="locked"><span class="ni-ic">❔</span>— clue not yet found —</li>`).join('');
+  const canSolve = foundClues.size >= 4 && !heistSolved;
+  noteList.innerHTML = `<ul class="ni">${items}</ul>` + (heistSolved
+    ? `<div class="solved">✔ Case closed — you named the thief.</div>`
+    : canSolve
+      ? `<button id="solve-btn">🔍 I know who did it →</button>`
+      : `<div class="ni-hint">Find at least 4 clues to attempt a solution (${foundClues.size}/4).</div>`);
+  const sb = document.getElementById('solve-btn');
+  if (sb) sb.addEventListener('click', openSolve);
+}
+noteBtn?.addEventListener('click', () => {
+  notebook.classList.toggle('show'); renderNotebook();
+});
+document.getElementById('note-close')?.addEventListener('click', () => notebook.classList.remove('show'));
+
+function openSolve() {
+  noteList.innerHTML = `<div class="solve-q">Who stole the paintings?</div>` +
+    `<div class="suspects">` + SUSPECTS.map(su =>
+      `<button class="suspect" data-id="${su.id}"><span>${su.face}</span>${su.name}</button>`).join('') + `</div>`;
+  noteList.querySelectorAll('.suspect').forEach(b => b.addEventListener('click', () => {
+    const right = b.dataset.id === CULPRIT;
+    if (right) {
+      heistSolved = true; localStorage.setItem('heist-solved', '1');
+      burstConfetti(courier.position.clone(), dir.clone());
+      ping(680, 0.16); setTimeout(() => ping(1020, 0.2), 160);
+      noteList.innerHTML = `<div class="verdict win">🎉 Correct! The Van Driver rented a courier disguise, propped a ladder to the skylight, and drove off with the canvases. The tacky varnish and plateless van gave it away.</div>`;
+    } else {
+      ping(220, 0.25);
+      noteList.innerHTML = `<div class="verdict lose">Not quite — the evidence doesn't fit. Look again at the van, the ladder and the glove.</div>` +
+        `<button id="solve-retry">← back to the clues</button>`;
+      document.getElementById('solve-retry').addEventListener('click', renderNotebook);
+    }
+  }));
+}
+
 mark('courier:start');
 // ─── the courier: one group, four possible rides. local +Z = forward ─────────
 const courier = new THREE.Group();
@@ -2904,7 +3020,11 @@ function openDlg(stop) {
   dlgEl.classList.add('show');
   dlgFace.textContent = stop.npc.face;
   dlgName.textContent = stop.npc.name;
-  const text = stop.line[transport] ?? stop.line.all ?? Object.values(stop.line)[0];
+  let text = stop.line[transport] ?? stop.line.all ?? Object.values(stop.line)[0];
+  // the twist: at every gallery the art is gone
+  if (stop.lm && (stop.lm.style === 'library' || stop.lm.style === 'garden' || stop.lm.tag?.includes('art'))) {
+    text = '…the frames are EMPTY. Every canvas — gone. ' + text;
+  }
   clearInterval(dlgTimer);
   let i = 0;
   dlgText.textContent = '';
@@ -3507,6 +3627,101 @@ function updateTitle3D(dt) {
 }
 
 // ─── title screen → GPS phone → play ─────────────────────────────────────────
+
+// ─── THE ARRIVAL: plane lands, Uber to the hotel, check in, then the phone ───
+// A hands-off cinematic that plays after "enter", using the airport and resort
+// that already exist. Ends by handing off to the texts + GPS flow.
+let arrivalT = 0, arrivalPhase = -1, uberCar = null;
+const _aTmp = new THREE.Vector3(), _aTmp2 = new THREE.Vector3(), _aPrev = new THREE.Vector3();
+const arrDir = { plane: null, uberA: null, uberB: null };
+const arrCaption = document.getElementById('arr-caption');
+
+function startArrival() {
+  gameState = 'arrival';
+  arrivalT = 0; arrivalPhase = 0;
+  titleEl.classList.add('hide');
+  title3D.visible = false;
+  document.body.classList.remove('title-mode');
+  applyGfx();
+  startAudio();
+  // the Uber waits at the terminal
+  if (!uberCar) { uberCar = simpleCar(0x1c1620); scene.add(uberCar); }
+  const airAt = frameAt(AIRPORT);
+  arrDir.plane = AIRPORT.clone();
+  arrDir.uberA = airAt(4.5, -3).normalize();      // terminal kerb
+  arrDir.uberB = RESORT.clone();                  // hotel entrance
+  uberCar.visible = false;
+  if (arrCaption) { arrCaption.style.opacity = 1; arrCaption.textContent = '✈ Flight 88 — now arriving'; }
+}
+
+function updateArrival(dt) {
+  arrivalT += dt / 20;                            // ~20s whole sequence
+  const T = arrivalT;
+  const airAt = frameAt(AIRPORT);
+
+  if (T < 0.34) {                                 // 1. the plane lands
+    const k = T / 0.34;
+    if (arrCaption) arrCaption.textContent = '✈ Flight 88 — now arriving';
+    // descend along the runway from high up, touch down, roll out
+    const along = -16 + k * 30;
+    const alt = Math.max(0, (0.5 - k) * 26);
+    const d = airAt(0, along).normalize();
+    airportPlane.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.2 + alt));
+    alignToSurface(airportPlane, d, yawToFace(d, airAt(0, along + 5)));
+    airportPlane.visible = true;
+    // chase the plane down
+    const back = airAt(0, along - 8).normalize();
+    _aTmp.copy(airportPlane.position).addScaledVector(back.clone().sub(d).normalize(), 6).addScaledVector(d, 3);
+    camera.position.lerp(_aTmp, 0.06);
+    camera.up.lerp(d, 0.1).normalize();
+    camera.lookAt(airportPlane.position);
+  } else if (T < 0.5) {                           // 2. hop in the Uber
+    const k = (T - 0.34) / 0.16;
+    if (arrCaption) arrCaption.textContent = '🚕 Your ride is here';
+    const d = arrDir.uberA;
+    uberCar.visible = true;
+    uberCar.position.copy(settleOn(d, 0.5, 0.02));
+    alignToSurface(uberCar, d, yawToFace(d, arrDir.uberB));
+    _aTmp.copy(uberCar.position).addScaledVector(d, 3.2)
+      .addScaledVector(_aTmp2.subVectors(arrDir.uberB, d).normalize(), -5);
+    camera.position.lerp(_aTmp, 0.08);
+    camera.up.lerp(d, 0.1).normalize();
+    camera.lookAt(uberCar.position);
+  } else if (T < 0.86) {                          // 3. drive to the hotel
+    const k = (T - 0.5) / 0.36;
+    if (arrCaption) arrCaption.textContent = '🚕 To the hotel…';
+    const d = slerpDir(arrDir.uberA, arrDir.uberB, k * k * (3 - 2 * k)).normalize();
+    uberCar.visible = true;
+    uberCar.position.copy(dbl(d));
+    const ahead = slerpDir(arrDir.uberA, arrDir.uberB, Math.min(1, k + 0.03)).normalize();
+    alignToSurface(uberCar, d, yawToFace(d, ahead));
+    for (const w of uberCar.userData.wheels || []) {}
+    _aTmp.copy(uberCar.position).addScaledVector(d, 3.0)
+      .addScaledVector(_aTmp2.subVectors(ahead, d).normalize(), -5.5);
+    camera.position.lerp(_aTmp, 0.09);
+    camera.up.lerp(d, 0.1).normalize();
+    camera.lookAt(uberCar.position.clone().addScaledVector(d, 0.6));
+  } else if (T < 1.0) {                           // 4. check in
+    if (arrCaption) arrCaption.textContent = '🏨 Checking in…';
+    const d = arrDir.uberB;
+    uberCar.position.copy(settleOn(d, 0.5, 0.02));
+    alignToSurface(uberCar, d, yawToFace(d, airAt(0, 0)));
+    // rise to look up at the hotel
+    _aTmp.copy(resortHotel ? resortHotel.position : posOn(d, 3)).addScaledVector(d, 3.5)
+      .addScaledVector(_aTmp2.copy(d).cross(UP_Y).normalize(), 7);
+    camera.position.lerp(_aTmp, 0.06);
+    camera.up.lerp(d, 0.08).normalize();
+    camera.lookAt(resortHotel ? resortHotel.position : posOn(d, 3));
+  } else {                                        // done → the phone
+    if (arrCaption) arrCaption.style.opacity = 0;
+    uberCar.visible = false;
+    enterPhone();
+  }
+}
+// drive on whichever is higher, terrain or sea
+function dbl(d) { return d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.42); }
+
+
 let gameState = 'title';
 document.body.classList.add('title-mode');
 const titleEl = document.getElementById('title');
@@ -3521,21 +3736,26 @@ const scrMsg = document.getElementById('scr-msg');
 const scrMap = document.getElementById('scr-map');
 function enterGame() {
   if (gameState !== 'title') return;
+  startArrival();                   // plane → Uber → hotel, then the phone
+}
+// after the arrival cinematic (or straight away in ?title=0), raise the phone
+function enterPhone() {
   gameState = 'msg';
-  titleEl.classList.add('hide');
-  title3D.visible = false;
   phoneEl.classList.add('show');
   scrMsg.classList.add('on');
-  // put the critic on the pavement outside the Library, phone raised
+  scrMap.classList.remove('on');
+  // the critic is now outside the hotel, by the resort
   setTransport('walk');
-  dir = ll(8, -22);
+  dir = RESORT.clone();
   heading = new THREE.Vector3(0, 0, 1);
   heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
   speed = 0;
-  applyGfx();                       // ground-level fog, not the orbit fog
-  startAudio();
+  applyGfx();
 }
 document.getElementById('enter-btn').addEventListener('click', enterGame);
+document.getElementById('arr-skip')?.addEventListener('click', () => {
+  if (gameState === 'arrival') { arrivalT = 1; }   // jump to check-in → phone
+});
 window.addEventListener('keydown', e => { if (e.key === 'Enter' && gameState === 'title') enterGame(); });
 
 document.getElementById('msg-reply').addEventListener('click', () => {
@@ -3716,15 +3936,20 @@ let navAcc = 0;
 {
   const _qs = new URLSearchParams(location.search);
   if (_qs.get('title') === '0') {
-    enterGame();
+    document.body.classList.remove('title-mode');
+    titleEl.classList.add('hide'); title3D.visible = false;
     const tp = _qs.get('transport');
     beginRun(tp && TRANSPORT[tp] ? tp : 'jeep');
     // ?launch=1 rides from the pad; ?launch=0.5 seeks into the flight (dev)
     const lp = _qs.get('launch');
     if (lp !== null) { startLaunch(); launchT = Math.min(0.99, parseFloat(lp) || 0); }
     if (_qs.get('sail') === '1') boardBoat();
+  } else if (_qs.get('arrival') === '1') {
+    startArrival();                 // watch the cinematic straight away (dev)
   } else if (_qs.get('gps')) {
-    enterGame();   // jump straight to the phone (testing)
+    document.body.classList.remove('title-mode');
+    titleEl.classList.add('hide'); title3D.visible = false;
+    enterPhone();                   // jump straight to the phone (testing)
     if (_qs.get('gps') === 'maps') document.getElementById('msg-reply').click();
   }
 }
@@ -3857,6 +4082,15 @@ function animate() {
     updateWorldAmbient(dt, t);
     updatePool(trailPool, dt);
     updatePool(confettiPool, dt);
+    sky.position.copy(camera.position);
+    if (gfxInked) renderInked(); else renderer.render(scene, camera);
+    return;
+  }
+
+  // the arrival cinematic: plane lands, Uber to the hotel, check in
+  if (gameState === 'arrival') {
+    updateArrival(dt);
+    updateWorldAmbient(dt, t);
     sky.position.copy(camera.position);
     if (gfxInked) renderInked(); else renderer.render(scene, camera);
     return;
@@ -4116,6 +4350,7 @@ applyGfx();
 applyVibe();
 updateQuestHUD();
 updateNav();
+updateNoteBadge();
 if (new URLSearchParams(location.search).get('debug') === '1') {
   let meshes = 0, tris = 0;
   scene.traverse(o => {

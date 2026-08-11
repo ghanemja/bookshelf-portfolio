@@ -85,6 +85,77 @@
     display: none;
   }
 
+  /* ── detective notebook, clue toast ── */
+  #note-btn {
+    position: fixed; left: 20px; bottom: 20px; z-index: 22; cursor: pointer;
+    width: 52px; height: 52px; border-radius: 50%; border: 3px solid var(--ink);
+    background: #ffd23d; font-size: 22px; box-shadow: 0 4px 0 var(--ink);
+  }
+  #note-btn #note-count {
+    position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px;
+    background: #ff2e88; color: #fff; border-radius: 999px; font-size: 12px;
+    font-weight: 700; line-height: 20px; text-align: center; border: 2px solid #fffaf2;
+  }
+  body.title-mode #note-btn { display: none; }
+  #toast {
+    position: fixed; left: 50%; bottom: 88px; transform: translate(-50%, 12px);
+    z-index: 23; max-width: min(520px, 88vw);
+    background: rgba(20, 15, 26, 0.9); color: #fffaf2; font-weight: 600;
+    font-size: 14px; padding: 11px 18px; border-radius: 14px;
+    opacity: 0; pointer-events: none; transition: opacity 0.3s, transform 0.3s;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #notebook {
+    position: fixed; left: 20px; bottom: 84px; z-index: 24;
+    width: min(360px, calc(100vw - 40px)); max-height: 62vh; overflow: auto;
+    background: var(--panel); border: 3px solid var(--ink); border-radius: 18px;
+    padding: 14px 16px; box-shadow: 0 18px 50px rgba(45,33,56,0.35);
+    opacity: 0; pointer-events: none; transform: translateY(12px);
+    transition: opacity 0.25s, transform 0.25s;
+  }
+  #notebook.show { opacity: 1; pointer-events: auto; transform: none; }
+  .nb-head { font-weight: 700; font-size: 16px; color: var(--ink); display: flex; justify-content: space-between; align-items: center; }
+  #note-close { border: none; background: none; font-size: 22px; color: var(--ink-dim); cursor: pointer; }
+  ul.ni { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  ul.ni li { font-size: 13px; line-height: 1.4; color: var(--ink); display: flex; gap: 8px;
+    background: #f6f0ea; border-radius: 10px; padding: 8px 10px; }
+  ul.ni li.locked { color: #b3a8c0; font-style: italic; background: #f0ecf4; }
+  .ni-ic { font-size: 16px; }
+  .ni-hint { font-size: 12px; color: var(--ink-dim); margin-top: 10px; }
+  #solve-btn, #solve-retry {
+    margin-top: 12px; width: 100%; cursor: pointer; font-family: inherit; font-weight: 700;
+    font-size: 14px; color: #fff6ec; background: var(--accent); border: none;
+    border-radius: 12px; padding: 11px; box-shadow: 0 3px 0 #d96a40;
+  }
+  .solve-q { font-weight: 700; font-size: 15px; margin: 4px 0 10px; }
+  .suspects { display: flex; flex-direction: column; gap: 8px; }
+  .suspect { cursor: pointer; font-family: inherit; font-weight: 700; font-size: 14px; text-align: left;
+    background: #f0eafc; border: 2px solid var(--panel-edge); border-radius: 12px; padding: 10px 12px; }
+  .suspect span { font-size: 20px; margin-right: 8px; }
+  .suspect:hover { background: #fff2ea; }
+  .verdict { font-size: 14px; line-height: 1.5; padding: 10px; border-radius: 12px; }
+  .verdict.win { background: #e6f7ec; color: #1c6b3a; }
+  .verdict.lose { background: #fdeaea; color: #a02a2a; }
+  .solved { margin-top: 10px; color: #1c6b3a; font-weight: 700; font-size: 13px; }
+
+  /* ── the arrival cinematic caption + skip ── */
+  #arrival-ui { position: fixed; inset: 0; z-index: 44; pointer-events: none; }
+  #arr-caption {
+    position: absolute; left: 50%; top: 8%; transform: translateX(-50%);
+    font-family: "Fredoka", system-ui, sans-serif; font-weight: 700;
+    font-size: clamp(16px, 3vw, 26px); color: #fffaf2;
+    background: rgba(20, 15, 26, 0.6); padding: 8px 22px; border-radius: 999px;
+    backdrop-filter: blur(6px); white-space: nowrap;
+    transition: opacity 0.5s ease; opacity: 0;
+  }
+  #arr-skip {
+    position: absolute; right: 20px; bottom: 20px; pointer-events: auto; cursor: pointer;
+    font-family: inherit; font-weight: 700; font-size: 13px; color: #2d2138;
+    background: rgba(255, 250, 242, 0.85); border: 2px solid #e8d9ea;
+    padding: 8px 16px; border-radius: 999px;
+  }
+  body.title-mode #arrival-ui, body:not(.title-mode) #arrival-ui:has(#arr-caption[style*="opacity: 0"]) { }
+
   /* ── the phone: texts, then maps. shown at ground level ── */
   #phone {
     position: fixed; inset: 0; z-index: 45;
@@ -335,6 +406,18 @@
     <span class="t-hint">or press ⏎</span>
   </div>
 
+  <div id="arrival-ui">
+    <div id="arr-caption"></div>
+    <button id="arr-skip">skip intro ⏭</button>
+  </div>
+
+  <button id="note-btn" title="detective's notebook">🔎<span id="note-count" style="display:none">0</span></button>
+  <div id="toast"></div>
+  <div id="notebook">
+    <div class="nb-head">🕵️ Case Notebook<button id="note-close">×</button></div>
+    <div id="note-list"></div>
+  </div>
+
   <div id="phone">
     <div class="p-frame">
       <div class="p-notch"></div>
@@ -343,9 +426,9 @@
       <div class="p-screen" id="scr-msg">
         <div class="ios-bar"><span class="ios-back">‹</span><span class="ios-title">Editor · The Chronicle</span><span class="ios-av">📰</span></div>
         <div class="ios-thread">
-          <div class="bub in b1">Hi! Reminder — we're expecting your art critiques for <b>both</b> shows tonight.</div>
+          <div class="bub in b1">You made it! Big night — reviews due for <b>both</b> galleries before dawn.</div>
           <div class="bub in b2">🏛️ The Downtown Museum (opening night)<br>🛰️ The Space Museum (aboard the station)</div>
-          <div class="bub in b3">Deadline is dawn. Don't be late — you know how the director gets 😬</div>
+          <div class="bub in b3">…heads up, security's been twitchy all week. Keep your eyes open out there. 👀</div>
           <div class="typing b4"><i></i><i></i><i></i></div>
         </div>
         <button class="ios-reply" id="msg-reply">ok be there soon 👍</button>
@@ -455,6 +538,6 @@
     }
   }
   </script>
-  <script type="module" src="./planet.js?cb=p24"></script>
+  <script type="module" src="./planet.js?cb=p26"></script>
 </body>
 </html>
