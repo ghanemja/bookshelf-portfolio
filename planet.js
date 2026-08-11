@@ -331,11 +331,12 @@ if (stored !== 'sketch' && stored !== 'classic' && stored !== 'wasteland') store
 let gfxMode = stored;                       // 'sketch' | 'wasteland' | 'classic'
 const GFX_CYCLE = ['sketch', 'wasteland', 'classic'];
 const GFX_LABEL = { sketch: '✏️ sketchbook', wasteland: '🖤 wasteland', classic: '🧊 classic' };
-let gfxInked = gfxMode !== 'classic';       // both painted modes use the 3-pass pipeline
+let gfxInked = gfxMode === 'sketch';        // only sketchbook uses the 3-pass ink pipeline
 const gfxBtn = document.getElementById('gfx-toggle');
 function applyGfx() {
   gfxBtn.textContent = GFX_LABEL[gfxMode];
-  gfxInked = gfxMode !== 'classic';
+  gfxInked = gfxMode === 'sketch';        // wasteland is single-pass grease pencil now
+  setGreasePencil(gfxMode === 'wasteland');
   // the wasteland is smoggy: haze closes in a lot sooner
   scene.fog.near = gfxMode === 'wasteland' ? 40 : gfxInked ? 40 : 42;
   scene.fog.far = gfxMode === 'wasteland' ? 150 : gfxInked ? 145 : 155;
@@ -4120,6 +4121,77 @@ function flyCameraTo(target, k, clearance = 1.2) {
   camera.position.copy(nd).multiplyScalar(Math.max(r, Math.max(radiusAt(nd), SEA_R) + clearance * 0.6));
 }
 
+// ─── GREASE PENCIL: the Blender tutorial recipe, done live ───────────────────
+// Two ingredients, exactly like the video: (1) toon-flat fills — every
+// material swapped for an unlit flat version, so there is no 3D shading at
+// all — and (2) LINE ART as real geometry: an inverted hull pushed out along
+// the vertex normals draws a contour stroke around every object, the way the
+// Line Art modifier traces meshes. No screen filter involved.
+const gpOutlineMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  uniforms: { thick: { value: 0.05 } },
+  vertexShader: `uniform float thick;
+    void main() {
+      vec3 p = position + normalize(normal) * thick;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+    }`,
+  fragmentShader: `void main() { gl_FragColor = vec4(0.10, 0.09, 0.12, 1.0); }`,
+});
+const gpOutlines = [];
+let gpBuilt = false, gpOn = false;
+function buildGreasePencil() {
+  if (gpBuilt) return; gpBuilt = true;
+  const skip = new Set([planet, ocean, sky, skyStars]);
+  scene.traverse(o => {
+    if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh) return;
+    if (skip.has(o) || o.material === gpOutlineMat) return;
+    if (!o.geometry?.attributes?.normal) return;
+    if (o.geometry.attributes.position.count > 5000) return;   // keep draws sane
+    const line = new THREE.Mesh(o.geometry, gpOutlineMat);
+    line.visible = false;
+    o.add(line);                       // child: follows every transform for free
+    gpOutlines.push(line);
+  });
+}
+const flatCache = new Map();
+function flatOf(mat) {
+  if (!mat || mat.isShaderMaterial) return mat;
+  let f = flatCache.get(mat);
+  if (!f) {
+    f = new THREE.MeshBasicMaterial({
+      color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
+      map: mat.map || null,
+      vertexColors: !!mat.vertexColors,
+      transparent: !!mat.transparent, opacity: mat.opacity ?? 1,
+      side: mat.side ?? THREE.FrontSide,
+    });
+    flatCache.set(mat, f);
+  }
+  return f;
+}
+function setGreasePencil(on) {
+  if (on && !gpBuilt) buildGreasePencil();
+  if (on === gpOn) return;
+  gpOn = on;
+  for (const l of gpOutlines) l.visible = on;
+  scene.traverse(o => {
+    if (!o.isMesh || o.material === gpOutlineMat) return;
+    if (on) {
+      if (!o.userData._origMat) {
+        o.userData._origMat = o.material;
+        o.material = Array.isArray(o.material) ? o.material.map(flatOf) : flatOf(o.material);
+      }
+    } else if (o.userData._origMat) {
+      o.material = o.userData._origMat;
+      o.userData._origMat = null;
+    }
+  });
+  sky.visible = !on;
+  skyStars.visible = !on;
+  scene.background = on ? new THREE.Color(0xf2efe7) : null;   // paper backdrop
+}
+
+
 // ─── main loop ───────────────────────────────────────────────────────────────
 const clock = new THREE.Clock();
 let introT = 0;
@@ -4213,7 +4285,8 @@ function updateWorldAmbient(dt, t) {
   for (let i = 0; i < 3; i++) {
     skyU[['cA', 'cB', 'cC'][i]].value.copy(SKY.night[i]).lerp(SKY.day[i], dayK);
   }
-  scene.fog.color.copy(_fogNight).lerp(_fogDay, dayK);
+  if (gpOn) scene.fog.color.setHex(0xe8e4da);   // paper haze
+  else scene.fog.color.copy(_fogNight).lerp(_fogDay, dayK);
   skyStars.material.opacity = 0.15 + 0.75 * (1 - dayK);
   lampBulbMat.emissiveIntensity = 0.5 + (1 - dayK) * 1.9;
   // downtown windows come on after dark
@@ -4400,8 +4473,17 @@ function animate() {
 
     if (hasInput) {
       _desired.set(0, 0, 0).addScaledVector(_fwd, iz).addScaledVector(_right, ix).normalize();
-      heading.lerp(_desired, turnK).normalize();
-      speed = Math.min(TR.max, speed + TR.accel * dt);
+      // pressing straight BACK aims exactly opposite the heading, and lerping
+      // a unit vector toward its own negation passes through zero — normalize
+      // can never flip it, which is why reverse never worked. When the target
+      // is behind us, swing around the local up at a steady rate instead.
+      if (heading.dot(_desired) < -0.72) {
+        heading.applyAxisAngle(dir, 3.0 * dt).normalize();
+        speed = Math.max(1.2, speed * (1 - dt * 2.2));   // slow through the U-turn
+      } else {
+        heading.lerp(_desired, turnK).normalize();
+        speed = Math.min(TR.max, speed + TR.accel * dt);
+      }
     } else if (targetDir) {
       const arc = dir.angleTo(targetDir);
       if (arc < 0.02) { targetDir = null; targetRing.material.opacity = 0; }
