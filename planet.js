@@ -203,8 +203,8 @@ function ensureInk() {
         float skyMask = 1.0 - step(camFar * 0.55, d0);
 
         // ── the ink: double-stroked, wobbling, redrawn every boil step
-        vec2 wobA = hash22(floor(vUv * res / 6.0) + tq * 17.0) * px * 1.4;
-        vec2 wobB = hash22(floor(vUv * res / 6.0) + 31.7 + tq * 17.0) * px * 2.4;
+        vec2 wobA = hash22(floor(vUv * res / 5.0) + tq * 17.0) * px * 2.1;
+        vec2 wobB = hash22(floor(vUv * res / 5.0) + 31.7 + tq * 17.0) * px * 3.3;
         float w = 1.5 + paper * 1.7;
         float e1 = edgeAt(vUv + wobA, w, d0);
         float e2 = edgeAt(vUv + wobB, w * 0.65, d0);
@@ -241,25 +241,31 @@ function ensureInk() {
         // grey, hatching bites everywhere rather than only in shadow, the ink
         // gets heavier, and a grimy vignette closes in at the edges.
         if (wasteland > 0.5) {
+          // ── PENCIL ON PAPER: graphite shading and hatching on a cream sheet,
+          // the way the reference sketches read — light paper, directional
+          // strokes that pile up into cross-hatch as the scene darkens.
           vec3 raw = texture2D(tColor, vUv).rgb;
-          float g = dot(raw, vec3(0.299, 0.587, 0.114));
-          g = pow(clamp(g, 0.0, 1.0), 1.22);
-          g = clamp((g - 0.5) * 1.38 + 0.46, 0.0, 1.0);      // crush toward ink and paper
-          // graphite is never neutral: warm in the lights, cold in the darks
-          vec3 warm = vec3(0.92, 0.88, 0.80), cool = vec3(0.30, 0.33, 0.38);
-          vec3 gr = mix(cool, warm, g);
-          // pencil tone: two hatch sets, angled, biting hardest in the mids
-          float h1 = step(0.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 5.0));
-          float h2 = step(0.62, fract((gl_FragCoord.x - gl_FragCoord.y) / 9.0));
-          float tone = smoothstep(0.85, 0.15, g);
-          gr *= 1.0 - (1.0 - h1) * tone * 0.26;
-          gr *= 1.0 - (1.0 - h2) * smoothstep(0.6, 0.05, g) * 0.30;
-          gr *= 0.86 + 0.22 * paper;                          // tooth of the paper
-          gr = mix(gr, gr * 0.55, e1 * 0.5 * skyMask);        // wash pools at the lines
-          gr = mix(gr, vec3(0.05, 0.05, 0.07), clamp(ink * 1.15, 0.0, 1.0));
-          vec2 vc = vUv - 0.5;                                // grimy vignette
-          gr *= 1.0 - smoothstep(0.28, 0.78, dot(vc, vc) * 2.2) * 0.55;
-          gr = mix(gr, vec3(dot(gr, vec3(0.33))), 0.25);      // last of the colour goes
+          float g = clamp(pow(dot(raw, vec3(0.299, 0.587, 0.114)), 0.9), 0.0, 1.0);
+          // warm paper with a visible tooth
+          vec3 paperCol = vec3(0.94, 0.92, 0.87) * (0.90 + 0.14 * paper);
+          float shade = smoothstep(0.96, 0.04, g);            // 0 = light, 1 = dark
+          // three hatch fields at different angles; each switches on deeper in shadow
+          float a1 = fract((gl_FragCoord.x + gl_FragCoord.y) * 0.11 + paper * 1.5);
+          float a2 = fract((gl_FragCoord.x - gl_FragCoord.y) * 0.11 + paper * 1.5);
+          float a3 = fract(gl_FragCoord.y * 0.16 + paper * 1.5);
+          float s1 = (1.0 - smoothstep(0.0, 0.42, a1)) * step(0.22, shade);
+          float s2 = (1.0 - smoothstep(0.0, 0.42, a2)) * step(0.52, shade);  // cross-hatch
+          float s3 = (1.0 - smoothstep(0.0, 0.42, a3)) * step(0.76, shade);  // densest darks
+          float hatch = clamp(s1 + s2 + s3, 0.0, 1.0);
+          float graphite = shade * 0.5 + hatch * 0.4;
+          vec3 lead = vec3(0.17, 0.16, 0.18);                 // 2B graphite grey
+          vec3 gr = mix(paperCol, lead, clamp(graphite, 0.0, 1.0));
+          gr *= 0.92 + 0.12 * paper;                          // paper grain over the lead
+          // rough pencil outline — graphite, not a black slab, and it skips with the tooth
+          float pline = clamp(ink * 1.1, 0.0, 1.0) * (0.65 + 0.35 * paper);
+          gr = mix(gr, lead * 0.8, pline);
+          // the sky is bare paper
+          gr = mix(paperCol, gr, skyMask);
           col = gr;
         }
 
@@ -309,8 +315,8 @@ function applyGfx() {
   gfxBtn.textContent = GFX_LABEL[gfxMode];
   gfxInked = gfxMode !== 'classic';
   // the wasteland is smoggy: haze closes in a lot sooner
-  scene.fog.near = gfxMode === 'wasteland' ? 26 : gfxInked ? 40 : 42;
-  scene.fog.far = gfxMode === 'wasteland' ? 105 : gfxInked ? 145 : 155;
+  scene.fog.near = gfxMode === 'wasteland' ? 40 : gfxInked ? 40 : 42;
+  scene.fog.far = gfxMode === 'wasteland' ? 150 : gfxInked ? 145 : 155;
 }
 gfxBtn.addEventListener('click', () => {
   gfxMode = GFX_CYCLE[(GFX_CYCLE.indexOf(gfxMode) + 1) % GFX_CYCLE.length];
@@ -456,7 +462,7 @@ const STOP_PEDESTALS = [STOP_DIRS.central, STOP_DIRS.lakeside, STOP_DIRS.farside
 const BEACH = ll(-16, -60);
 // district anchors (lat, lon), each on open ground linked to downtown by a radial
 const MALL = ll(9, -48);       // shopping district SE of downtown
-const AIRPORT = ll(38, -30);   // north of downtown, flat, room for a runway
+const AIRPORT = ll(55, 80);    // clear airspace, well outside the city footprint
 const FARM_A = ll(46, -12);    // north-east fields
 const FARM_B = ll(-34, -46);   // south-west fields
 const RESORT = ll(-14, -66);   // hotel, just inland of the beach
@@ -2294,22 +2300,42 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
     g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
     scene.add(g); addSolid(d, 3.4);
   }
-  // a parked airliner
+  // the private jet — nose along +Z so it faces its direction of travel
   {
     const d = at(-3.2, 3);
     const g = new THREE.Group();
     const fus = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 4.2, 6, 12), M(0xf4f6f8));
-    fus.rotation.z = Math.PI / 2; fus.position.y = 0.9; g.add(fus);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.0, 0.8), M(0xff4d6e));
-    tail.position.set(-2.2, 1.5, 0); g.add(tail);
-    for (const s of [-1, 1]) {
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.1, 2.6), M(0xdfe6ec));
-      wing.position.set(0.2, 0.85, s * 1.0); wing.rotation.x = s * 0.1; g.add(wing);
+    fus.rotation.x = Math.PI / 2; fus.position.y = 0.9; g.add(fus);      // long axis = Z
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 12), M(0xf4f6f8));
+    nose.rotation.x = Math.PI / 2; nose.position.set(0, 0.9, 2.9); g.add(nose);
+    const tailfin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.1, 0.9), M(0x14243a));
+    tailfin.position.set(0, 1.5, -2.3); g.add(tailfin);
+    for (const s of [-1, 1]) {                                            // wings along X
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.1, 1.3), M(0xdfe6ec));
+      wing.position.set(s * 1.0, 0.85, 0.1); wing.rotation.z = s * 0.06; g.add(wing);
+      const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.6, 8), M(0x2d3540));
+      engine.rotation.x = Math.PI / 2; engine.position.set(s * 1.3, 0.68, 0.2); g.add(engine);
     }
+    // a navy cheatline + windows down the side
+    const line = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.14, 4.2), M(0x14243a));
+    for (const sx of [-0.5, 0.5]) { const l = line.clone(); l.position.set(sx, 1.0, 0); g.add(l); }
     g.position.copy(settleOn(d, 2.0, -0.1));
-    alignToSurface(g, d, yawToFace(d, at(0, 3)));
+    alignToSurface(g, d, yawToFace(d, at(0, 12)));   // parked pointing down the runway
     g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
     scene.add(g); airportPlane = g;
+  }
+  // the NetJets sign on the terminal apron
+  {
+    const d = at(4.5, -6);
+    const board = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.1, 0.16), M(0x14243a));
+    const g = new THREE.Group();
+    g.add(board);
+    const posts = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.4, 6), M(0x2d2138));
+    posts.position.y = -1.0; g.add(posts);
+    g.position.copy(posOn(d, 1.5));
+    alignToSurface(g, d, yawToFace(d, at(0, 0)));
+    scene.add(g);
+    tinySign('✈ NetJets Terminal', posOn(d, 2.9));
   }
   districtSign(AIRPORT, '✈ Airport', 0, -19);
 }
@@ -3646,90 +3672,111 @@ function updateTitle3D(dt) {
 // ─── THE ARRIVAL: plane lands, Uber to the hotel, check in, then the phone ───
 // A hands-off cinematic that plays after "enter", using the airport and resort
 // that already exist. Ends by handing off to the texts + GPS flow.
-let arrivalT = 0, arrivalPhase = -1, uberCar = null;
+let arrivalT = 0, arrivalPhase = -1, limo = null;
 const _aTmp = new THREE.Vector3(), _aTmp2 = new THREE.Vector3(), _aPrev = new THREE.Vector3();
-const arrDir = { plane: null, uberA: null, uberB: null };
+const arrDir = { runwayA: null, runwayB: null, board: null, cityEnd: null };
 const arrCaption = document.getElementById('arr-caption');
+
+// a stretch limousine — long black body, tinted glass, chrome trim
+function buildLimo() {
+  const g = new THREE.Group();
+  const BLK = M(0x14121a, { roughness: 0.35 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 4.4), BLK);
+  body.position.y = 0.5; g.add(body);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.4, 2.6),
+    new THREE.MeshStandardMaterial({ color: 0x0a0a10, roughness: 0.1 }));
+  cab.position.set(0, 0.9, -0.1); g.add(cab);
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.24, 0.9), BLK);
+  hood.position.set(0, 0.66, 2.1); g.add(hood);
+  const grille = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.18, 0.06), M(0xd8d8e0, { metalness: 0.6, roughness: 0.2 }));
+  grille.position.set(0, 0.5, 2.55); g.add(grille);
+  for (const s of [-1, 1]) {
+    const hl = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6),
+      new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0xffedb0, emissiveIntensity: 0.8 }));
+    hl.position.set(s * 0.32, 0.55, 2.56); g.add(hl);
+  }
+  const wheels = [];
+  for (const wz of [1.7, 0.5, -0.7, -1.9]) {
+    for (const wx of [-0.52, 0.52]) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.16, 10), M(0x2d2138));
+      w.rotation.z = Math.PI / 2; w.position.set(wx, 0.24, wz); g.add(w); wheels.push(w);
+    }
+  }
+  g.userData.wheels = wheels;
+  g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+  return g;
+}
 
 function startArrival() {
   gameState = 'arrival';
-  arrivalT = 0; arrivalPhase = 0;
+  arrivalT = 0;
   titleEl.classList.add('hide');
   title3D.visible = false;
   document.body.classList.remove('title-mode');
   applyGfx();
   startAudio();
-  // the Uber waits at the terminal
-  if (!uberCar) { uberCar = simpleCar(0x1c1620); scene.add(uberCar); }
+  if (!limo) { limo = buildLimo(); scene.add(limo); }
   const airAt = frameAt(AIRPORT);
-  arrDir.plane = AIRPORT.clone();
-  arrDir.uberA = airAt(4.5, -3).normalize();      // terminal kerb
-  arrDir.uberB = RESORT.clone();                  // hotel entrance
-  uberCar.visible = false;
-  if (arrCaption) { arrCaption.style.opacity = 1; arrCaption.textContent = '✈ Flight 88 — now arriving'; }
+  arrDir.runwayA = airAt(0, -16).normalize();     // touchdown end
+  arrDir.runwayB = airAt(0, 12).normalize();      // roll-out / where the limo waits
+  arrDir.cityEnd = DOWNTOWN.clone();              // "into the city"
+  limo.visible = false;
+  if (arrCaption) { arrCaption.style.opacity = 1; arrCaption.textContent = '✈ NetJets — cleared to land'; }
 }
 
 function updateArrival(dt) {
-  arrivalT += dt / 20;                            // ~20s whole sequence
+  arrivalT += dt / 22;
   const T = arrivalT;
   const airAt = frameAt(AIRPORT);
+  // where the limo waits: just off the roll-out end
+  const limoWait = airAt(2.2, 12).normalize();
 
-  if (T < 0.34) {                                 // 1. the plane lands
-    const k = T / 0.34;
-    if (arrCaption) arrCaption.textContent = '✈ Flight 88 — now arriving';
-    // descend along the runway from high up, touch down, roll out
-    const along = -16 + k * 30;
-    const alt = Math.max(0, (0.5 - k) * 26);
+  if (T < 0.30) {                                 // 1. the jet lands, nose-forward
+    if (arrCaption) arrCaption.textContent = '✈ NetJets — cleared to land';
+    const k = T / 0.30;
+    const along = -16 + k * 28;                   // travels +along = +Z (its nose)
+    const alt = Math.max(0, (0.5 - k) * 24);
     const d = airAt(0, along).normalize();
     airportPlane.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.2 + alt));
-    alignToSurface(airportPlane, d, yawToFace(d, airAt(0, along + 5)));
+    alignToSurface(airportPlane, d, yawToFace(d, airAt(0, along + 6)));   // face down the runway
     airportPlane.visible = true;
-    // chase the plane down
-    const back = airAt(0, along - 8).normalize();
-    _aTmp.copy(airportPlane.position).addScaledVector(back.clone().sub(d).normalize(), 6).addScaledVector(d, 3);
+    const back = airAt(-6, along - 9).normalize();
+    _aTmp.copy(airportPlane.position).addScaledVector(_aTmp2.subVectors(back, d).normalize(), 7).addScaledVector(d, 3.5);
     camera.position.lerp(_aTmp, 0.06);
     camera.up.lerp(d, 0.1).normalize();
     camera.lookAt(airportPlane.position);
-  } else if (T < 0.5) {                           // 2. hop in the Uber
-    const k = (T - 0.34) / 0.16;
-    if (arrCaption) arrCaption.textContent = '🚕 Your ride is here';
-    const d = arrDir.uberA;
-    uberCar.visible = true;
-    uberCar.position.copy(settleOn(d, 0.5, 0.02));
-    alignToSurface(uberCar, d, yawToFace(d, arrDir.uberB));
-    _aTmp.copy(uberCar.position).addScaledVector(d, 3.2)
-      .addScaledVector(_aTmp2.subVectors(arrDir.uberB, d).normalize(), -5);
-    camera.position.lerp(_aTmp, 0.08);
+  } else if (T < 0.44) {                           // 2. first class — step off the jet
+    if (arrCaption) arrCaption.textContent = '🛬 Welcome — first class. Your car is waiting.';
+    const d = airAt(0, 12).normalize();
+    airportPlane.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.1));
+    alignToSurface(airportPlane, d, yawToFace(d, airAt(0, 24)));
+    limo.visible = true;
+    limo.position.copy(settleOn(limoWait, 0.6, 0.02));
+    alignToSurface(limo, limoWait, yawToFace(limoWait, arrDir.cityEnd));
+    // frame the jet door and the limo together
+    _aTmp.copy(airportPlane.position).addScaledVector(d, 3.5)
+      .addScaledVector(_aTmp2.copy(d).cross(UP_Y).normalize(), 8);
+    camera.position.lerp(_aTmp, 0.06);
     camera.up.lerp(d, 0.1).normalize();
-    camera.lookAt(uberCar.position);
-  } else if (T < 0.86) {                          // 3. drive to the hotel
-    const k = (T - 0.5) / 0.36;
-    if (arrCaption) arrCaption.textContent = '🚕 To the hotel…';
-    const d = slerpDir(arrDir.uberA, arrDir.uberB, k * k * (3 - 2 * k)).normalize();
-    uberCar.visible = true;
-    uberCar.position.copy(dbl(d));
-    const ahead = slerpDir(arrDir.uberA, arrDir.uberB, Math.min(1, k + 0.03)).normalize();
-    alignToSurface(uberCar, d, yawToFace(d, ahead));
-    for (const w of uberCar.userData.wheels || []) {}
-    _aTmp.copy(uberCar.position).addScaledVector(d, 3.0)
-      .addScaledVector(_aTmp2.subVectors(ahead, d).normalize(), -5.5);
+    camera.lookAt(limo.position);
+  } else if (T < 0.92) {                           // 3. the limo drives into the city
+    if (arrCaption) arrCaption.textContent = '🚘 Into the city…';
+    const k = (T - 0.44) / 0.48;
+    const e = k * k * (3 - 2 * k);
+    const d = slerpDir(limoWait, arrDir.cityEnd, e).normalize();
+    const ahead = slerpDir(limoWait, arrDir.cityEnd, Math.min(1, e + 0.02)).normalize();
+    limo.visible = true;
+    limo.position.copy(dbl(d));
+    alignToSurface(limo, d, yawToFace(d, ahead));
+    for (const w of limo.userData.wheels || []) w.rotation.x += dt * 9;
+    _aTmp.copy(limo.position).addScaledVector(d, 3.2)
+      .addScaledVector(_aTmp2.subVectors(ahead, d).normalize(), -6.5);
     camera.position.lerp(_aTmp, 0.09);
     camera.up.lerp(d, 0.1).normalize();
-    camera.lookAt(uberCar.position.clone().addScaledVector(d, 0.6));
-  } else if (T < 1.0) {                           // 4. check in
-    if (arrCaption) arrCaption.textContent = '🏨 Checking in…';
-    const d = arrDir.uberB;
-    uberCar.position.copy(settleOn(d, 0.5, 0.02));
-    alignToSurface(uberCar, d, yawToFace(d, airAt(0, 0)));
-    // rise to look up at the hotel
-    _aTmp.copy(resortHotel ? resortHotel.position : posOn(d, 3)).addScaledVector(d, 3.5)
-      .addScaledVector(_aTmp2.copy(d).cross(UP_Y).normalize(), 7);
-    camera.position.lerp(_aTmp, 0.06);
-    camera.up.lerp(d, 0.08).normalize();
-    camera.lookAt(resortHotel ? resortHotel.position : posOn(d, 3));
-  } else {                                        // done → the phone
+    camera.lookAt(limo.position.clone().addScaledVector(d, 0.6));
+  } else {                                         // 4. arrived → the phone
     if (arrCaption) arrCaption.style.opacity = 0;
-    uberCar.visible = false;
+    limo.visible = false;
     enterPhone();
   }
 }
@@ -3759,9 +3806,9 @@ function enterPhone() {
   phoneEl.classList.add('show');
   scrMsg.classList.add('on');
   scrMap.classList.remove('on');
-  // the critic is now outside the hotel, by the resort
+  // the limo has dropped the critic downtown
   setTransport('walk');
-  dir = RESORT.clone();
+  dir = DOWNTOWN.clone();
   heading = new THREE.Vector3(0, 0, 1);
   heading.sub(dir.clone().multiplyScalar(heading.dot(dir))).normalize();
   speed = 0;
