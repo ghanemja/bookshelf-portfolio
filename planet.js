@@ -589,6 +589,7 @@ const cityWindowMats = [];    // tower window materials, lit after dark
 const traffic = [];           // cars and pedestrians that actually move
 const bobbers = [];           // moored boats that rock on the swell
 let airportPlane = null, resortHotel = null;   // handles for the arrival intro
+let RING_LOOP = null;                          // the smoothed landmark loop
 let GAS_DIR = null;                            // gas station, off the airport spur
 let cityMapCtx = null, cityMapTex = null, cityMapDraw = null;   // the painted city floor
 const SKIN = [0xffd9b8, 0xe8b98f, 0xc68a5e, 0x8a5a3a];
@@ -900,6 +901,49 @@ function makeLabel(lm) {
   lm.label = sp;
 }
 
+function slerpDir(a, b, t) {
+  const th = a.angleTo(b);
+  if (th < 1e-4) return a.clone();
+  const s = Math.sin(th);
+  return a.clone().multiplyScalar(Math.sin((1 - t) * th) / s)
+    .addScaledVector(b, Math.sin(t * th) / s).normalize();
+}
+// the road network's sample points, known before anything is placed, so
+// nothing may be built on a carriageway
+const roadNetPts = [];
+function nearRoad(d, units = 2.0) {
+  const lim = units / R;
+  for (let i = 0; i < roadNetPts.length; i += 2) {
+    if (d.angleTo(roadNetPts[i]) < lim) return true;
+  }
+  return false;
+}
+{
+  // gates: each landmark's waypoint shifts ~2.7 units to the side, so the
+  // road runs past the plaza's edge instead of through its middle
+  const gates = LANDMARKS.map((lm, i) => {
+    const prev = LANDMARKS[(i - 1 + LANDMARKS.length) % LANDMARKS.length].dir;
+    const next = LANDMARKS[(i + 1) % LANDMARKS.length].dir;
+    const tang = next.clone().sub(prev.clone().multiplyScalar(prev.dot(next))).normalize();
+    return lm.dir.clone().applyAxisAngle(tang, 2.7 / R).normalize();
+  });
+  let pts0 = [];
+  for (let i = 0; i < gates.length; i++) {
+    const a = gates[i], b = gates[(i + 1) % gates.length];
+    for (let k = 0; k < 22; k++) pts0.push(slerpDir(a, b, k / 22));
+  }
+  for (let pass = 0; pass < 6; pass++) {
+    const n = pts0.length, out = [];
+    for (let i = 0; i < n; i++) {
+      out.push(pts0[i].clone().multiplyScalar(2)
+        .add(pts0[(i - 1 + n) % n]).add(pts0[(i + 1) % n]).normalize());
+    }
+    pts0 = out;
+  }
+  RING_LOOP = pts0;
+  roadNetPts.push(...pts0);
+}
+
 for (const lm of LANDMARKS) {
   const b = makeBuilding(lm);
   addSolid(lm.dir, 1.9, b);
@@ -931,13 +975,6 @@ scatterClumps(roundTree, 5, 6);
 scatter(rockDeco, 26);
 
 // ─── the ROAD: a paved ribbon through every stop on the route ───────────────
-function slerpDir(a, b, t) {
-  const th = a.angleTo(b);
-  if (th < 1e-4) return a.clone();
-  const s = Math.sin(th);
-  return a.clone().multiplyScalar(Math.sin((1 - t) * th) / s)
-    .addScaledVector(b, Math.sin(t * th) / s).normalize();
-}
 {
   // ── ONE road network, with a hierarchy like real planning: smooth asphalt
   // near the city that grades into dirt lanes in the country, spur roads out
@@ -1013,23 +1050,35 @@ function slerpDir(a, b, t) {
       () => new THREE.Color(0xf2ecd8), 0.06, true);
   }
 
-  // the grand loop through every landmark, corners rounded like a laid road
-  const pts = [];
-  for (let i = 0; i < LANDMARKS.length; i++) {
-    const a = LANDMARKS[i].dir, b = LANDMARKS[(i + 1) % LANDMARKS.length].dir;
-    for (let k = 0; k < 22; k++) pts.push(slerpDir(a, b, k / 22));
-  }
-  const loop = smoothLoop(pts, 6, true);
+  // the grand loop through every landmark, precomputed above
+  const loop = RING_LOOP;
   roadLayers(loop, true);
+
+  // the RING BOULEVARD: a bypass around the whole city at the grid edge —
+  // spurs meet it, and through-traffic goes AROUND downtown, never across
+  const bvE1 = new THREE.Vector3(0, 1, 0).cross(DOWNTOWN).normalize();
+  const bvE2 = new THREE.Vector3().crossVectors(DOWNTOWN, bvE1).normalize();
+  const BLVD_ARC = 0.94;
+  const blvd = [];
+  for (let i = 0; i < 72; i++) {
+    const th = (i / 72) * Math.PI * 2;
+    blvd.push(DOWNTOWN.clone().multiplyScalar(Math.cos(BLVD_ARC))
+      .addScaledVector(bvE1, Math.sin(BLVD_ARC) * Math.cos(th))
+      .addScaledVector(bvE2, Math.sin(BLVD_ARC) * Math.sin(th)).normalize());
+  }
+  roadLayers(blvd, true);
+  roadNetPts.push(...blvd);
 
   // spur roads: downtown out to every district, ending in a turning circle
   const SPURS = [AIRPORT, RESORT, MALL, FARM_A, FARM_B, BEACH];
   for (const target of SPURS) {
     const total = DOWNTOWN.angleTo(target);
-    const t0 = Math.min(0.85, 0.55 / total);          // leave the paved grid edge
+    const t0 = Math.min(0.9, 0.94 / total);           // leave from the ring boulevard
     const spur = [];
     for (let k = 0; k <= 26; k++) spur.push(slerpDir(DOWNTOWN, target, t0 + (1 - t0) * (k / 26)));
-    roadLayers(smoothLoop(spur, 3, false), false);
+    const spurPts = smoothLoop(spur, 3, false);
+    roadLayers(spurPts, false);
+    roadNetPts.push(...spurPts);
     // cul-de-sac: a dirt turning circle where the road arrives
     const end = spur[spur.length - 1];
     const disc = new THREE.Mesh(new THREE.CircleGeometry(2.0, 22), new THREE.MeshStandardMaterial({
@@ -1178,6 +1227,36 @@ const stopStructures = {};
   alignToSurface(ov, STOP_DIRS.overlook, yawToFace(STOP_DIRS.overlook, lmByKeyLater('artgarden')));
   scene.add(ov);
   stopStructures.overlook = ov;
+  // the monumental stair: terraced steps climbing toward the summit, ending
+  // at a small columned temple — straight out of the inspiration reel
+  {
+    const steps = 12;
+    for (let i = 0; i < steps; i++) {
+      const d = slerpDir(STOP_DIRS.overlook, MTN, 0.06 + (i / steps) * 0.30);
+      const st = new THREE.Mesh(new THREE.BoxGeometry(1.7 - i * 0.05, 0.26, 0.9), M(0xe8e2d4));
+      st.position.copy(settleOn(d, 0.9, -0.02));
+      alignToSurface(st, d, yawToFace(d, MTN));
+      st.receiveShadow = !IS_TOUCH;
+      scene.add(st);
+    }
+    const td = slerpDir(STOP_DIRS.overlook, MTN, 0.4);
+    const temple = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.3, 1.7), M(0xe8e2d4));
+    base.position.y = 0.15; temple.add(base);
+    for (const [px, pz] of [[-0.9, 0.6], [0, 0.6], [0.9, 0.6], [-0.9, -0.6], [0, -0.6], [0.9, -0.6]]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 1.1, 8), M(0xf2ede2));
+      col.position.set(px, 0.85, pz); temple.add(col);
+    }
+    const archi = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.18, 1.8), M(0xe8e2d4));
+    archi.position.y = 1.5; temple.add(archi);
+    const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.001, 1.35, 0.55, 4, 1), M(0xdcd4c2));
+    ped.rotation.y = Math.PI / 4; ped.scale.z = 0.72; ped.position.y = 1.85; temple.add(ped);
+    temple.position.copy(settleOn(td, 1.6, 0.1));
+    alignToSurface(temple, td, yawToFace(td, STOP_DIRS.overlook));
+    temple.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+    scene.add(temple);
+    addSolid(td, 1.6, temple);
+  }
   // Seaside Boardwalk: planks + shave-ice stand with a striped awning
   const bw = new THREE.Group();
   for (let i = 0; i < 5; i++) {
@@ -1467,6 +1546,7 @@ placeBand(flowerPatch, 34, 0.06);
       const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.45, 0.4), WOOD);
       leg.position.set(sx, 0.22, 0); bench.add(leg);
     }
+    if (nearRoad(d, 2.0)) continue;
     bench.position.copy(settleOn(d, 0.7, 0.08));
     alignToSurface(bench, d, yawToFace(d, lib.dir));
     bench.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
@@ -1886,6 +1966,8 @@ mark('downtown:start');
     scene.add(g);
   }
 
+  const FACADE = [0x3fa8a0, 0xc0504a, 0xd8a83a, 0xe8836a, 0x6a8fc0, 0xb06ab0, 0xe8c9a8];
+  const TILE = [0xb5654a, 0xc76a3a, 0xa85a3f];
   // Density falls off with distance: glass core -> midrise -> houses with
   // gardens. Cities read as cities because of the gradient, not the towers.
   const museumDir = LANDMARKS.find(l => l.key === 'artgarden').dir;
@@ -1912,23 +1994,15 @@ mark('downtown:start');
         for (let k = 0; k < per; k++) {
           plot(cx, cy, 2.7 + rand() * 2.2, 1.2 + rand() * 0.5, mi++);
         }
-      } else {                                         // ── suburbs: houses + yards
-        if (rand() < 0.34) { park(cx, cy, 3); continue; }
-        const homes = 1;
-        for (let k = 0; k < homes; k++) {
-          const room = Math.max(0, BUILDABLE - 0.85);
-          const ox = (rand() - 0.5) * 2 * room, oy = (rand() - 0.5) * 2 * room;
-          const dd = at(cx + ox, cy + oy);
-          if (!isLand(dd, 0.05)) continue;
-          const h = cottage();
-          addSolid(dd, 0.85, h);
-          h.position.copy(settleOn(dd, 1.0, 0.12));
-          alignToSurface(h, dd, yawToFace(dd, at(cx + ox * 2.2, cy + oy * 2.2)));
-          h.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
-          deco.add(h);
-          if (rand() > 0.5) {                          // a tree in the yard
+      } else {                                         // ── suburbs: EUROPEAN
+        // row-house terraces — many buildings shoulder to shoulder, vivid
+        // facades under one shared terracotta roof, like the reference
+        if (rand() < 0.22) { park(cx, cy, 3); continue; }
+        const terrace = buildTerrace(cx, cy, (bx + by) % 2 ? 0 : Math.PI / 2);
+        if (terrace && rand() > 0.55) {                // a tree by the terrace
+          const td = at(cx + (rand() - 0.5) * 3, cy + (rand() - 0.5) * 3);
+          if (isLand(td, 0.05) && !nearRoad(td, 2.2)) {
             const tr = roundTree();
-            const td = at(cx + ox + (rand() - 0.5) * 2, cy + oy + (rand() - 0.5) * 2);
             tr.position.copy(settleOn(td, 0.4, 0.1));
             alignToSurface(tr, td, rand() * Math.PI * 2);
             deco.add(tr);
@@ -1936,6 +2010,60 @@ mark('downtown:start');
         }
       }
     }
+  }
+
+  // a European terrace: 4-5 contiguous units, each its own vivid colour, tall
+  // windows and a door, iron balcony line, one continuous terracotta roof
+  function buildTerrace(cx, cy, yawExtra) {
+    const dd0 = at(cx, cy);
+    if (!isLand(dd0, 0.05) || nearRoad(dd0, 2.4)) return null;
+    const g = new THREE.Group();
+    const units = 4 + Math.floor(rand() * 2);
+    const uw = 0.72, depth = 1.3;
+    const len = units * uw;
+    const H0 = 1.5 + rand() * 0.4;
+    let fx = -len / 2;
+    for (let u = 0; u < units; u++) {
+      const wallHex = FACADE[Math.floor(rand() * FACADE.length)];
+      const h = H0 + (rand() - 0.5) * 0.25;
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(uw, h, depth), M(wallHex));
+      wall.position.set(fx + uw / 2, h / 2, 0); g.add(wall);
+      // tall door OR ground window, and an upper window with shutters
+      const door = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.42, 0.05), M(0x6b4a2b));
+      door.position.set(fx + uw / 2 + (rand() - 0.5) * 0.2, 0.21, depth / 2 + 0.02); g.add(door);
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.3, 0.04), M(0xbfe8ff));
+      win.position.set(fx + uw / 2, h * 0.68, depth / 2 + 0.02); g.add(win);
+      const lintel = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.05), M(0xf2e8d8));
+      lintel.position.set(fx + uw / 2, h * 0.68 + 0.19, depth / 2 + 0.02); g.add(lintel);
+      fx += uw;
+    }
+    // one continuous balcony rail across the upper floor
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(len * 0.96, 0.05, 0.06), M(0x2d2138));
+    rail.position.set(0, H0 * 0.55, depth / 2 + 0.08); g.add(rail);
+    for (let b = 0; b <= units * 2; b++) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.16, 0.025), M(0x2d2138));
+      bar.position.set(-len * 0.48 + (len * 0.96 / (units * 2)) * b, H0 * 0.55 - 0.09, depth / 2 + 0.08);
+      g.add(bar);
+    }
+    // the shared terracotta roof, one gable over the whole terrace
+    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.001, depth * 0.82, 0.55, 4, 1), M(TILE[Math.floor(rand() * TILE.length)]));
+    roof.rotation.y = Math.PI / 4;
+    roof.scale.x = (len + 0.2) / (depth * 1.16);
+    roof.position.y = H0 + 0.26; g.add(roof);
+    // ridge caps + chimney
+    const chim = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.35, 0.16), M(0x9a6b4f));
+    chim.position.set(len * (rand() - 0.5) * 0.6, H0 + 0.55, 0); g.add(chim);
+    g.add(foundation(len * 0.55, 2.0, 6));
+    addSolid(dd0, len * 0.55, g);
+    g.position.copy(settleOn(dd0, len * 0.55, 0.12));
+    alignToSurface(g, dd0, gridYawAt(cx, cy) + yawExtra);
+    g.traverse(m => { if (m.isMesh && !IS_TOUCH) { m.castShadow = true; m.receiveShadow = true; } });
+    scene.add(g);
+    return g;
+  }
+  function gridYawAt(cx, cy) {
+    const dd = at(cx, cy);
+    return yawToFace(dd, at(cx + 4, cy));
   }
 
   // the only way a building gets placed: size and jitter are clamped so the
@@ -3186,7 +3314,8 @@ defStop('cape', { dir: padDir, name: 'Cape Far Side', npc: { face: '👩‍🚀'
   for (const key of Object.keys(STOPS)) {
     const s = STOPS[key];
     const axis = new THREE.Vector3(0, 1, 0).cross(s.dir).normalize();
-    const nd = s.dir.clone().applyAxisAngle(axis, 0.055).normalize();
+    let nd = s.dir.clone().applyAxisAngle(axis, 0.055).normalize();
+    if (nearRoad(nd, 1.8)) nd = s.dir.clone().applyAxisAngle(axis, -0.055).normalize();
     const p = makePerson(palette[pi % palette.length], pi % 3 === 0 ? 0x2d2138 : null);
     pi++;
     p.scale.setScalar(0.78);
@@ -3873,16 +4002,29 @@ let gasDriver = null;
 function buildArrPath() {
   // the same waypoints the spur roads are BUILT from, so the limo is always
   // on painted road: airport → spur → downtown centre → spur → resort
-  const tA = Math.min(0.85, 0.55 / DOWNTOWN.angleTo(AIRPORT));
-  const tR = Math.min(0.85, 0.55 / DOWNTOWN.angleTo(RESORT));
+  const tA = Math.min(0.9, 0.94 / DOWNTOWN.angleTo(AIRPORT));
+  const tR = Math.min(0.9, 0.94 / DOWNTOWN.angleTo(RESORT));
   const apron = frameAt(AIRPORT)(2.2, 12);       // where the limo waits
-  const way = [apron, slerpDir(DOWNTOWN, AIRPORT, tA), DOWNTOWN,
-               slerpDir(DOWNTOWN, RESORT, tR), RESORT];
+  const eA = slerpDir(DOWNTOWN, AIRPORT, tA);    // airport gate on the boulevard
+  const eR = slerpDir(DOWNTOWN, RESORT, tR);     // resort gate
   let pts = [];
-  for (let i = 0; i < way.length - 1; i++) {
-    for (let k = 0; k < 20; k++) pts.push(slerpDir(way[i], way[i + 1], k / 20));
+  for (let k = 0; k < 22; k++) pts.push(slerpDir(apron, eA, k / 22));
+  // around the ring boulevard, the short way — NEVER across downtown
+  const bE1 = new THREE.Vector3(0, 1, 0).cross(DOWNTOWN).normalize();
+  const bE2 = new THREE.Vector3().crossVectors(DOWNTOWN, bE1).normalize();
+  const azi = (d) => Math.atan2(d.dot(bE2), d.dot(bE1));
+  const thA = azi(eA), thR = azi(eR);
+  let dth = thR - thA;
+  while (dth > Math.PI) dth -= Math.PI * 2;
+  while (dth < -Math.PI) dth += Math.PI * 2;
+  const BARC = 0.94;
+  for (let k = 0; k <= 24; k++) {
+    const th = thA + dth * (k / 24);
+    pts.push(DOWNTOWN.clone().multiplyScalar(Math.cos(BARC))
+      .addScaledVector(bE1, Math.sin(BARC) * Math.cos(th))
+      .addScaledVector(bE2, Math.sin(BARC) * Math.sin(th)).normalize());
   }
-  pts.push(RESORT.clone());
+  for (let k = 0; k <= 20; k++) pts.push(slerpDir(eR, RESORT, k / 20));
   // soften the two grid-edge corners so the limo steers, not teleports
   for (let pass = 0; pass < 3; pass++) {
     const out = [pts[0]];
