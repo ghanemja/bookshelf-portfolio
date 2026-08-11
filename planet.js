@@ -743,6 +743,10 @@ const deco = new THREE.Group();
 scene.add(deco);
 const M = (color, opts = {}) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.9, ...opts });
 const WOOD = M(0x9a6b4f), LEAF_A = M(0x7fbf8b), LEAF_B = M(0xa8d8a0), ROCK = M(0xcdc3dd);
+// grease-pencil category tags: what kind of marks (if any) a surface earns
+WOOD.userData.gp = 'wood'; LEAF_A.userData.gp = 'leaf'; LEAF_B.userData.gp = 'leaf';
+// MW = a WALL material: the only kind that gets brick-and-scratch detail
+const MW = (color, opts = {}) => { const m = M(color, opts); m.userData.gp = 'wall'; return m; };
 
 function scatter(make, count) {
   for (let i = 0; i < count; i++) {
@@ -789,7 +793,7 @@ const texLoader = new THREE.TextureLoader();
 
 function makeBuilding(lm) {
   const g = new THREE.Group();
-  const body = M(lm.color);
+  const body = MW(lm.color);
   const trim = M(0xfff4e0);
   const plat = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.4, 0.5, 10), M(0xd8cbb2));
   plat.position.y = 0.1; g.add(plat);
@@ -1203,7 +1207,7 @@ const trackPts = [];
 // station platform + canopy + sign; overlook cairn; boardwalk stand
 function makeStation(dir, name) {
   const g = new THREE.Group();
-  const plat = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.34, 1.7), M(0xd8cbb2));
+  const plat = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.34, 1.7), MW(0xd8cbb2));
   plat.position.y = 0.17; g.add(plat);
   const skirt = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.6, 1.7),
     new THREE.MeshStandardMaterial({ color: 0xbdb2a2, flatShading: true, roughness: 0.95 }));
@@ -1493,7 +1497,7 @@ const COTTAGE_COLORS = [0xffd9c2, 0xcfe8ff, 0xffe9b3, 0xe0d4ff, 0xd6f2d9];
 function cottage() {
   const g = new THREE.Group(), s = 0.8 + rand() * 0.5;
   const body = new THREE.Mesh(new THREE.BoxGeometry(1.5 * s, 1.0 * s, 1.2 * s),
-    M(COTTAGE_COLORS[Math.floor(rand() * COTTAGE_COLORS.length)]));
+    MW(COTTAGE_COLORS[Math.floor(rand() * COTTAGE_COLORS.length)]));
   body.position.y = 0.55 * s; g.add(body);
   const roof = new THREE.Mesh(new THREE.ConeGeometry(1.25 * s, 0.8 * s, 4), M(0xb5654a));
   roof.position.y = 1.45 * s; roof.rotation.y = Math.PI / 4; g.add(roof);
@@ -2061,7 +2065,7 @@ mark('downtown:start');
     for (let u = 0; u < units; u++) {
       const wallHex = FACADE[Math.floor(rand() * FACADE.length)];
       const h = H0 + (rand() - 0.5) * 0.25;
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(uw, h, depth), M(wallHex));
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(uw, h, depth), MW(wallHex));
       wall.position.set(fx + uw / 2, h / 2, 0); g.add(wall);
       // tall door OR ground window, and an upper window with shutters
       const door = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.42, 0.05), M(0x6b4a2b));
@@ -2438,7 +2442,7 @@ mark('bridge:start');
   {
     const d = bAt(-2.2, seaSign * 2.0);
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.25, 1.5), M(0xdfe6ec));
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.25, 1.5), MW(0xdfe6ec));
     body.position.y = 0.62; g.add(body);
     const roof = new THREE.Mesh(new THREE.ConeGeometry(1.55, 0.7, 4), M(0xc7572a));
     roof.position.y = 1.6; roof.rotation.y = Math.PI / 4; g.add(roof);
@@ -2543,7 +2547,7 @@ function simpleCar(hex) {
 }
 function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd_), M(bodyHex));
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd_), MW(bodyHex));
   body.position.y = h / 2; g.add(body);
   if (roofType === 'gable') {
     const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.001, w * 0.62, 0.5, 4, 1),
@@ -2585,7 +2589,7 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   {
     const d = at(4.5, 0);
     const g = new THREE.Group();
-    const hall = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.6, 7.0), M(0xdfe6ec));
+    const hall = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.6, 7.0), MW(0xdfe6ec));
     hall.position.y = 0.8; g.add(hall);
     const glass = new THREE.Mesh(new THREE.BoxGeometry(3.05, 1.0, 7.05),
       new THREE.MeshStandardMaterial({ color: 0x8fb8d8, roughness: 0.2, transparent: true, opacity: 0.55 }));
@@ -2688,7 +2692,7 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   {
     const d = at(0, 0);
     const g = new THREE.Group();
-    const tower = new THREE.Mesh(new THREE.BoxGeometry(2.2, 6.5, 2.2), M(0xf0e6d2));
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(2.2, 6.5, 2.2), MW(0xf0e6d2));
     tower.position.y = 3.25;
     const uv = tower.geometry.attributes.uv;
     g.add(tower);
@@ -2736,7 +2740,7 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   {
     const d = at(0, 0);
     const g = new THREE.Group();
-    const box = new THREE.Mesh(new THREE.BoxGeometry(5.0, 1.8, 3.4), M(0xe8dcc8));
+    const box = new THREE.Mesh(new THREE.BoxGeometry(5.0, 1.8, 3.4), MW(0xe8dcc8));
     box.position.y = 0.9; g.add(box);
     const dome = new THREE.Mesh(new THREE.SphereGeometry(1.1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
       new THREE.MeshStandardMaterial({ color: 0x8fd0e8, roughness: 0.25, transparent: true, opacity: 0.7 }));
@@ -2781,7 +2785,7 @@ function buildFarm(anchor, label) {
   {
     const d = at(0, 0);
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.5, 3.0), M(0xa83a2a));
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.5, 3.0), MW(0xa83a2a));
     body.position.y = 0.75; g.add(body);
     const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.001, 1.7, 1.0, 4, 1, false, Math.PI / 4), M(0x7a2a1e));
     roof.scale.set(1, 1, 1.36); roof.position.y = 2.0; g.add(roof);
@@ -2855,7 +2859,7 @@ function buildFarm(anchor, label) {
     screen.position.set(sx, 0.72, 0.54); g.add(screen);
   }
   // the kiosk
-  const shop = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.1, 1.2), M(0xf0e6d2));
+  const shop = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.1, 1.2), MW(0xf0e6d2));
   shop.position.set(0, 0.65, -1.4); g.add(shop);
   const shopRoof = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.12, 1.35), M(0xc7572a));
   shopRoof.position.set(0, 1.28, -1.4); g.add(shopRoof);
@@ -4815,12 +4819,57 @@ const sketchDetailTex = (() => {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 })();
+// wood grain: long parallel strokes with knots — for trunks, decks, fences
+const grainTex = (() => {
+  const S = 512, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#ffffff'; c.fillRect(0, 0, S, S);
+  const rr = mulberry32(23);
+  c.strokeStyle = 'rgba(40,26,16,0.42)'; c.lineCap = 'round';
+  for (let i = 0; i < 26; i++) {
+    const y = rr() * S, len = 90 + rr() * 260, x = rr() * S;
+    c.lineWidth = 1.2 + rr() * 1.6;
+    c.beginPath(); c.moveTo(x, y);
+    c.quadraticCurveTo(x + len / 2, y + (rr() - 0.5) * 14, x + len, y + (rr() - 0.5) * 8);
+    c.stroke();
+  }
+  for (let i = 0; i < 6; i++) {                     // knots
+    const x = rr() * S, y = rr() * S;
+    c.lineWidth = 1.6;
+    c.beginPath(); c.ellipse(x, y, 7 + rr() * 6, 4 + rr() * 3, rr(), 0, 7); c.stroke();
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+// foliage veins: sparse little kicks and Vs — barely-there, never bricks
+const leafTex = (() => {
+  const S = 512, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#ffffff'; c.fillRect(0, 0, S, S);
+  const rr = mulberry32(31);
+  c.strokeStyle = 'rgba(20,40,24,0.35)'; c.lineCap = 'round'; c.lineWidth = 1.6;
+  for (let i = 0; i < 40; i++) {
+    const x = rr() * S, y = rr() * S, l = 8 + rr() * 14, a = rr() * Math.PI;
+    c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+    c.stroke();
+    if (rr() > 0.6) { c.beginPath(); c.moveTo(x, y); c.lineTo(x + Math.cos(a + 0.7) * l * 0.7, y + Math.sin(a + 0.7) * l * 0.7); c.stroke(); }
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+// the marks a surface earns are decided by WHAT IT IS, not how big it is
+const GP_DETAIL = { wall: () => sketchDetailTex, wood: () => grainTex, leaf: () => leafTex };
 const flatCache = new Map();       // mat → { plain, detailed }
-function flatOf(mat, wantDetail) {
+function flatOf(mat) {
   if (!mat || mat.isShaderMaterial) return mat;
   let pair = flatCache.get(mat);
   if (!pair) { pair = {}; flatCache.set(mat, pair); }
-  const key = wantDetail ? 'detailed' : 'plain';
+  const cat = mat.userData?.gp;
+  const key = cat || 'plain';
   if (!pair[key]) {
     if (mat.map) {
       // the city floor and other textured sheets read as clean 2D art —
@@ -4834,9 +4883,9 @@ function flatOf(mat, wantDetail) {
     }
     pair[key] = new THREE.MeshToonMaterial({
       color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
-      // real maps always win; the sketch detail is only for surfaces that
-      // EARNED it (building-scale, wall-like) — never terrain, water, roads
-      map: mat.map || (wantDetail && !mat.vertexColors && !mat.transparent ? sketchDetailTex : null),
+      // real maps always win; otherwise the material's TAG decides the marks:
+      // wall→bricks, wood→grain, leaf→veins, untagged→clean
+      map: mat.map || (GP_DETAIL[cat] && !mat.vertexColors && !mat.transparent ? GP_DETAIL[cat]() : null),
       gradientMap: toonRamp,
       vertexColors: !!mat.vertexColors,
       transparent: !!mat.transparent, opacity: mat.opacity ?? 1,
@@ -4854,16 +4903,10 @@ function setGreasePencil(on) {
     if (!o.isMesh || gpBoilMats.includes(o.material)) return;
     if (on) {
       if (!o.userData._origMat) {
-        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-        const bb = o.geometry.boundingBox.getSize(new THREE.Vector3());
-        const maxD = Math.max(bb.x, bb.y, bb.z), minD = Math.min(bb.x, bb.y, bb.z);
-        // brick-and-scratch detail belongs on wall-scale surfaces only:
-        // big enough to read as a building face, not a flat ground sheet
-        const wantDetail = maxD > 0.9 && maxD < 8 && !(minD < 0.13 && maxD > 3.0);
         o.userData._origMat = o.material;
         o.material = Array.isArray(o.material)
-          ? o.material.map(m => flatOf(m, wantDetail))
-          : flatOf(o.material, wantDetail);
+          ? o.material.map(m => flatOf(m))
+          : flatOf(o.material);
       }
     } else if (o.userData._origMat) {
       o.material = o.userData._origMat;
