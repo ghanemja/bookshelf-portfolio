@@ -3858,26 +3858,54 @@ function buildLimo() {
 let cabin = null;
 function buildCabin() {
   const g = new THREE.Group();
-  // two cream leather seats and a window, seen from behind during the intro
-  for (const sx of [-0.32, 0.32]) {
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.42), M(0xf0e6d2));
-    seat.position.set(sx, 0.62, -0.2); g.add(seat);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.14), M(0xe8dcc0));
-    back.position.set(sx, 0.85, -0.42); g.add(back);
+  const CREAM = M(0xf0e6d2), WALLM = M(0xf4f0e8), CARPET = M(0x7a4a5a);
+  // the shell: floor, ceiling, back wall, both side walls — a sealed set
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 3.2), CARPET);
+  floor.position.set(0, 0.36, 0); g.add(floor);
+  const ceil = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 3.2), WALLM);
+  ceil.position.set(0, 1.78, 0); g.add(ceil);
+  const backW = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.5, 0.08), WALLM);
+  backW.position.set(0, 1.06, -1.6); g.add(backW);
+  const frontW = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.5, 0.08), WALLM);
+  frontW.position.set(0, 1.06, 1.6); g.add(frontW);
+  for (const sx of [-1.1, 1.1]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.5, 3.2), WALLM);
+    side.position.set(sx, 1.06, 0); g.add(side);
   }
-  // a cabin wall with a round window, forward of the seats
-  const wall = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.3, 0.06), M(0xf4f0e8));
-  wall.position.set(0, 0.9, 0.7); g.add(wall);
-  const win = new THREE.Mesh(new THREE.CircleGeometry(0.26, 20),
-    new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.55 }));
-  win.position.set(0.42, 1.0, 0.735); g.add(win);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.04, 8, 20), M(0xd8d8e0));
-  ring.position.set(0.42, 1.0, 0.72); g.add(ring);
-  const tray = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.03, 0.2), M(0xcfd6de));
-  tray.position.set(-0.32, 0.78, 0.05); g.add(tray);
-  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.14, 8),
-    new THREE.MeshStandardMaterial({ color: 0xffe4a8, transparent: true, opacity: 0.7 }));
-  glass.position.set(-0.32, 0.86, 0.05); g.add(glass);
+  // round windows down both sides, glowing sky-blue (their own light, no sun needed)
+  for (const sx of [-1.05, 1.05]) {
+    for (const wz of [-0.8, 0.2, 1.0]) {
+      const win = new THREE.Mesh(new THREE.CircleGeometry(0.22, 18),
+        new THREE.MeshBasicMaterial({ color: 0xbfe8ff }));
+      win.position.set(sx * 1.01, 1.05, wz);
+      win.rotation.y = sx > 0 ? -Math.PI / 2 : Math.PI / 2;
+      g.add(win);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 8, 18), M(0xd8d8e0));
+      ring.position.set(sx, 1.05, wz);
+      ring.rotation.y = Math.PI / 2;
+      g.add(ring);
+    }
+  }
+  // two rows of cream leather seats
+  for (const rz of [-0.9, -0.1]) {
+    for (const sx of [-0.5, 0.5]) {
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.18, 0.46), CREAM);
+      seat.position.set(sx, 0.56, rz); g.add(seat);
+      const back = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.55, 0.15), M(0xe8dcc0));
+      back.position.set(sx, 0.86, rz - 0.26); g.add(back);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.4), M(0xd8c8b0));
+      arm.position.set(sx + 0.24, 0.68, rz); g.add(arm);
+    }
+  }
+  // champagne on the front-row tray, of course
+  const tray = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.04, 0.22), M(0xcfd6de));
+  tray.position.set(-0.5, 0.82, 0.35); g.add(tray);
+  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.035, 0.16, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffe4a8, transparent: true, opacity: 0.8 }));
+  glass.position.set(-0.5, 0.92, 0.35); g.add(glass);
+  // the cabin lights itself — the shot cannot go dark at night
+  const lamp = new THREE.PointLight(0xfff2dc, 2.2, 6);
+  lamp.position.set(0, 1.6, 0.2); g.add(lamp);
   g.visible = false;
   scene.add(g);
   return g;
@@ -3917,18 +3945,21 @@ function updateArrival(dt) {
 
   if (T < 0.14) {                                 // 0. INSIDE the cabin, first class
     if (arrCaption) arrCaption.textContent = '✈ First class — welcome aboard';
-    const d = airAt(0, 12).normalize();
-    parkJet();
+    // the set floats high over the airport in empty sky: the frame can only
+    // ever contain the cabin, whatever the time of day or graphics mode
+    const up = AIRPORT.clone();
     cabin.visible = true;
-    cabin.position.copy(airportPlane.position);
-    cabin.quaternion.copy(airportPlane.quaternion);
-    // camera sits behind the seats, looking forward out the window
-    _aTmp.copy(cabin.localToWorld(new THREE.Vector3(0, 0.95, -1.1)));
-    camera.position.lerp(_aTmp, 0.1);
-    camera.up.lerp(d, 0.1).normalize();
-    camera.lookAt(cabin.localToWorld(new THREE.Vector3(0.2, 0.95, 1.2)));
+    cabin.position.copy(up.clone().multiplyScalar(R + 34));
+    alignToSurface(cabin, up);
+    airportPlane.visible = false;                  // the jet appears at landing
+    // camera at the back row, looking up the aisle toward the windows
+    _aTmp.copy(cabin.localToWorld(new THREE.Vector3(0, 1.12, -1.35)));
+    camera.position.lerp(_aTmp, T < 0.01 ? 1 : 0.15);
+    camera.up.lerp(up, 0.2).normalize();
+    camera.lookAt(cabin.localToWorld(new THREE.Vector3(0.15, 0.92, 0.9)));
   } else if (T < 0.42) {                           // 1. the jet lands, nose-forward
     cabin.visible = false;
+    airportPlane.visible = true;
     if (arrCaption) arrCaption.textContent = '✈ NetJets — cleared to land';
     const k = (T - 0.14) / 0.28;
     const along = -16 + k * 28;
@@ -4223,8 +4254,11 @@ function makeBoilMat(thickness, seed, color, opacity) {
     fragmentShader: `void main() { gl_FragColor = vec4(${color}, ${opacity}); }`,
   });
 }
-const gpOutlineMat = makeBoilMat(0.05, 3.1, '0.10, 0.09, 0.12', 1.0);
-const gpOutlineMat2 = makeBoilMat(0.032, 11.7, '0.16, 0.14, 0.18', 0.55);
+const gpBoilHeavy = makeBoilMat(0.05, 3.1, '0.10, 0.09, 0.12', 1.0);    // buildings
+const gpBoilMid   = makeBoilMat(0.032, 7.9, '0.10, 0.09, 0.12', 1.0);   // props, vehicles
+const gpBoilLight = makeBoilMat(0.02, 15.3, '0.14, 0.12, 0.16', 0.8);   // small items
+const gpBoilLoose = makeBoilMat(0.03, 11.7, '0.16, 0.14, 0.18', 0.5);   // the loose over-stroke
+const gpBoilMats = [gpBoilHeavy, gpBoilMid, gpBoilLight, gpBoilLoose];
 const gpOutlines = [];
 let gpBuilt = false, gpOn = false;
 function buildGreasePencil() {
@@ -4232,15 +4266,23 @@ function buildGreasePencil() {
   const skip = new Set([planet, ocean, sky, skyStars]);
   scene.traverse(o => {
     if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh) return;
-    if (skip.has(o) || o.material === gpOutlineMat || o.material === gpOutlineMat2) return;
+    if (skip.has(o) || gpBoilMats.includes(o.material)) return;
     if (!o.geometry?.attributes?.normal) return;
     if (o.geometry.attributes.position.count > 5000) return;   // keep draws sane
-    const line = new THREE.Mesh(o.geometry, gpOutlineMat);
+    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    const bb = o.geometry.boundingBox.getSize(new THREE.Vector3());
+    const maxD = Math.max(bb.x, bb.y, bb.z), minD = Math.min(bb.x, bb.y, bb.z);
+    // ground-like slabs (runway, decks, fields) get NO contour — a wobbling
+    // outline around a flat sheet reads as scribble, not line art
+    if (minD < 0.13 && maxD > 3.0) return;
+    const mat = maxD > 2.2 ? gpBoilHeavy : maxD > 0.6 ? gpBoilMid : gpBoilLight;
+    const line = new THREE.Mesh(o.geometry, mat);
     line.visible = false;
     o.add(line);                       // child: follows every transform for free
     gpOutlines.push(line);
-    if (o.geometry.attributes.position.count < 2200) {
-      const loose = new THREE.Mesh(o.geometry, gpOutlineMat2);
+    // buildings and props get the loose second stroke; small items stay clean
+    if (maxD > 0.6 && o.geometry.attributes.position.count < 2200) {
+      const loose = new THREE.Mesh(o.geometry, gpBoilLoose);
       loose.visible = false;
       o.add(loose);
       gpOutlines.push(loose);
@@ -4296,24 +4338,25 @@ const sketchDetailTex = (() => {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 })();
-const flatCache = new Map();
-function flatOf(mat) {
+const flatCache = new Map();       // mat → { plain, detailed }
+function flatOf(mat, wantDetail) {
   if (!mat || mat.isShaderMaterial) return mat;
-  let f = flatCache.get(mat);
-  if (!f) {
-    f = new THREE.MeshToonMaterial({
+  let pair = flatCache.get(mat);
+  if (!pair) { pair = {}; flatCache.set(mat, pair); }
+  const key = wantDetail ? 'detailed' : 'plain';
+  if (!pair[key]) {
+    pair[key] = new THREE.MeshToonMaterial({
       color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
-      // real maps stay; bare colour gets sketch detail — but NEVER the terrain
-      // or water: their stretched UVs smear the strokes into giant ghost marks
-      map: mat.map || (mat.vertexColors || mat.transparent ? null : sketchDetailTex),
+      // real maps always win; the sketch detail is only for surfaces that
+      // EARNED it (building-scale, wall-like) — never terrain, water, roads
+      map: mat.map || (wantDetail && !mat.vertexColors && !mat.transparent ? sketchDetailTex : null),
       gradientMap: toonRamp,
       vertexColors: !!mat.vertexColors,
       transparent: !!mat.transparent, opacity: mat.opacity ?? 1,
       side: mat.side ?? THREE.FrontSide,
     });
-    flatCache.set(mat, f);
   }
-  return f;
+  return pair[key];
 }
 function setGreasePencil(on) {
   if (on && !gpBuilt) buildGreasePencil();
@@ -4321,11 +4364,19 @@ function setGreasePencil(on) {
   gpOn = on;
   for (const l of gpOutlines) l.visible = on;
   scene.traverse(o => {
-    if (!o.isMesh || o.material === gpOutlineMat || o.material === gpOutlineMat2) return;
+    if (!o.isMesh || gpBoilMats.includes(o.material)) return;
     if (on) {
       if (!o.userData._origMat) {
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        const bb = o.geometry.boundingBox.getSize(new THREE.Vector3());
+        const maxD = Math.max(bb.x, bb.y, bb.z), minD = Math.min(bb.x, bb.y, bb.z);
+        // brick-and-scratch detail belongs on wall-scale surfaces only:
+        // big enough to read as a building face, not a flat ground sheet
+        const wantDetail = maxD > 0.9 && maxD < 8 && !(minD < 0.13 && maxD > 3.0);
         o.userData._origMat = o.material;
-        o.material = Array.isArray(o.material) ? o.material.map(flatOf) : flatOf(o.material);
+        o.material = Array.isArray(o.material)
+          ? o.material.map(m => flatOf(m, wantDetail))
+          : flatOf(o.material, wantDetail);
       }
     } else if (o.userData._origMat) {
       o.material = o.userData._origMat;
@@ -4508,7 +4559,7 @@ function updateWorldAmbient(dt, t) {
     b.rotation.x = Math.sin(t * 0.8 + i * 2) * 0.035;
   }
 
-  if (gpOn) { gpOutlineMat.uniforms.time.value = t; gpOutlineMat2.uniforms.time.value = t; }
+  if (gpOn) for (const m of gpBoilMats) m.uniforms.time.value = t;
 
   // ambient motion
   for (const p of cloudPivots) p.rotateY(p.userData.speed * dt);
