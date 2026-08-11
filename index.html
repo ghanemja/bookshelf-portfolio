@@ -100,8 +100,9 @@
   #toast {
     position: fixed; left: 50%; bottom: 88px; transform: translate(-50%, 12px);
     z-index: 23; max-width: min(520px, 88vw);
-    background: rgba(20, 15, 26, 0.9); color: #fffaf2; font-weight: 600;
-    font-size: 14px; padding: 11px 18px; border-radius: 14px;
+    background: rgba(20, 15, 26, 0.9); color: #fffaf2;
+    font-family: "Permanent Marker", cursive; font-weight: 400; letter-spacing: 0.01em;
+    font-size: 15px; padding: 11px 18px; border-radius: 14px;
     opacity: 0; pointer-events: none; transition: opacity 0.3s, transform 0.3s;
   }
   #toast.show { opacity: 1; transform: translate(-50%, 0); }
@@ -161,9 +162,9 @@
   #arrival-ui { position: fixed; inset: 0; z-index: 44; pointer-events: none; }
   #arr-caption {
     position: absolute; left: 50%; top: 8%; transform: translateX(-50%);
-    font-family: "Fredoka", system-ui, sans-serif; font-weight: 700;
+    font-family: "Permanent Marker", cursive; font-weight: 400; letter-spacing: 0.01em;
     font-size: clamp(16px, 3vw, 26px); color: #fffaf2;
-    background: rgba(20, 15, 26, 0.6); padding: 8px 22px; border-radius: 999px;
+    background: rgba(20, 15, 26, 0.6); padding: 8px 24px; border-radius: 16px;
     backdrop-filter: blur(6px); white-space: nowrap;
     transition: opacity 0.5s ease; opacity: 0;
   }
@@ -180,6 +181,10 @@
     position: fixed; inset: 0; z-index: 45;
     display: flex; align-items: center; justify-content: center;
     opacity: 0; pointer-events: none; transition: opacity 0.5s ease;
+    /* a real handset: crisp modern system UI, not the game's rounded marker */
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+      "Inter", Roboto, "Helvetica Neue", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; letter-spacing: -0.01em;
   }
   /* on a wide screen the phone sits to one side so you can see the critic
      holding it up, rather than the handset covering them */
@@ -365,10 +370,11 @@
   #quest {
     position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 11;
     display: flex; align-items: center; gap: 10px;
-    padding: 9px 18px; border-radius: 999px;
-    background: rgba(255, 250, 242, 0.82); backdrop-filter: blur(8px);
-    border: 2px solid var(--panel-edge);
-    font-size: 13.5px; font-weight: 700; color: var(--ink); white-space: nowrap;
+    padding: 7px 18px 5px; border-radius: 14px;
+    background: var(--panel); border: 2.5px solid var(--ink);
+    box-shadow: 0 4px 0 var(--ink);
+    font-family: "Permanent Marker", cursive; font-weight: 400;
+    font-size: 14.5px; letter-spacing: 0.01em; color: var(--ink); white-space: nowrap;
   }
   #quest .q-icon { font-size: 15px; }
   #quest #quest-count {
@@ -388,14 +394,22 @@
     position: fixed; top: 20px; right: 24px; z-index: 12;
     display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
   }
+  /* painted stickers, not frosted pills — solid paper, ink outline, hand-drop
+     shadow, marker lettering, each nudged a hair off-square like it was placed
+     by hand */
   #toggles button {
-    border: 2px solid var(--panel-edge); cursor: pointer;
-    background: rgba(255, 250, 242, 0.8); backdrop-filter: blur(8px);
-    color: var(--ink); font-family: inherit; font-weight: 700; font-size: 13px;
-    padding: 8px 15px; border-radius: 999px;
-    transition: transform 0.12s ease, background 0.12s ease;
+    border: 2.5px solid var(--ink); cursor: pointer;
+    background: var(--panel);
+    color: var(--ink); font-family: "Permanent Marker", cursive; font-weight: 400;
+    font-size: 14.5px; letter-spacing: 0.01em; line-height: 1.15;
+    padding: 6px 15px 4px; border-radius: 13px;
+    box-shadow: 0 4px 0 var(--ink);
+    transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
   }
-  #toggles button:hover { transform: translateY(-1px); background: rgba(255, 250, 242, 0.95); }
+  #toggles button:nth-child(odd) { transform: rotate(-1.2deg); }
+  #toggles button:nth-child(even) { transform: rotate(1deg); }
+  #toggles button:hover { transform: translateY(2px) rotate(0deg); background: #fff; box-shadow: 0 2px 0 var(--ink); }
+  #toggles button:active { transform: translateY(4px) rotate(0deg); box-shadow: 0 0 0 var(--ink); }
 
   /* ── comfort mode: motion-sickness reducers ── */
   #comfort-fx {
