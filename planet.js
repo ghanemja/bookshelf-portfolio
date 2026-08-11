@@ -937,50 +937,113 @@ function slerpDir(a, b, t) {
     .addScaledVector(b, Math.sin(t * th) / s).normalize();
 }
 {
-  const pts = [];
-  for (let i = 0; i < LANDMARKS.length; i++) {
-    const a = LANDMARKS[i].dir, b = LANDMARKS[(i + 1) % LANDMARKS.length].dir;
-    const n = 22;
-    for (let k = 0; k < n; k++) pts.push(slerpDir(a, b, k / n));
-  }
-  function ribbon(halfW, lift, key, dashed = false) {
-    const pos = [], idx = [];
-    const lat = new THREE.Vector3();
-    for (let i = 0; i < pts.length; i++) {
-      const d = pts[i], dn = pts[(i + 1) % pts.length];
-      const tang = dn.clone().sub(d.clone().multiplyScalar(d.dot(dn))).normalize();
-      lat.crossVectors(d, tang).normalize();
-      const r = Math.max(radiusAt(d), SEA_R) + lift;   // becomes a causeway over bays
-      const p1 = d.clone().multiplyScalar(r).addScaledVector(lat, halfW);
-      const p2 = d.clone().multiplyScalar(r).addScaledVector(lat, -halfW);
-      pos.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+  // ── ONE road network, with a hierarchy like real planning: smooth asphalt
+  // near the city that grades into dirt lanes in the country, spur roads out
+  // to every district, and a turning circle wherever a road ends.
+  const DIRT = { edge: new THREE.Color(0x8a7a5c), bed: new THREE.Color(0x9a805a) };
+  const PAVED = { edge: new THREE.Color(0xf2ecd8), bed: new THREE.Color(0x54575f) };
+  // 1 near downtown → 0 in the country; drives width, colour and dashes
+  const cityness = (d) => THREE.MathUtils.smoothstep(1.35 - d.angleTo(DOWNTOWN), 0.10, 0.90);
+
+  function smoothLoop(raw, passes, closed) {
+    let out = raw.map(v => v.clone());
+    const n = out.length;
+    for (let p = 0; p < passes; p++) {
+      const next = [];
+      for (let i = 0; i < n; i++) {
+        if (!closed && (i === 0 || i === n - 1)) { next.push(out[i].clone()); continue; }
+        next.push(out[i].clone().multiplyScalar(2)
+          .add(out[(i - 1 + n) % n]).add(out[(i + 1) % n]).normalize());
+      }
+      out = next;
     }
+    return out;
+  }
+
+  // ribbon with PER-VERTEX colour: asphalt and dirt in one continuous mesh
+  function gradedRibbon(pts, closed, widthOf, colorOf, lift, dashed = false) {
+    const pos = [], col = [], idx = [];
+    const lat = new THREE.Vector3();
     const n = pts.length;
     for (let i = 0; i < n; i++) {
+      const d = pts[i];
+      const dn = pts[closed ? (i + 1) % n : Math.min(i + 1, n - 1)];
+      const dp = pts[closed ? (i - 1 + n) % n : Math.max(i - 1, 0)];
+      const tang = dn.clone().sub(dp.clone().multiplyScalar(dp.dot(dn))).normalize();
+      lat.crossVectors(d, tang).normalize();
+      const r = Math.max(radiusAt(d), SEA_R) + lift;
+      const w = widthOf(d);
+      const c = colorOf(d);
+      const p1 = d.clone().multiplyScalar(r).addScaledVector(lat, w);
+      const p2 = d.clone().multiplyScalar(r).addScaledVector(lat, -w);
+      pos.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+      col.push(c.r, c.g, c.b, c.r, c.g, c.b);
+    }
+    const lim = closed ? n : n - 1;
+    for (let i = 0; i < lim; i++) {
       if (dashed && i % 4 >= 2) continue;
+      if (dashed && cityness(pts[i]) < 0.45) continue;   // no lane paint on dirt
       const a0 = i * 2, a1 = i * 2 + 1, b0 = ((i + 1) % n) * 2, b1 = ((i + 1) % n) * 2 + 1;
       idx.push(a0, b0, a1, a1, b0, b1);
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const mesh = new THREE.Mesh(g, roadMat(key === 'roadMark'));
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.97, flatShading: true,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    }));
     mesh.receiveShadow = true;
     scene.add(mesh);
-    roadParts.push({ mesh, key });
     return mesh;
   }
-  // all three layers sit at the SAME height (flush with the ground); the
-  // polygon-offset ordering — shoulder, asphalt, then a DARK recessed centre
-  // groove — is what stacks them without z-fighting or raising anything
-  ribbon(1.62, 0.04, 'roadLine');            // pale shoulders
-  ribbon(1.45, 0.045, 'road');               // asphalt
-  ribbon(0.07, 0.055, 'roadMark', true);     // dashed centre line
+  const _cTmp = new THREE.Color();
+  function roadLayers(pts, closed) {
+    gradedRibbon(pts, closed,
+      d => { const c = cityness(d); return (1.35 + 0.35 * c) * (1.06 + 0.14 * (1 - c)); },
+      d => _cTmp.copy(DIRT.edge).lerp(PAVED.edge, cityness(d)).clone(), 0.04);
+    gradedRibbon(pts, closed,
+      d => { const c = cityness(d); return 1.15 + 0.38 * c; },
+      d => _cTmp.copy(DIRT.bed).lerp(PAVED.bed, cityness(d)).clone(), 0.05);
+    gradedRibbon(pts, closed, () => 0.07,
+      () => new THREE.Color(0xf2ecd8), 0.06, true);
+  }
+
+  // the grand loop through every landmark, corners rounded like a laid road
+  const pts = [];
+  for (let i = 0; i < LANDMARKS.length; i++) {
+    const a = LANDMARKS[i].dir, b = LANDMARKS[(i + 1) % LANDMARKS.length].dir;
+    for (let k = 0; k < 22; k++) pts.push(slerpDir(a, b, k / 22));
+  }
+  const loop = smoothLoop(pts, 6, true);
+  roadLayers(loop, true);
+
+  // spur roads: downtown out to every district, ending in a turning circle
+  const SPURS = [AIRPORT, RESORT, MALL, FARM_A, FARM_B, BEACH];
+  for (const target of SPURS) {
+    const total = DOWNTOWN.angleTo(target);
+    const t0 = Math.min(0.85, 0.55 / total);          // leave the paved grid edge
+    const spur = [];
+    for (let k = 0; k <= 26; k++) spur.push(slerpDir(DOWNTOWN, target, t0 + (1 - t0) * (k / 26)));
+    roadLayers(smoothLoop(spur, 3, false), false);
+    // cul-de-sac: a dirt turning circle where the road arrives
+    const end = spur[spur.length - 1];
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(2.0, 22), new THREE.MeshStandardMaterial({
+      color: 0x9a805a, roughness: 0.97, flatShading: true,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    }));
+    disc.position.copy(posOn(end, 0.06));
+    alignToSurface(disc, end);
+    disc.rotateX(-Math.PI / 2);
+    disc.receiveShadow = true;
+    scene.add(disc);
+  }
 
   // pines line the road at regular intervals — planted, not scattered
-  for (let i = 0; i < pts.length; i += 5) {
-    const d = pts[i], dn = pts[(i + 1) % pts.length];
+  for (let i = 0; i < loop.length; i += 5) {
+    const d = loop[i], dn = loop[(i + 1) % loop.length];
     const tang = dn.clone().sub(d.clone().multiplyScalar(d.dot(dn))).normalize();
     for (const s of [-1, 1]) {
       const dd = d.clone().applyAxisAngle(tang, s * 0.06).normalize();
@@ -4240,7 +4303,9 @@ function flatOf(mat) {
   if (!f) {
     f = new THREE.MeshToonMaterial({
       color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
-      map: mat.map || sketchDetailTex,      // real maps stay; bare colour gets sketch detail
+      // real maps stay; bare colour gets sketch detail — but NEVER the terrain
+      // or water: their stretched UVs smear the strokes into giant ghost marks
+      map: mat.map || (mat.vertexColors || mat.transparent ? null : sketchDetailTex),
       gradientMap: toonRamp,
       vertexColors: !!mat.vertexColors,
       transparent: !!mat.transparent, opacity: mat.opacity ?? 1,
