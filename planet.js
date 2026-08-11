@@ -3241,22 +3241,10 @@ function playRide(t, prev) {
 
 new GLTFLoader().load('./models/critic.glb', (glb) => {
   const base = glb.animations[0];
+  // strides / arm-swing / swag are baked into the clip itself (see the Blender
+  // bake), so we just slice each named sub-clip out of the one timeline
   for (const [n, [a, b]] of Object.entries(SUBCLIPS))
     CRITIC.clips[n] = THREE.AnimationUtils.subclip(base.clone(), n, a, b, 24);
-    if (n === 'Walk') {
-      // longer strides: scale every limb rotation away from identity
-      const AMP = 1.4;
-      const idq = new THREE.Quaternion();
-      const q = new THREE.Quaternion();
-      for (const tr of CRITIC.clips[n].tracks) {
-        if (!/thigh|shin|uparm|forearm/i.test(tr.name) || !tr.name.endsWith('.quaternion')) continue;
-        for (let i = 0; i < tr.values.length; i += 4) {
-          q.fromArray(tr.values, i);
-          q.slerpQuaternions(idq, q, AMP);         // >1 = exaggerate the swing
-          q.toArray(tr.values, i);
-        }
-      }
-    }
   for (const key of Object.keys(RIDER_XF)) {
     const rig = skeletonClone(glb.scene);
     rig.traverse(m => { if (m.isMesh) { m.castShadow = !IS_TOUCH; m.frustumCulled = false; } });
@@ -4272,79 +4260,91 @@ let cabin = null;
 // the cabin is a PAINTING: a hand-drawn NetJets-style interior on one
 // billboard (the critic never walks, so it reads as a room), plus a real
 // porthole to the left that the camera turns to for the planet-below shot
-function drawCabinPainting() {
+// hand-traced NetJets cabin: every shape (bulkhead, seats, windows, sign) is a
+// flat fill with a wobbly grease-pencil outline. `seed` jitters the line path so
+// a handful of variants swapped per frame read as a hand-drawn boil.
+function drawCabinPainting(seed = 1) {
   const W = 1024, H = 640;
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const c = cv.getContext('2d');
-  const ink = '#241c28';
-  const line = (w) => { c.strokeStyle = ink; c.lineWidth = w; };
-  // walls: warm cream, arched ceiling band
-  c.fillStyle = '#f2ead9'; c.fillRect(0, 0, W, H);
-  const ceil = c.createLinearGradient(0, 0, 0, H * 0.3);
-  ceil.addColorStop(0, '#f9edd6'); ceil.addColorStop(1, '#f2ead9');
-  c.fillStyle = ceil; c.fillRect(0, 0, W, H * 0.3);
-  // ceiling spotlights
-  for (let i = 0; i < 6; i++) {
-    const x = W * (0.2 + i * 0.12), y = H * 0.07;
-    c.fillStyle = '#fff6d0'; c.beginPath(); c.ellipse(x, y, 16, 9, 0, 0, 7); c.fill();
-    line(3); c.stroke();
-  }
-  // carpet with perspective seams
-  c.fillStyle = '#c9b4a0'; c.fillRect(0, H * 0.72, W, H * 0.28);
-  line(3);
-  for (let i = 0; i < 7; i++) {
-    c.beginPath();
-    c.moveTo(W * (0.1 + i * 0.14), H);
-    c.lineTo(W * (0.34 + i * 0.055), H * 0.72);
-    c.stroke();
-  }
-  line(5); c.strokeRect(-4, H * 0.72, W + 8, H * 0.281);
-  // aft wood wall with the NETJETS screen
-  c.fillStyle = '#7a4a2e';
-  const wx = W * 0.33, wy = H * 0.16, ww = W * 0.34, wh = H * 0.58;
-  c.beginPath(); c.roundRect(wx, wy, ww, wh, 26); c.fill();
-  line(6); c.stroke();
-  c.strokeStyle = 'rgba(40,20,10,0.5)'; c.lineWidth = 2.5;   // wood grain
-  for (let i = 1; i < 9; i++) {
-    c.beginPath(); c.moveTo(wx + (ww / 9) * i, wy + 8); c.lineTo(wx + (ww / 9) * i, wy + wh - 8); c.stroke();
-  }
-  c.fillStyle = '#fffdf6';
-  c.beginPath(); c.roundRect(W * 0.415, H * 0.26, W * 0.17, H * 0.13, 8); c.fill();
-  line(4); c.stroke();
-  c.fillStyle = ink; c.font = '700 26px "Fredoka", sans-serif'; c.textAlign = 'center';
-  c.fillText('NETJETS', W * 0.5, H * 0.345);
-  // cream sofa, left — seat, back, arm cushions
-  function couch(x, y, w, h, flip) {
-    c.fillStyle = '#efe4ce';
-    c.beginPath(); c.roundRect(x, y, w, h * 0.55, 18); c.fill(); line(5); c.stroke();
-    c.fillStyle = '#f6ecd8';
-    c.beginPath(); c.roundRect(x, y - h * 0.5, w, h * 0.58, 16); c.fill(); c.stroke();
-    c.strokeStyle = 'rgba(36,28,40,0.55)'; c.lineWidth = 3;
-    for (let i = 1; i < 3; i++) {
-      c.beginPath(); c.moveTo(x + (w / 3) * i, y - h * 0.45); c.lineTo(x + (w / 3) * i, y + h * 0.4); c.stroke();
+  const ink = '#26202b';
+  const rnd = mulberry32(seed >>> 0);
+  const jit = (a) => (rnd() - 0.5) * a;
+  c.lineJoin = 'round'; c.lineCap = 'round'; c.textAlign = 'center';
+  const stroke = (pts, w, close, col) => {
+    c.strokeStyle = col || ink; c.lineWidth = w; c.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const x = pts[i][0] + jit(2.6), y = pts[i][1] + jit(2.6);
+      i ? c.lineTo(x, y) : c.moveTo(x, y);
     }
+    if (close) c.closePath();
+    c.stroke();
+  };
+  const panel = (x, y, w, h, r, col, lw = 5) => {
+    c.fillStyle = col; c.beginPath(); c.roundRect(x, y, w, h, r); c.fill();
+    const N = 5, p = [];
+    for (let i = 0; i <= N; i++) p.push([x + w * i / N, y]);
+    for (let i = 1; i <= N; i++) p.push([x + w, y + h * i / N]);
+    for (let i = 1; i <= N; i++) p.push([x + w - w * i / N, y + h]);
+    for (let i = 1; i < N; i++) p.push([x, y + h - h * i / N]);
+    stroke(p, lw, true);
+  };
+  const ellipse = (cx, cy, rx, ry, col, lw) => {
+    c.fillStyle = col; c.beginPath(); c.ellipse(cx, cy, rx, ry, 0, 0, 7); c.fill();
+    const p = []; for (let i = 0; i <= 22; i++) { const a = i / 22 * Math.PI * 2; p.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]); }
+    stroke(p, lw, true);
+  };
+
+  // warm cabin shell + ceiling glow + carpet
+  const wall = c.createLinearGradient(0, 0, 0, H);
+  wall.addColorStop(0, '#f7eeda'); wall.addColorStop(0.55, '#efe4cf'); wall.addColorStop(1, '#e6d7bd');
+  c.fillStyle = wall; c.fillRect(0, 0, W, H);
+  const cg = c.createLinearGradient(0, 0, 0, H * 0.24);
+  cg.addColorStop(0, '#fbf3df'); cg.addColorStop(1, 'rgba(251,243,223,0)');
+  c.fillStyle = cg; c.fillRect(0, 0, W, H * 0.24);
+  stroke([[0, H * 0.12], [W * 0.3, H * 0.08], [W * 0.7, H * 0.08], [W, H * 0.12]], 3);
+  c.fillStyle = '#d3bda4'; c.fillRect(0, H * 0.76, W, H * 0.24);
+  stroke([[0, H * 0.76], [W, H * 0.76]], 4);
+  for (let i = 0; i < 6; i++) { const t = i / 5; stroke([[W * (0.18 + t * 0.68), H * 0.77], [W * (t * 1.05 - 0.05), H]], 2.5, false, 'rgba(38,32,43,0.35)'); }
+
+  // maroon aft bulkhead (left), curved like the real cabin
+  c.fillStyle = '#6f2b2c';
+  c.beginPath(); c.moveTo(-10, H * 0.07);
+  c.quadraticCurveTo(W * 0.30, H * 0.0, W * 0.44, H * 0.15);
+  c.lineTo(W * 0.42, H * 0.82); c.lineTo(-10, H * 0.84); c.closePath(); c.fill();
+  c.fillStyle = 'rgba(40,12,14,0.32)';
+  c.beginPath(); c.moveTo(W * 0.30, H * 0.05); c.quadraticCurveTo(W * 0.40, H * 0.09, W * 0.44, H * 0.15);
+  c.lineTo(W * 0.42, H * 0.82); c.lineTo(W * 0.33, H * 0.82); c.closePath(); c.fill();
+  stroke([[-10, H * 0.07], [W * 0.30, H * 0.0], [W * 0.44, H * 0.15], [W * 0.42, H * 0.82]], 5);
+  // NETJETS placard on the bulkhead
+  panel(W * 0.05, H * 0.40, W * 0.22, H * 0.15, 10, '#fdfcf6', 5);
+  c.fillStyle = ink; c.font = '700 30px "Fredoka", system-ui, sans-serif';
+  c.fillText('NETJETS', W * 0.16, H * 0.487);
+  stroke([[W * 0.075, H * 0.505], [W * 0.246, H * 0.44]], 3);
+
+  // two glowing windows, right wall
+  for (const wx of [W * 0.80, W * 0.915]) {
+    panel(wx - 58, H * 0.24, 106, H * 0.42, 42, '#efe3c9', 6);
+    const glow = c.createRadialGradient(wx - 6, H * 0.44, 6, wx - 6, H * 0.44, 130);
+    glow.addColorStop(0, '#fffdf4'); glow.addColorStop(0.6, '#ffedbe'); glow.addColorStop(1, '#f4e0b2');
+    c.save(); c.beginPath(); c.roundRect(wx - 46, H * 0.27, 80, H * 0.36, 34); c.clip();
+    c.fillStyle = glow; c.fillRect(wx - 60, H * 0.24, 120, H * 0.5); c.restore();
+    const p = []; for (let i = 0; i <= 18; i++) { const a = i / 18 * Math.PI * 2; p.push([wx - 6 + Math.cos(a) * 40, H * 0.45 + Math.sin(a) * H * 0.18]); }
+    stroke(p, 4);
   }
-  couch(W * 0.02, H * 0.56, W * 0.27, H * 0.3);
-  // two club chairs, right
-  for (const [cx2, cy2] of [[W * 0.71, H * 0.55], [W * 0.86, H * 0.60]]) {
-    c.fillStyle = '#f6ecd8';
-    c.beginPath(); c.roundRect(cx2, cy2 - H * 0.16, W * 0.115, H * 0.2, 16); c.fill(); line(5); c.stroke();
-    c.fillStyle = '#efe4ce';
-    c.beginPath(); c.roundRect(cx2 - 8, cy2, W * 0.135, H * 0.11, 12); c.fill(); c.stroke();
-  }
-  // wood side table with a glass
-  c.fillStyle = '#8a5a36';
-  c.beginPath(); c.ellipse(W * 0.63, H * 0.66, 44, 16, 0, 0, 7); c.fill(); line(4); c.stroke();
-  c.fillStyle = '#ffe4a8';
-  c.beginPath(); c.roundRect(W * 0.615, H * 0.585, 14, 26, 4); c.fill(); line(3); c.stroke();
-  // portholes upper left and right, sky blue
-  for (const px of [0.08, 0.19, 0.92]) {
-    c.fillStyle = '#bfe8ff';
-    c.beginPath(); c.ellipse(W * px, H * 0.30, 34, 44, 0, 0, 7); c.fill();
-    c.strokeStyle = '#fdfaf2'; c.lineWidth = 10; c.stroke();
-    line(4); c.stroke();
-  }
+
+  // two cream club seats facing each other, centre, with a low table
+  const seat = (x, base, w, tall, arm) => {
+    panel(x - w * 0.10, base - tall * 0.12, w * 0.16, tall * 0.5, 12, '#e2d3b4', 4);   // armrest
+    panel(x, base - tall * 0.60, w * 0.96, tall * 0.68, 22, '#efe4ca', 5);            // backrest
+    panel(x, base, w, tall * 0.34, 20, '#e9dcc0', 5);                                 // cushion
+    stroke([[x + w * 0.5, base - tall * 0.52], [x + w * 0.5, base + tall * 0.26]], 3, false, 'rgba(38,32,43,0.45)');
+  };
+  seat(W * 0.40, H * 0.66, W * 0.155, H * 0.40);
+  seat(W * 0.575, H * 0.685, W * 0.155, H * 0.40);
+  ellipse(W * 0.55, H * 0.72, 40, 14, '#8a5a36', 4);
+  panel(W * 0.537, H * 0.645, 15, 30, 4, '#ffe6ac', 3);
   return cv;
 }
 
@@ -4403,25 +4403,15 @@ function greaseOverPhoto(img, seed) {
 // porthole to the left that the camera turns to for the planet-below shot
 function buildCabin() {
   const g = new THREE.Group();
-  const tex = new THREE.CanvasTexture(drawCabinPainting());
-  tex.colorSpace = THREE.SRGBColorSpace;
+  // three traced drawings of the same cabin, each with a slightly different line
+  // wobble — swapped per frame they read as a hand-drawn boil
+  const boil = [1, 2, 3].map((s) => { const t = new THREE.CanvasTexture(drawCabinPainting(s)); t.colorSpace = THREE.SRGBColorSpace; return t; });
   const board = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 4.5),
-    new THREE.MeshBasicMaterial({ map: tex }));
+    new THREE.MeshBasicMaterial({ map: boil[0] }));
   board.position.set(0, 1.1, 3.0);
   board.rotation.y = Math.PI;                 // faces the camera at -z
+  board.userData.boil = boil;
   g.add(board);
-  // the REAL NetJets photo takes over the moment models/cabin.jpg exists
-  const photo = new Image();
-  photo.onload = () => {
-    const gtA = new THREE.CanvasTexture(greaseOverPhoto(photo, 9));
-    const gtB = new THREE.CanvasTexture(greaseOverPhoto(photo, 71));
-    gtA.colorSpace = gtB.colorSpace = THREE.SRGBColorSpace;
-    board.material.map = gtA;
-    board.material.needsUpdate = true;
-    board.userData.boil = [gtA, gtB];              // two drawings of the same lines
-    board.scale.set(1, (photo.height / photo.width) * (7.2 / 4.5), 1);
-  };
-  photo.src = './models/cabin.jpg';
   g.userData.board = board;
   // the porthole: cabin wall (annulus) filling the frame right to the screen
   // edges, a cream outer rim and a steel inner ring — the planet shows only
@@ -4576,27 +4566,43 @@ function updateArrival(dt) {
     }
     sampleArrPath(u, _apDir, _apTan);
     limo.visible = true;
-    limo.position.copy(dbl(_apDir));
-    alignToSurface(limo, _apDir, yawToFace(_apDir, _apDir.clone().multiplyScalar(R).addScaledVector(_apTan, 2).normalize()));
+    // lateral surface direction from the road toward the station
+    const gasSide = GAS_DIR.clone().sub(_apDir.clone().multiplyScalar(_apDir.dot(GAS_DIR))).normalize();
+    // driving: stay on the painted road. stopped: pull OFF onto the forecourt so
+    // the limo sits alongside the pumps, not idling in the middle of the road.
+    // 1.55 arc-units ≈ the pump line (station centre is ~2.3 off the road).
+    const parkDir = driving ? _apDir.clone()
+      : _apDir.clone().addScaledVector(gasSide, 1.55 / R).normalize();
+    limo.position.copy(dbl(parkDir));
+    alignToSurface(limo, parkDir, yawToFace(parkDir, parkDir.clone().multiplyScalar(R).addScaledVector(_apTan, 2).normalize()));
     if (driving) for (const w of limo.userData.wheels || []) w.rotation.x += dt * 5;
-    // the chauffeur hops out at the pumps
+    // the chauffeur hops out on the pump side
     if (!driving) {
       gasDriver.visible = true;
-      const side = GAS_DIR.clone().sub(_apDir.clone().multiplyScalar(_apDir.dot(GAS_DIR))).normalize();
-      gasDriver.position.copy(limo.position).addScaledVector(side, 1.1);
-      alignToSurface(gasDriver, _apDir, yawToFace(_apDir, GAS_DIR));
+      gasDriver.position.copy(limo.position).addScaledVector(gasSide, 1.0);
+      alignToSurface(gasDriver, parkDir, yawToFace(parkDir, GAS_DIR));
       walkPerson(gasDriver, performance.now() / 1000, 0.25);   // fidgets with the pump
     } else {
       gasDriver.visible = false;
     }
-    // camera trails the limo along the road; at the pumps it swings wide to
-    // frame the stop like a scene
-    _aTmp.copy(limo.position).addScaledVector(_apDir, driving ? 3.2 : 2.4)
-      .addScaledVector(_aTmp2.copy(_apTan).negate(), driving ? 6.5 : 3.5);
-    if (!driving) _aTmp.addScaledVector(_aTmp2.crossVectors(_apDir, _apTan).normalize(), 4.5);
+    // camera: while driving it trails behind; at the stop it stands off on the
+    // OPEN-ROAD side and looks back at the forecourt, so the limo and the
+    // station share the frame and read at their true relative scale.
+    let arrLook;
+    if (driving) {
+      _aTmp.copy(limo.position).addScaledVector(_apDir, 3.2)
+        .addScaledVector(_aTmp2.copy(_apTan).negate(), 6.5);
+      arrLook = limo.position.clone().addScaledVector(_apDir, 0.6);
+    } else {
+      const lat = _aTmp2.crossVectors(_apDir, _apTan).normalize();
+      if (lat.dot(GAS_DIR) > 0) lat.negate();     // keep the station BEHIND the limo
+      _aTmp.copy(limo.position).addScaledVector(_apDir, 2.8)
+        .addScaledVector(lat, 6.5).addScaledVector(_apTan, -2.5);
+      arrLook = limo.position.clone().addScaledVector(gasSide, 1.4).addScaledVector(_apDir, 0.4);
+    }
     camera.position.lerp(_aTmp, 0.055);
     camera.up.lerp(_apDir, 0.08).normalize();
-    camera.lookAt(limo.position.clone().addScaledVector(_apDir, 0.6));
+    camera.lookAt(arrLook);
   } else if (T < 1.0) {                            // 4. check in at the hotel
     gasDriver.visible = false;
     if (arrCaption) arrCaption.textContent = '🏨 Checking in…';
@@ -5683,5 +5689,7 @@ if (new URLSearchParams(location.search).get('debug') === '1') {
 }
 try { buildCollisionBVH(); } catch (e) { console.warn('BVH build skipped:', e.message); }
 progress(1, 'ready!');
+window.__step = () => animate();
+window.__dbg = () => ({ criticReady, insts: Object.keys(CRITIC.insts) });
 animate();
 setTimeout(() => loaderEl.classList.add('hide'), 450);
