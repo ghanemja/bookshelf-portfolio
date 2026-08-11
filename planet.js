@@ -2600,27 +2600,69 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
     g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
     scene.add(g); addSolid(d, 3.4, g);
   }
-  // the private jet — nose along +Z so it faces its direction of travel
+  // the private jet, silhouette done properly: tapered fuselage, swept wings
+  // with dihedral, rear-mounted engines, swept tail with a T-stabiliser, and
+  // real landing gear — nose along +Z
   {
     const d = at(-3.2, 3);
     const g = new THREE.Group();
-    const fus = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 4.2, 6, 12), M(0xf4f6f8));
-    fus.rotation.x = Math.PI / 2; fus.position.y = 0.9; g.add(fus);      // long axis = Z
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 12), M(0xf4f6f8));
-    nose.rotation.x = Math.PI / 2; nose.position.set(0, 0.9, 2.9); g.add(nose);
-    const tailfin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.1, 0.9), M(0x14243a));
-    tailfin.position.set(0, 1.5, -2.3); g.add(tailfin);
-    for (const s of [-1, 1]) {                                            // wings along X
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.1, 1.3), M(0xdfe6ec));
-      wing.position.set(s * 1.0, 0.85, 0.1); wing.rotation.z = s * 0.06; g.add(wing);
-      const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.6, 8), M(0x2d3540));
-      engine.rotation.x = Math.PI / 2; engine.position.set(s * 1.3, 0.68, 0.2); g.add(engine);
+    const WHITE = M(0xf4f6f8, { roughness: 0.35 });
+    const NAVY = M(0x14243a);
+    const DARKG = M(0x2d3540);
+    // fuselage: centre tube + tapered nose and tail cones
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 2.6, 14), WHITE);
+    tube.rotation.x = Math.PI / 2; tube.position.set(0, 1.05, 0.3); g.add(tube);
+    const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.1, 1.1, 14), WHITE);
+    nose.rotation.x = Math.PI / 2; nose.position.set(0, 1.02, 2.15); g.add(nose);
+    const noseTip = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), NAVY);
+    noseTip.position.set(0, 0.99, 2.7); g.add(noseTip);
+    const tailCone = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.14, 1.3, 14), WHITE);
+    tailCone.rotation.x = -Math.PI / 2; tailCone.position.set(0, 1.1, -1.65); g.add(tailCone);
+    // cockpit windows: a dark wrap near the nose
+    const cockpit = new THREE.Mesh(new THREE.CylinderGeometry(0.425, 0.35, 0.35, 14), NAVY);
+    cockpit.rotation.x = Math.PI / 2; cockpit.position.set(0, 1.06, 1.85); g.add(cockpit);
+    // cheatline + cabin windows
+    for (const sx of [-0.43, 0.43]) {
+      const line = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.1, 3.2), NAVY);
+      line.position.set(sx, 1.12, 0.2); g.add(line);
     }
-    // a navy cheatline + windows down the side
-    const line = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.14, 4.2), M(0x14243a));
-    for (const sx of [-0.5, 0.5]) { const l = line.clone(); l.position.set(sx, 1.0, 0); g.add(l); }
-    g.position.copy(settleOn(d, 2.0, -0.1));
-    alignToSurface(g, d, yawToFace(d, at(0, 12)));   // parked pointing down the runway
+    // swept wings with a little dihedral
+    for (const sgn of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.07, 0.95), WHITE);
+      wing.position.set(sgn * 1.35, 0.88, 0.35);
+      wing.rotation.z = sgn * 0.09;                  // dihedral
+      wing.rotation.y = -sgn * 0.45;                 // sweep BACK
+      g.add(wing);
+      const tip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.4), NAVY);
+      tip.position.set(sgn * 2.42, 0.99, -0.42); tip.rotation.y = -sgn * 0.45; g.add(tip);
+      // rear-mounted engines on the tail flanks
+      const eng = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.75, 10), DARKG);
+      eng.rotation.x = Math.PI / 2; eng.position.set(sgn * 0.58, 1.28, -1.15); g.add(eng);
+      const engRing = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.035, 8, 14), NAVY);
+      engRing.position.set(sgn * 0.58, 1.28, -0.78); g.add(engRing);
+    }
+    // swept fin + T-tail stabiliser
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.05, 0.75), NAVY);
+    fin.position.set(0, 1.75, -2.0); fin.rotation.x = 0.35; g.add(fin);
+    const stab = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.06, 0.5), WHITE);
+    stab.position.set(0, 2.22, -2.25); g.add(stab);
+    // LANDING GEAR: nose strut + twin mains, real wheels
+    const gearWheelGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.1, 10);
+    gearWheelGeo.rotateZ(Math.PI / 2);
+    function gear(x, z, twin) {
+      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.5, 6), DARKG);
+      strut.position.set(x, 0.55, z); g.add(strut);
+      for (const wx of twin ? [x - 0.09, x + 0.09] : [x]) {
+        const w = new THREE.Mesh(gearWheelGeo, M(0x1c1620));
+        w.position.set(wx, 0.26, z); g.add(w);
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.12, 8), M(0xd8d8e0));
+        hub.rotation.z = Math.PI / 2; hub.position.set(wx, 0.26, z); g.add(hub);
+      }
+    }
+    gear(0, 1.9, false);                            // nose gear
+    gear(-0.55, -0.1, true); gear(0.55, -0.1, true); // mains under the wing root
+    g.position.copy(settleOn(d, 2.0, -0.02));
+    alignToSurface(g, d, yawToFace(d, at(0, 12)));
     g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
     scene.add(g); airportPlane = g;
   }
@@ -3139,15 +3181,18 @@ function buildTrain() {
 const bodies = { jeep: buildJeep(), walk: buildCritic(), bike: buildBike(), train: buildTrain(), boat: buildBoat() };
 // the Blender-rigged critic replaces the procedural one once the GLB lands
 let walkMixer = null, walkAction = null;
-new GLTFLoader().load('./models/critic-walk.glb', (glb) => {
+const CRITIC_S = 0.136;                            // 9.19 blender units → ~1.25 game height
+new GLTFLoader().load('./models/critic.glb', (glb) => {
   const rig = glb.scene;
-  rig.scale.setScalar(0.82);                      // 1.06 blender units → game height
+  rig.scale.setScalar(CRITIC_S);
+  rig.position.y = 4.593 * CRITIC_S;              // drop feet onto the ground plane (y=0)
+  rig.rotation.y = -Math.PI / 2;                  // model faces +X → turn to face +Z (travel dir)
   rig.traverse(m => { if (m.isMesh) { m.castShadow = !IS_TOUCH; m.frustumCulled = false; } });
   bodies.walk.clear();                            // out with the pose-rigged boxes
   bodies.walk.add(rig);
   bodies.walk.userData.wheels = [];
   walkMixer = new THREE.AnimationMixer(rig);
-  const clip = THREE.AnimationClip.findByName(glb.animations, 'walk') || glb.animations[0];
+  const clip = THREE.AnimationClip.findByName(glb.animations, 'Walk') || glb.animations[0];
   if (clip) { walkAction = walkMixer.clipAction(clip); walkAction.play(); }
 }, undefined, (e) => console.warn('critic GLB failed, keeping procedural rig:', e?.message || e));
 for (const k of Object.keys(bodies)) { bodies[k].visible = (k === 'jeep'); courier.add(bodies[k]); }
@@ -4268,11 +4313,16 @@ function buildCabin() {
   };
   photo.src = './models/cabin.jpg';
   g.userData.board = board;
-  // the REAL porthole, hanging to the left: a frame with the world through it
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.18, 10, 26), M(0xf4efe6));
-  const ring2 = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.07, 8, 26), M(0x9aa0a8));
+  // the porthole: cabin wall (annulus) filling the frame right to the screen
+  // edges, a cream outer rim and a steel inner ring — the planet shows only
+  // through the glass
   const winG = new THREE.Group();
-  winG.add(ring); winG.add(ring2);
+  const wall = new THREE.Mesh(new THREE.RingGeometry(1.0, 7.5, 36),
+    new THREE.MeshBasicMaterial({ color: 0xf2ead9, side: THREE.DoubleSide }));
+  winG.add(wall);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.02, 0.16, 10, 30), M(0xf4efe6));
+  const rim2 = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.06, 8, 30), M(0x9aa0a8));
+  winG.add(rim); winG.add(rim2);
   winG.position.set(-3.6, 0.2, 0.6);
   g.add(winG);
   g.userData.window = winG;
@@ -4315,12 +4365,12 @@ function updateArrival(dt) {
   // keep the jet parked at the gate whenever we're not actively flying it
   const parkJet = () => {
     const d = airAt(0, 12).normalize();
-    airportPlane.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.1));
+    airportPlane.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.02));
     alignToSurface(airportPlane, d, yawToFace(d, airAt(0, 24)));
     airportPlane.visible = true;
   };
 
-  if (T < 0.14) {                                 // 0. first class, then the view
+  if (T < 0.16) {                                 // 0. first class, then the view
     const up = AIRPORT.clone();
     cabin.visible = true;
     cabin.position.copy(up.clone().multiplyScalar(R + 34));
@@ -4333,28 +4383,37 @@ function updateArrival(dt) {
     _aTmp.copy(cabin.localToWorld(new THREE.Vector3(jx, 1.1 + jy, 0)));
     camera.position.copy(_aTmp);
     camera.up.lerp(up, 0.25).normalize();
-    if (T < 0.085) {                               // gazing down the cabin
+    const win = cabin.userData.window;
+    if (T < 0.065) {                               // gazing down the cabin
       if (arrCaption) arrCaption.textContent = '✈ First class — welcome aboard';
+      win.visible = false;
       camera.lookAt(cabin.localToWorld(new THREE.Vector3(jx * 2, 1.1, 3.0)));
-    } else {                                       // turn left: the planet below
+    } else {                                       // the porthole, and the pause
       if (arrCaption) arrCaption.textContent = '🌍 There it is — the tiny planet';
-      const k = (T - 0.085) / 0.055;
+      const k = Math.min(1, (T - 0.065) / 0.035);
       const e = k * k * (3 - 2 * k);
-      // window frame keeps facing the eye; gaze sweeps from wall to porthole
-      cabin.userData.window.lookAt(camera.position);
-      _aTmp2.copy(cabin.localToWorld(new THREE.Vector3(0, 1.1, 3.0))).lerp(
-        cabin.localToWorld(new THREE.Vector3(-9, -14, 1.4)), e);
-      camera.lookAt(_aTmp2);
+      // gaze swings from the cabin down through the floor of sky to the world
+      const lookTarget = _aTmp2.copy(cabin.localToWorld(new THREE.Vector3(0, 1.1, 3.0)))
+        .lerp(cabin.position.clone().addScaledVector(up, -40), e);
+      camera.lookAt(lookTarget);
+      // the porthole hangs on that exact sight line, so the planet — clouds,
+      // coasts, the whole map from above — is seen through its glass
+      win.visible = true;
+      _aTmp2.subVectors(lookTarget, camera.position).normalize();
+      win.position.copy(cabin.worldToLocal(camera.position.clone().addScaledVector(_aTmp2, 3.2)));
+      win.lookAt(camera.position);
+      // ...and during the hold, drift very slowly so it feels alive
+      if (k >= 1) camera.position.addScaledVector(camera.up, Math.sin(tt * 0.7) * 0.02);
     }
-  } else if (T < 0.42) {                           // 1. the jet lands, nose-forward
+  } else if (T < 0.44) {                           // 1. the jet lands, nose-forward
     cabin.visible = false;
     airportPlane.visible = true;
     if (arrCaption) arrCaption.textContent = '✈ NetJets — cleared to land';
-    const k = (T - 0.14) / 0.28;
+    const k = (T - 0.16) / 0.28;
     const along = -16 + k * 28;
     const alt = Math.max(0, (0.5 - k) * 24);
     const d = airAt(0, along).normalize();
-    airportPlane.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.2 + alt));
+    airportPlane.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.02 + alt));
     alignToSurface(airportPlane, d, yawToFace(d, airAt(0, along + 6)));
     airportPlane.visible = true;
     const back = airAt(-6, along - 9).normalize();
@@ -4433,7 +4492,9 @@ function updateArrival(dt) {
   }
 }
 // drive on whichever is higher, terrain or sea
-function dbl(d) { return d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.42); }
+// wheels touch at the limo's origin, so sit it on the surface (a hair sunk, to
+// match the parked settleOn sink and hide low-poly facet gaps) — no hover.
+function dbl(d) { return d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) - 0.02); }
 
 
 let gameState = 'title';
