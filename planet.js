@@ -3281,10 +3281,12 @@ const TRANSPORT = {
 let transport = 'jeep';
 let runTransport = 'jeep';   // the mode the run STARTED with (the train ends on foot)
 function setTransport(t) {
+  const prev = transport;
   transport = t;
   for (const k of Object.keys(bodies)) bodies[k].visible = (k === t);
   courierBody = bodies[t];
   courierBody.rotation.set(0, 0, 0);
+  if (criticReady) playRide(t, prev);
   updateNav();
 }
 
@@ -5380,22 +5382,19 @@ function animate() {
   courierBody.rotation.z = THREE.MathUtils.lerp(courierBody.rotation.z, -ix * leanK, 0.09);
   courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.07 * (speed / TR.max) * leanS, 0.09);
   for (const w of courierBody.userData.wheels) w.rotation.x += dt * speed / 0.34;
-  // on foot: the baked Blender walk clip, its speed tied to ground speed
-  if (transport === 'walk') {
-    const gait = Math.min(1, speed / TRANSPORT.walk.max);
-    if (walkMixer && walkAction) {
-      if (gait > 0.04) {
-        walkAction.paused = false;
-        walkMixer.timeScale = 0.4 + gait * 1.5;
-        walkMixer.update(dt);
-      } else {
-        // ease to the passing pose (frame 6 ≈ 0.25s) so they stand, not mid-stride
-        walkAction.time += (0.25 - walkAction.time) * Math.min(1, dt * 8);
-        walkMixer.update(0);
-      }
-    } else {
-      courierBody.traverse(o => { if (o.userData && o.userData.limbs) walkPerson(o, t * 1.3, gait * 0.9); });
+  // the rigged critic: walking & biking pump with ground speed; seated rides
+  // (jeep/boat/train) and mount/dismount intros play at their own steady rate
+  const critic = CRITIC.insts[transport];
+  if (critic) {
+    let ts = 1;
+    if (!critic.intro && (transport === 'walk' || transport === 'bike')) {
+      const gait = Math.min(1, speed / TR.max);
+      ts = gait > 0.04 ? 0.45 + gait * 1.6 : 0;      // freeze to a stand when stopped
     }
+    if (critic.cur) critic.cur.timeScale = ts;
+    critic.mixer.update(dt);
+  } else {
+    courierBody.traverse(o => { if (o.userData && o.userData.limbs) walkPerson(o, t * 1.3, Math.min(1, speed / TR.max) * 0.9); });
   }
 
   // engine particles + hum
