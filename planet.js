@@ -4424,9 +4424,6 @@ function buildCabin() {
   const rim2 = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.06, 8, 30), M(0x9aa0a8));
   winG.add(rim); winG.add(rim2);
   winG.position.set(-3.6, 0.2, 0.6);
-  // fade the glass in as the head turns, so the wall doesn't blanket the
-  // forward view before she looks out
-  winG.traverse(m => { if (m.material) { m.material.transparent = true; m.material.opacity = 0; } });
   g.add(winG);
   g.userData.window = winG;
   g.visible = false;
@@ -4499,26 +4496,23 @@ function updateArrival(dt) {
       if (arrCaption) arrCaption.textContent = '✈ First class — welcome aboard';
       win.visible = false;
       camera.lookAt(cabin.localToWorld(new THREE.Vector3(jx * 2, 1.1, 3.0)));
-    } else {                                       // turn her head to look out
+    } else {                                       // the porthole, and the pause
       if (arrCaption) arrCaption.textContent = '🌍 There it is — the tiny planet';
-      const k = Math.min(1, (T - 0.065) / 0.045);
+      const k = Math.min(1, (T - 0.065) / 0.035);
       const e = k * k * (3 - 2 * k);
-      // where the world sits out the LEFT window: down the fuselage side and
-      // below, so the tiny planet's curve fills the glass
+      // gaze swings from the cabin down through the floor of sky to the world
+      // out the LEFT window: sideways and a little down — the planet's curve
+      // fills the glass like a view from cruise altitude, not a hole in the floor
       const sideDir = new THREE.Vector3(-1, 0, 0).applyQuaternion(cabin.quaternion).normalize();
-      const planetPt = cabin.position.clone().addScaledVector(sideDir, 13).addScaledVector(up, -32);
-      const planetDir = _aTmp2.copy(planetPt).sub(_aTmp).normalize();   // eye→planet, fixed
-      // the porthole is ANCHORED out there where the planet is — it does NOT
-      // follow the gaze. So as the head yaws left the glass slides in from the
-      // side and settles to centre, a real head-turn instead of a frame pinned
-      // dead-centre with the image swiping behind it.
+      const lookTarget = _aTmp2.copy(cabin.localToWorld(new THREE.Vector3(0, 1.1, 3.0)))
+        .lerp(cabin.position.clone().addScaledVector(sideDir, 13).addScaledVector(up, -32), e);
+      camera.lookAt(lookTarget);
+      // the porthole hangs on that exact sight line, so the planet — clouds,
+      // coasts, the whole map from above — is seen through its glass
       win.visible = true;
-      win.position.copy(cabin.worldToLocal(_aTmp.clone().addScaledVector(planetDir, 3.2)));
-      win.lookAt(_aTmp);                            // glass faces the passenger
-      win.traverse(m => { if (m.material) m.material.opacity = e; });
-      // the head yaws from down-the-cabin round to the glass
-      const fwdTarget = cabin.localToWorld(new THREE.Vector3(jx * 2, 1.1, 3.0));
-      camera.lookAt(fwdTarget.lerp(planetPt, e));
+      _aTmp2.subVectors(lookTarget, camera.position).normalize();
+      win.position.copy(cabin.worldToLocal(camera.position.clone().addScaledVector(_aTmp2, 3.2)));
+      win.lookAt(camera.position);
       // ...and during the hold, drift very slowly so it feels alive
       if (k >= 1) camera.position.addScaledVector(camera.up, Math.sin(tt * 0.7) * 0.02);
     }
