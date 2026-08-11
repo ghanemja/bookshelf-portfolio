@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -98,6 +99,40 @@ if (IS_TOUCH) document.body.classList.add('touch');
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xe3cfe8, 42, 155);
+
+// ─── chrome/pearlescent finish for barbie mode ───────────────────────────────
+// A neutral studio env map so metals have something to reflect (metalness with
+// no envMap renders black). Metals tint reflections by their own base color, so
+// barbie's already-pink materials read as pearlescent-pink chrome for free.
+const _pmrem = new THREE.PMREMGenerator(renderer);
+const _chromeEnv = _pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+// Toggle high metalness / low roughness across solid surfaces. Skips glass,
+// water, clouds, sprites and anything emissive so lights still glow. Stashes the
+// original matte values once so bratz restores exactly.
+function applyChrome(on) {
+  scene.environment = on ? _chromeEnv : null;
+  scene.traverse((o) => {
+    const mat = o.material;
+    if (!mat) return;
+    const mats = Array.isArray(mat) ? mat : [mat];
+    for (const m of mats) {
+      if (!m.isMeshStandardMaterial) continue;         // Basic/Normal/Shader/Points/Sprite → skip
+      if (m.transparent || (m.opacity ?? 1) < 1) continue; // glass, water, clouds, trails
+      if (m.emissive && m.emissive.getHex() !== 0 && (m.emissiveIntensity ?? 0) > 0) continue; // lamps, windows, stars
+      if (!m.userData._matte) {
+        m.userData._matte = { metalness: m.metalness, roughness: m.roughness, envMapIntensity: m.envMapIntensity };
+      }
+      if (on) {
+        m.metalness = 0.85;
+        m.roughness = 0.22;          // satin, not a hard mirror → reads pearlescent
+        m.envMapIntensity = 1.5;
+      } else {
+        const s = m.userData._matte;
+        m.metalness = s.metalness; m.roughness = s.roughness; m.envMapIntensity = s.envMapIntensity;
+      }
+    }
+  });
+}
 
 const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 600);
 camera.position.set(0, 26, 95);
@@ -3240,6 +3275,7 @@ function applyVibe() {
   for (const rp of roadParts) rp.mesh.material.color.setHex(P[rp.key]);
   if (cityMapDraw) { cityMapDraw(P); cityMapTex.needsUpdate = true; }
   paintTerrain(P.terr);
+  applyChrome(vibe === 'barbie');
 }
 vibeBtn.addEventListener('click', () => {
   vibe = vibe === 'barbie' ? 'bratz' : 'barbie';
@@ -4168,6 +4204,50 @@ function drawCabinPainting() {
   return cv;
 }
 
+// grease-pencil pass over a PHOTO: sobel edges become hand-inked strokes,
+// and a paper tint pulls the photo toward the drawn world
+function greaseOverPhoto(img) {
+  const W = 1024, H = Math.round(1024 * img.height / img.width);
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const c = cv.getContext('2d');
+  c.drawImage(img, 0, 0, W, H);
+  const dW = 256, dH = Math.round(dW * H / W);
+  const dc = document.createElement('canvas');
+  dc.width = dW; dc.height = dH;
+  const d2 = dc.getContext('2d');
+  d2.drawImage(img, 0, 0, dW, dH);
+  const px = d2.getImageData(0, 0, dW, dH).data;
+  const lum = (i) => px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114;
+  c.strokeStyle = 'rgba(24, 18, 28, 0.85)';
+  c.lineCap = 'round';
+  const jr = mulberry32(9);
+  for (let y = 1; y < dH - 1; y++) {
+    for (let x = 1; x < dW - 1; x++) {
+      const i = (y * dW + x) * 4;
+      const gx = lum(i + 4) - lum(i - 4);
+      const gy = lum(i + dW * 4) - lum(i - dW * 4);
+      const mag = Math.hypot(gx, gy);
+      if (mag > 46 && jr() > 0.35) {
+        const ang = Math.atan2(gy, gx) + Math.PI / 2;   // stroke ALONG the edge
+        const sx = (x / dW) * W + (jr() - 0.5) * 3;
+        const sy = (y / dH) * H + (jr() - 0.5) * 3;
+        const ln = 3 + jr() * 6;
+        c.lineWidth = 1.2 + jr() * 1.8;
+        c.beginPath();
+        c.moveTo(sx - Math.cos(ang) * ln, sy - Math.sin(ang) * ln);
+        c.lineTo(sx + Math.cos(ang) * ln, sy + Math.sin(ang) * ln);
+        c.stroke();
+      }
+    }
+  }
+  c.globalCompositeOperation = 'multiply';           // paper tint
+  c.fillStyle = 'rgba(244, 236, 218, 0.55)';
+  c.fillRect(0, 0, W, H);
+  c.globalCompositeOperation = 'source-over';
+  return cv;
+}
+
 function buildCabin() {
   const g = new THREE.Group();
   const tex = new THREE.CanvasTexture(drawCabinPainting());
@@ -4177,6 +4257,16 @@ function buildCabin() {
   board.position.set(0, 1.1, 3.0);
   board.rotation.y = Math.PI;                 // faces the camera at -z
   g.add(board);
+  // the REAL NetJets photo takes over the moment models/cabin.jpg exists
+  const photo = new Image();
+  photo.onload = () => {
+    const gt = new THREE.CanvasTexture(greaseOverPhoto(photo));
+    gt.colorSpace = THREE.SRGBColorSpace;
+    board.material.map = gt;
+    board.material.needsUpdate = true;
+    board.scale.set(1, (photo.height / photo.width) * (7.2 / 4.5), 1);
+  };
+  photo.src = './models/cabin.jpg';
   g.userData.board = board;
   // the REAL porthole, hanging to the left: a frame with the world through it
   const ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.18, 10, 26), M(0xf4efe6));
