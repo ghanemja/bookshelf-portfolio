@@ -4127,16 +4127,41 @@ function flyCameraTo(target, k, clearance = 1.2) {
 // all — and (2) LINE ART as real geometry: an inverted hull pushed out along
 // the vertex normals draws a contour stroke around every object, the way the
 // Line Art modifier traces meshes. No screen filter involved.
-const gpOutlineMat = new THREE.ShaderMaterial({
-  side: THREE.BackSide,
-  uniforms: { thick: { value: 0.05 } },
-  vertexShader: `uniform float thick;
-    void main() {
-      vec3 p = position + normalize(normal) * thick;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-    }`,
-  fragmentShader: `void main() { gl_FragColor = vec4(0.10, 0.09, 0.12, 1.0); }`,
-});
+// LINE BOIL, the traditional-animation way: the stroke is redrawn as a
+// slightly different line several times a second. Each 1/7s tick picks a new
+// wobble variant — per-vertex pseudo-random offsets seeded by position and
+// the tick — so the contour breathes like it was traced frame by frame.
+// Two layers wear different seeds and weights: a firm dark stroke and a
+// lighter, loose one over it, out of phase with each other.
+function makeBoilMat(thickness, seed, color, opacity) {
+  return new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    transparent: opacity < 1,
+    uniforms: {
+      thick: { value: thickness },
+      time: { value: 0 },
+      seed: { value: seed },
+    },
+    vertexShader: `uniform float thick, time, seed;
+      float h1(vec3 v, float s) {
+        return fract(sin(dot(v, vec3(12.9898, 78.233, 45.164)) + s) * 43758.5453);
+      }
+      void main() {
+        float tick = floor(time * 7.0);                     // 7 redraws a second
+        float h = h1(position, seed + tick * 0.618);
+        float g = h1(position.zxy, seed * 1.7 + tick * 0.37);
+        // the line swells and thins along its length, differently every tick
+        float w = thick * (0.55 + 1.0 * h);
+        // and wanders sideways a touch, so it never sits exactly still
+        vec3 wander = (vec3(h, g, h1(position.yzx, seed + tick)) - 0.5) * thick * 1.4;
+        vec3 p = position + normalize(normal) * w + wander;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader: `void main() { gl_FragColor = vec4(${color}, ${opacity}); }`,
+  });
+}
+const gpOutlineMat = makeBoilMat(0.05, 3.1, '0.10, 0.09, 0.12', 1.0);
+const gpOutlineMat2 = makeBoilMat(0.032, 11.7, '0.16, 0.14, 0.18', 0.55);
 const gpOutlines = [];
 let gpBuilt = false, gpOn = false;
 function buildGreasePencil() {
@@ -4144,23 +4169,79 @@ function buildGreasePencil() {
   const skip = new Set([planet, ocean, sky, skyStars]);
   scene.traverse(o => {
     if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh) return;
-    if (skip.has(o) || o.material === gpOutlineMat) return;
+    if (skip.has(o) || o.material === gpOutlineMat || o.material === gpOutlineMat2) return;
     if (!o.geometry?.attributes?.normal) return;
     if (o.geometry.attributes.position.count > 5000) return;   // keep draws sane
     const line = new THREE.Mesh(o.geometry, gpOutlineMat);
     line.visible = false;
     o.add(line);                       // child: follows every transform for free
     gpOutlines.push(line);
+    if (o.geometry.attributes.position.count < 2200) {
+      const loose = new THREE.Mesh(o.geometry, gpOutlineMat2);
+      loose.visible = false;
+      o.add(loose);
+      gpOutlines.push(loose);
+    }
   });
 }
+// ── the fills: cel-shaded, not flat. A two-step gradient map is the exact
+// ColorRamp-set-to-Constant trick from the tutorial — one lit tone, one
+// shade tone, hard edge between them.
+const toonRamp = (() => {
+  const data = new Uint8Array([120, 255]);          // shade, light
+  const t = new THREE.DataTexture(data, 2, 1, THREE.RedFormat);
+  t.minFilter = t.magFilter = THREE.NearestFilter;
+  t.needsUpdate = true;
+  return t;
+})();
+// ── hand-sketched surface detail, tiled per face: brick patches, plank
+// grain, scratches — the interior linework that sells the drawn look
+const sketchDetailTex = (() => {
+  const S = 512, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#ffffff'; c.fillRect(0, 0, S, S);
+  const rr = mulberry32(41);
+  c.strokeStyle = 'rgba(30,26,36,0.5)'; c.lineCap = 'round';
+  for (let i = 0; i < 26; i++) {                    // brick patches
+    const x = rr() * S, y = rr() * S, w = 26 + rr() * 40, h = 12 + rr() * 14;
+    c.lineWidth = 1.6 + rr() * 1.4;
+    c.strokeRect(x, y, w, h);
+    if (rr() > 0.5) c.strokeRect(x + w * 0.45, y - h, w * 0.6, h);
+  }
+  for (let i = 0; i < 34; i++) {                    // stray strokes + scratches
+    const x = rr() * S, y = rr() * S, len = 12 + rr() * 46;
+    const ang = rr() > 0.6 ? (rr() - 0.5) * 0.4 : Math.PI / 2 + (rr() - 0.5) * 0.3;
+    c.lineWidth = 1.2 + rr() * 1.6;
+    c.beginPath();
+    c.moveTo(x, y);
+    c.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len);
+    c.stroke();
+  }
+  for (let i = 0; i < 14; i++) {                    // little tick clusters
+    const x = rr() * S, y = rr() * S;
+    c.lineWidth = 1.1;
+    for (let k = 0; k < 3; k++) {
+      c.beginPath();
+      c.moveTo(x + k * 5, y);
+      c.lineTo(x + k * 5 + 3, y + 7 + rr() * 5);
+      c.stroke();
+    }
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
 const flatCache = new Map();
 function flatOf(mat) {
   if (!mat || mat.isShaderMaterial) return mat;
   let f = flatCache.get(mat);
   if (!f) {
-    f = new THREE.MeshBasicMaterial({
+    f = new THREE.MeshToonMaterial({
       color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
-      map: mat.map || null,
+      map: mat.map || sketchDetailTex,      // real maps stay; bare colour gets sketch detail
+      gradientMap: toonRamp,
       vertexColors: !!mat.vertexColors,
       transparent: !!mat.transparent, opacity: mat.opacity ?? 1,
       side: mat.side ?? THREE.FrontSide,
@@ -4175,7 +4256,7 @@ function setGreasePencil(on) {
   gpOn = on;
   for (const l of gpOutlines) l.visible = on;
   scene.traverse(o => {
-    if (!o.isMesh || o.material === gpOutlineMat) return;
+    if (!o.isMesh || o.material === gpOutlineMat || o.material === gpOutlineMat2) return;
     if (on) {
       if (!o.userData._origMat) {
         o.userData._origMat = o.material;
@@ -4361,6 +4442,8 @@ function updateWorldAmbient(dt, t) {
     b.rotation.z = Math.sin(t * 1.1 + i) * 0.05;
     b.rotation.x = Math.sin(t * 0.8 + i * 2) * 0.035;
   }
+
+  if (gpOn) { gpOutlineMat.uniforms.time.value = t; gpOutlineMat2.uniforms.time.value = t; }
 
   // ambient motion
   for (const p of cloudPivots) p.rotateY(p.userData.speed * dt);
