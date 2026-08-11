@@ -33,7 +33,7 @@ const VIBES = {
     terr: { deep: 0xd9a1b8, sand: 0xffe9b3, mid: 0xff9fc2, high: 0xf2c9e0, snow: 0xfff6fa },
     water: 0xff9fc0, leafA: 0xff8ab5, leafB: 0xffc2d8, wood: 0xf2e0d0, rock: 0xf4d9e8,
     cloud: 0xffe4ef, trail: 0xffc2d8,
-    road: 0x9c8295, roadLine: 0xfff2d8, roadMark: 0x4a3a45,
+    road: 0x6e5a6a, roadLine: 0xfff2d8, roadMark: 0xffe9c8,
   },
   bratz: {
     label: '😎 bratz',
@@ -44,7 +44,7 @@ const VIBES = {
     terr: { deep: 0xb5a582, sand: 0xe8dcc0, mid: 0x8fbf7f, high: 0xbfae8e, snow: 0xf4f1e8 },
     water: 0x3f9db2, leafA: 0x4f8f5f, leafB: 0x7fb56f, wood: 0x8a6248, rock: 0xc2b8a4,
     cloud: 0xffffff, trail: 0xffe2b8,
-    road: 0x8d8f96, roadLine: 0xf2ecd8, roadMark: 0x3a3d44,
+    road: 0x54575f, roadLine: 0xf2ecd8, roadMark: 0xf2ecd8,
   },
 };
 let vibe = (new URLSearchParams(location.search).get('vibe'))
@@ -588,6 +588,7 @@ const cityWindowMats = [];    // tower window materials, lit after dark
 const traffic = [];           // cars and pedestrians that actually move
 const bobbers = [];           // moored boats that rock on the swell
 let airportPlane = null, resortHotel = null;   // handles for the arrival intro
+let cityMapCtx = null, cityMapTex = null, cityMapDraw = null;   // the painted city floor
 const SKIN = [0xffd9b8, 0xe8b98f, 0xc68a5e, 0x8a5a3a];
 const HAIR = [0x2d2138, 0x5a3a22, 0x8a6a3a, 0x1c1620, 0x704020];
 const npcs = [];              // everyone standing around the world
@@ -972,9 +973,9 @@ function slerpDir(a, b, t) {
   // all three layers sit at the SAME height (flush with the ground); the
   // polygon-offset ordering — shoulder, asphalt, then a DARK recessed centre
   // groove — is what stacks them without z-fighting or raising anything
-  ribbon(1.62, 0.02, 'roadLine');            // pale shoulders, flush
-  ribbon(1.45, 0.02, 'road');                // asphalt, flush
-  ribbon(0.07, 0.02, 'roadMark', true);      // recessed dashed centre groove
+  ribbon(1.62, 0.04, 'roadLine');            // pale shoulders
+  ribbon(1.45, 0.045, 'road');               // asphalt
+  ribbon(0.07, 0.055, 'roadMark', true);     // dashed centre line
 
   // pines line the road at regular intervals — planted, not scattered
   for (let i = 0; i < pts.length; i += 5) {
@@ -1618,7 +1619,7 @@ mark('downtown:start');
   // streets: an open ribbon, same construction as the highway
   function street(a, b, halfW, lift, key) {
     const pts = [];
-    const STEPS = 18;
+    const STEPS = 40;
     for (let i = 0; i <= STEPS; i++) pts.push(slerpDir(a, b, i / STEPS));
     const pos = [], idx = [];
     const lat = new THREE.Vector3();
@@ -1647,20 +1648,102 @@ mark('downtown:start');
 
   const SUB = N + 1;                       // suburbs reach one block further
   const SPAN = BLOCK * (SUB + 0.55);
-  for (let i = -SUB; i <= SUB; i++) {
-    const o = i * BLOCK;
-    const w = Math.abs(i) <= N ? ROAD_W : ROAD_W * 0.72;   // lanes narrow outward
-    const ext = Math.abs(i) <= N ? SPAN : BLOCK * (SUB + 0.2);
-    if (Math.abs(i) <= N) {                       // kerbs downtown only
-      street(at(o, -ext), at(o, ext), w + 0.3, 0.02, 'roadLine');
-      street(at(-ext, o), at(ext, o), w + 0.3, 0.02, 'roadLine');
+  const MAP_R = BLOCK * (SUB + 1.4);       // radius of the painted ground, in units
+
+  // draw the whole city floor: concrete, asphalt grid, kerbs, dashes, crosswalks
+  function drawCityMap(ctx, P, SZ) {
+    const u = SZ / (2 * MAP_R);            // units → pixels
+    const X = (x) => SZ / 2 + x * u, Y = (y) => SZ / 2 - y * u;
+    const hex = (h) => '#' + h.toString(16).padStart(6, '0');
+    ctx.clearRect(0, 0, SZ, SZ);
+    // concrete base with a soft grass fade at the rim
+    const grad = ctx.createRadialGradient(SZ/2, SZ/2, SZ * 0.30, SZ/2, SZ/2, SZ * 0.5);
+    grad.addColorStop(0, '#9c9a95'); grad.addColorStop(0.82, '#9c9a95');
+    grad.addColorStop(1, 'rgba(156,154,149,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(SZ/2, SZ/2, SZ/2, 0, Math.PI*2); ctx.fill();
+    for (let i = -SUB; i <= SUB; i++) {
+      const o = i * BLOCK;
+      const w = Math.abs(i) <= N ? ROAD_W : ROAD_W * 0.72;
+      const ext = Math.abs(i) <= N ? SPAN : BLOCK * (SUB + 0.2);
+      // kerbs (pale), then asphalt (dark)
+      ctx.fillStyle = hex(P.roadLine);
+      ctx.fillRect(X(o - w - 0.3), Y(ext), (w + 0.3) * 2 * u, 2 * ext * u);
+      ctx.fillRect(X(-ext), Y(o + w + 0.3), 2 * ext * u, (w + 0.3) * 2 * u);
+      ctx.fillStyle = hex(P.road);
+      ctx.fillRect(X(o - w), Y(ext), w * 2 * u, 2 * ext * u);
+      ctx.fillRect(X(-ext), Y(o + w), 2 * ext * u, w * 2 * u);
     }
-    street(at(o, -ext), at(o, ext), w, 0.02, 'road');
-    street(at(-ext, o), at(ext, o), w, 0.02, 'road');
-    if (Math.abs(i) <= N) {                       // dashed centre groove downtown
-      street(at(o, -ext), at(o, ext), 0.07, 0.02, 'roadMark');
-      street(at(-ext, o), at(ext, o), 0.07, 0.02, 'roadMark');
+    // dashed centre lines
+    ctx.strokeStyle = hex(P.roadMark); ctx.lineWidth = 0.14 * u;
+    ctx.setLineDash([0.9 * u, 0.9 * u]);
+    for (let i = -N; i <= N; i++) {
+      const o = i * BLOCK;
+      ctx.beginPath(); ctx.moveTo(X(o), Y(SPAN)); ctx.lineTo(X(o), Y(-SPAN)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(X(-SPAN), Y(o)); ctx.lineTo(X(SPAN), Y(o)); ctx.stroke();
     }
+    ctx.setLineDash([]);
+    // zebra crossings on every approach of alternating intersections
+    ctx.fillStyle = hex(P.roadMark);
+    for (let i = -N; i <= N; i++) {
+      for (let j = -N; j <= N; j++) {
+        if ((i + j) % 2) continue;
+        const cx = i * BLOCK, cy = j * BLOCK;
+        for (const sgn of [-1, 1]) {
+          for (let k = -1; k <= 1; k++) {
+            // stripes across the N-S road
+            ctx.fillRect(X(cx + k * 0.44 - 0.15), Y(cy + sgn * (ROAD_W + 0.55)), 0.3 * u, 0.5 * u);
+            // stripes across the E-W road
+            ctx.fillRect(X(cx + sgn * (ROAD_W + 0.55) - 0.25), Y(cy + k * 0.44 + 0.1), 0.5 * u, 0.3 * u);
+          }
+        }
+      }
+    }
+  }
+
+  // the ground mesh: a disc of tangent-space quads conformed to the terrain,
+  // one texture stretched over it — roads are PART OF THE GROUND now
+  {
+    const SZ = 2048;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = SZ;
+    cityMapCtx = cv.getContext('2d');
+    cityMapDraw = (P) => drawCityMap(cityMapCtx, P, SZ);
+    drawCityMap(cityMapCtx, VIBES[vibe], SZ);
+    cityMapTex = new THREE.CanvasTexture(cv);
+    cityMapTex.colorSpace = THREE.SRGBColorSpace;
+    cityMapTex.anisotropy = 4;
+    const SEG = 96;
+    const pos = [], uvA = [], idx = [];
+    for (let iy = 0; iy <= SEG; iy++) {
+      for (let ix = 0; ix <= SEG; ix++) {
+        const x = -MAP_R + (2 * MAP_R * ix) / SEG;
+        const y = -MAP_R + (2 * MAP_R * iy) / SEG;
+        const d = at(x, y);
+        const r = Math.max(radiusAt(d), SEA_R) + 0.045;
+        pos.push(d.x * r, d.y * r, d.z * r);
+        uvA.push(ix / SEG, iy / SEG);
+      }
+    }
+    for (let iy = 0; iy < SEG; iy++) {
+      for (let ix = 0; ix < SEG; ix++) {
+        const a = iy * (SEG + 1) + ix, b = a + 1, c = a + SEG + 1, d2 = c + 1;
+        idx.push(a, c, b, b, c, d2);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uvA, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+      map: cityMapTex, transparent: true, roughness: 0.96, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      depthWrite: false,
+    }));
+    mesh.renderOrder = 2;   // painted floor draws over the terrain, always
+    mesh.receiveShadow = true;
+    scene.add(mesh);
   }
 
   // windows, baked once into a texture — 40 buildings of window boxes would
@@ -1693,6 +1776,8 @@ mark('downtown:start');
   const ROOF = M(0x8d8477);
   function tower(x, y, h, w, d, mat, rot) {
     const g = new THREE.Group();
+    // grid-aligned: local +Z faces "grid east", then rot turns in right angles
+    const gridYaw = (dd2) => yawToFace(dd2, at(x + 4, y)) + rot;
     const geo = new THREE.BoxGeometry(w, h, d);
     // one texture tile per storey, so windows stay the same size on every tower
     const uv = geo.attributes.uv;
@@ -1730,7 +1815,7 @@ mark('downtown:start');
     const dd = at(x, y);
     addSolid(dd, Math.max(w, d) * 0.62, g);
     g.position.copy(settleOn(dd, Math.max(w, d) * 0.6, 0.14));
-    alignToSurface(g, dd, rot);
+    alignToSurface(g, dd, gridYaw(dd));
     g.traverse(m => { if (m.isMesh && !IS_TOUCH) { m.castShadow = true; m.receiveShadow = true; } });
     scene.add(g);
   }
@@ -1839,47 +1924,6 @@ mark('downtown:start');
       }
     }
   }
-  // crosswalk stripes. One InstancedMesh, not ~1000 separate meshes: the naive
-  // version cost more to build than the entire rest of the planet.
-  {
-    const marks = [];
-    const _q = new THREE.Quaternion(), _sc = new THREE.Vector3(1, 1, 1), _mm = new THREE.Matrix4();
-    const _bx = new THREE.Vector3(), _bz = new THREE.Vector3();
-    for (let i = -N; i <= N; i++) {
-      for (let j = -N; j <= N; j++) {
-        if ((i + j) % 2) continue;                      // every other junction
-        for (const axis of [0, 1]) {
-          for (const sgn of [-1, 1]) {
-            for (let k = -1; k <= 1; k++) {
-              const ox = axis ? k * 0.44 : (ROAD_W + 0.3) * sgn;
-              const oy = axis ? (ROAD_W + 0.3) * sgn : k * 0.44;
-              const dd = at(i * BLOCK + ox, j * BLOCK + oy);
-              const pos = settleOn(dd, 0.25, -0.04);
-              // lay the stripe flat, running across the carriageway
-              const tangent = axis
-                ? at(i * BLOCK + ox + 1, j * BLOCK + oy)
-                : at(i * BLOCK + ox, j * BLOCK + oy + 1);
-              _bz.copy(tangent).sub(dd.clone().multiplyScalar(dd.dot(tangent))).normalize();
-              _bx.crossVectors(dd, _bz).normalize();
-              _mm.makeBasis(_bx, dd, _bz);
-              _q.setFromRotationMatrix(_mm);
-              marks.push({ pos, q: _q.clone() });
-            }
-          }
-        }
-      }
-    }
-    const geo = new THREE.BoxGeometry(0.7, 0.05, 0.2);
-    const inst = new THREE.InstancedMesh(geo, M(0xf2ecd8), marks.length);
-    marks.forEach((mk, idx) => {
-      _mm.compose(mk.pos, mk.q, _sc);
-      inst.setMatrixAt(idx, _mm);
-    });
-    inst.instanceMatrix.needsUpdate = true;
-    inst.receiveShadow = true;
-    scene.add(inst);
-  }
-
   // ── traffic: cars driving the grid, and people on the sidewalks
   const carBody = [0xff4d6e, 0x4e8eff, 0xffd23d, 0xfffaf2, 0x2dd47b, 0x8f7ae8];
   function makeCar(hex) {
@@ -2957,6 +3001,7 @@ function applyVibe() {
   cloudMat.color.setHex(P.cloud);
   for (const p of trailPool) p.sp.material.color.setHex(P.trail);
   for (const rp of roadParts) rp.mesh.material.color.setHex(P[rp.key]);
+  if (cityMapDraw) { cityMapDraw(P); cityMapTex.needsUpdate = true; }
   paintTerrain(P.terr);
 }
 vibeBtn.addEventListener('click', () => {
@@ -4079,6 +4124,7 @@ function flyCameraTo(target, k, clearance = 1.2) {
 const clock = new THREE.Clock();
 let introT = 0;
 let navAcc = 0;
+const BIRDSEYE = new URLSearchParams(location.search).get('birdseye') === '1';
 let camZoom = parseFloat(localStorage.getItem('cam-zoom')) || 1.0;   // 0.5 close … 2.5 far
 let camOrbit = 0;                                                    // radians around the character
 {
@@ -4098,6 +4144,28 @@ let camOrbit = 0;                                                    // radians 
     if (e.code === 'KeyE') camOrbit += Math.PI / 12;
   });
 }
+
+// ── comfort mode: cut the sensory mismatch that causes sim sickness ──────────
+// horizon lock + no camera bob + a turn-tunnel vignette (peripheral dimming, the
+// same trick VR uses) + a fixed on-screen reference frame. On by default.
+let comfort = localStorage.getItem('planet-comfort');
+comfort = comfort === null ? true : comfort === '1';
+const comfortBtn = document.getElementById('comfort-toggle');
+const comfortFx = document.getElementById('comfort-fx');
+function applyComfort() {
+  if (comfortBtn) comfortBtn.textContent = comfort ? '🟢 comfort: on' : '⚪ comfort: off';
+  document.body.classList.toggle('comfort', comfort);
+  if (!comfort && comfortFx) comfortFx.style.opacity = '0';
+}
+comfortBtn?.addEventListener('click', () => {
+  comfort = !comfort;
+  localStorage.setItem('planet-comfort', comfort ? '1' : '0');
+  applyComfort();
+});
+applyComfort();
+let vignetteA = 0;                 // smoothed turn-tunnel strength
+let orbitPrev = 0;                 // last camOrbit, to detect rotate pulses
+const _headPrev = new THREE.Vector3(1, 0, 0);
 {
   const _qs = new URLSearchParams(location.search);
   if (_qs.get('title') === '0') {
@@ -4313,6 +4381,8 @@ function animate() {
   const hasInput = Math.abs(ix) > 0.01 || Math.abs(iz) > 0.01;
   if (hasInput) { targetDir = null; targetRing.material.opacity = 0; hideHint(); }
 
+  _headPrev.copy(heading);           // comfort: snapshot to measure turn rate
+  const spd0 = speed;
   if (TR.rail) {
     // the Museum Express drives itself — ease toward the next station
     const targetU = stationU[Math.min(routeIdx, stationU.length - 1)];
@@ -4363,19 +4433,37 @@ function animate() {
     }
   }
 
-  // ride-height bob: suspension for wheels, a light step for the walker
-  const bob = transport === 'walk'
+  // comfort: drive the turn-tunnel vignette from how hard we're turning/accelerating.
+  // dimming the periphery cuts the vection (illusory self-motion) that sickens.
+  {
+    const invDt = 1 / Math.max(dt, 1e-3);
+    const turnRate = _headPrev.angleTo(heading) * invDt;
+    const accel = Math.max(0, speed - spd0) * invDt;
+    const orbitRate = Math.abs(camOrbit - orbitPrev) * invDt; orbitPrev = camOrbit;
+    const vTarget = comfort
+      ? Math.min(0.5, turnRate * 0.18 + orbitRate * 0.10 + accel * 0.010)
+      : 0;
+    // rise fast when a turn starts, ease back out slowly
+    vignetteA += (vTarget - vignetteA) * Math.min(1, dt * (vTarget > vignetteA ? 7 : 3));
+    if (comfortFx) comfortFx.style.opacity = vignetteA.toFixed(3);
+  }
+
+  // ride-height bob: suspension for wheels, a light step for the walker.
+  // comfort mode nearly flattens it — bob is a top vestibular-mismatch trigger.
+  const bobK = comfort ? 0.12 : 1;
+  const bob = (transport === 'walk'
     ? Math.abs(Math.sin(t * 9)) * 0.07 * (speed / TR.max)
-    : Math.sin(t * 8.5) * 0.03 * (0.3 + speed / TR.max);
+    : Math.sin(t * 8.5) * 0.03 * (0.3 + speed / TR.max)) * bobK;
   const groundR = Math.max(radiusAt(dir), SEA_R);
   courier.position.copy(dir.clone().multiplyScalar(groundR + TR.hover + bob));
   _right.crossVectors(dir, heading);
   _m.makeBasis(_right, dir, heading);
   _q.setFromRotationMatrix(_m);
   courier.quaternion.slerp(_q, 1 - Math.pow(0.001, dt));
-  const leanK = transport === 'bike' ? 0.22 : transport === 'jeep' ? 0.12 : 0;
+  const leanS = comfort ? 0.45 : 1;   // comfort: trim body sway that reads as camera roll
+  const leanK = (transport === 'bike' ? 0.22 : transport === 'jeep' ? 0.12 : 0) * leanS;
   courierBody.rotation.z = THREE.MathUtils.lerp(courierBody.rotation.z, -ix * leanK, 0.09);
-  courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.07 * (speed / TR.max), 0.09);
+  courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.07 * (speed / TR.max) * leanS, 0.09);
   for (const w of courierBody.userData.wheels) w.rotation.x += dt * speed / 0.34;
   // on foot: the baked Blender walk clip, its speed tied to ground speed
   if (transport === 'walk') {
@@ -4409,6 +4497,11 @@ function animate() {
     AudioState.engineOsc.frequency.setTargetAtTime((transport === 'train' ? 54 : 72) + g * 46, AudioState.ctx.currentTime, 0.15);
   }
 
+  if (BIRDSEYE) {
+    camera.position.copy(posOn(DOWNTOWN, 46));
+    camera.up.set(0, 1, 0);
+    camera.lookAt(posOn(DOWNTOWN, 0));
+  } else {
   // chase camera — user zoom scales the distance, user orbit swings it around
   introT = Math.min(1, introT + dt / 2.6);
   const ease = introT * introT * (3 - 2 * introT);
@@ -4418,8 +4511,11 @@ function animate() {
     .addScaledVector(dir, TR.camH * (0.6 + camZoom * 0.4))
     .addScaledVector(behind, -TR.camD * camZoom);
   flyCameraTo(camPos, (0.02 + 0.05 * ease), 0.9);
-  camera.up.lerp(dir, 0.06).normalize();
+  // comfort: snap the up-vector to the planet normal harder so the horizon stays
+  // level (no camera roll) — the artificial-horizon trick motion-sickness glasses use.
+  camera.up.lerp(dir, comfort ? 0.14 : 0.06).normalize();
   camera.lookAt(courier.position.clone().addScaledVector(dir, 1.1));
+  }
 
   updateWorldAmbient(dt, t);
 
