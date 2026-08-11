@@ -2705,10 +2705,11 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
     const sign = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.5, 0.1), M(0xff2e88));
     sign.position.set(0, 6.7, 1.1); g.add(sign);
     g.add(foundation(1.7, 3.0, 6));
-    g.position.copy(settleOn(d, 1.6, 0.14));
+    g.scale.setScalar(1.6);                        // a hotel, not a kiosk: bigger than any car
+    g.position.copy(settleOn(d, 2.8, 0.14));
     alignToSurface(g, d, rand() * Math.PI * 2);
     g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
-    scene.add(g); addSolid(d, 1.7, g); resortHotel = g;
+    scene.add(g); addSolid(d, 2.8, g); resortHotel = g;
   }
   // cabanas + palms round the pool
   for (let i = 0; i < 5; i++) {
@@ -3200,9 +3201,9 @@ const RIDE_CLIP = { walk: 'Walk', jeep: 'SitDrive', bike: 'RideBike', boat: 'Sai
 // how she sits in each body. yRig centres the model on the holder; holder pos is
 // the seat in body-space. These are eyeball starting points — easy to nudge.
 const RIDER_XF = {
-  walk:  { pos: [0, 0, 0],       s: 0.136, yRig: 4.593 * 0.136 },  // feet on the ground
+  walk:  { pos: [0, 0, 0],       s: 0.112, yRig: 4.593 * 0.112 },  // feet on the ground (smaller so buildings feel bigger)
   jeep:  { pos: [0.30, 0.62, -0.05], s: 0.11,  yRig: 0 },
-  bike:  { pos: [0, 0.66, -0.32], s: 0.115, yRig: 0 },
+  bike:  { pos: [0, 0.26, -0.38], s: 0.105, yRig: 0, lean: 0.24 },
   boat:  { pos: [0, 0.74, -0.70], s: 0.12,  yRig: 0 },
   train: { pos: [0, 0.84, -0.75], s: 0.12,  yRig: 0 },
 };
@@ -3242,6 +3243,20 @@ new GLTFLoader().load('./models/critic.glb', (glb) => {
   const base = glb.animations[0];
   for (const [n, [a, b]] of Object.entries(SUBCLIPS))
     CRITIC.clips[n] = THREE.AnimationUtils.subclip(base.clone(), n, a, b, 24);
+    if (n === 'Walk') {
+      // longer strides: scale every limb rotation away from identity
+      const AMP = 1.4;
+      const idq = new THREE.Quaternion();
+      const q = new THREE.Quaternion();
+      for (const tr of CRITIC.clips[n].tracks) {
+        if (!/thigh|shin|uparm|forearm/i.test(tr.name) || !tr.name.endsWith('.quaternion')) continue;
+        for (let i = 0; i < tr.values.length; i += 4) {
+          q.fromArray(tr.values, i);
+          q.slerpQuaternions(idq, q, AMP);         // >1 = exaggerate the swing
+          q.toArray(tr.values, i);
+        }
+      }
+    }
   for (const key of Object.keys(RIDER_XF)) {
     const rig = skeletonClone(glb.scene);
     rig.traverse(m => { if (m.isMesh) { m.castShadow = !IS_TOUCH; m.frustumCulled = false; } });
@@ -3251,6 +3266,7 @@ new GLTFLoader().load('./models/critic.glb', (glb) => {
     rig.rotation.y = FACE_Y;
     const holder = new THREE.Group();
     holder.position.set(...xf.pos);
+    holder.rotation.x = xf.lean || 0;              // riding posture
     holder.add(rig);
     const mixer = new THREE.AnimationMixer(rig);
     const inst = { holder, mixer, cur: null, intro: false, actions: {} };
@@ -4150,7 +4166,7 @@ function updateTitle3D(dt) {
 let arrivalT = 0, arrivalPhase = -1, limo = null;
 const _aTmp = new THREE.Vector3(), _aTmp2 = new THREE.Vector3(), _aPrev = new THREE.Vector3();
 const arrDir = { runwayA: null, runwayB: null, board: null, cityEnd: null };
-let arrPath = null, arrArcs = null, arrTotal = 0, uGas = 0.45;
+let arrPath = null, arrArcs = null, arrTotal = 0, uGas = 0.45, uEnd = 1;
 let gasDriver = null;
 function buildArrPath() {
   // the same waypoints the spur roads are BUILT from, so the limo is always
@@ -4207,6 +4223,8 @@ function buildArrPath() {
     if (a < bestA) { bestA = a; best = i; }
   }
   uGas = arrArcs[best] / arrTotal;
+  // pull up OUTSIDE the hotel: the path ends at its centre, so stop short
+  uEnd = Math.max(uGas + 0.05, 1 - 4.5 / (arrTotal * R));
 }
 const _apDir = new THREE.Vector3(), _apTan = new THREE.Vector3();
 function sampleArrPath(u01, outDir, outTan) {
@@ -4553,7 +4571,7 @@ function updateArrival(dt) {
     } else {                                       // gas → downtown → hotel
       const k = (K - STOP) / (1 - STOP);
       const e = k < 0.1 ? (k / 0.1) * (k / 0.1) * 0.1 : k > 0.9 ? 1 - ((1 - k) / 0.1) * ((1 - k) / 0.1) * 0.1 : k;
-      u = uGas + (1 - uGas) * e;
+      u = uGas + (uEnd - uGas) * e;
       if (arrCaption) arrCaption.textContent = '🚘 Into the city…';
     }
     sampleArrPath(u, _apDir, _apTan);
@@ -4582,9 +4600,10 @@ function updateArrival(dt) {
   } else if (T < 1.0) {                            // 4. check in at the hotel
     gasDriver.visible = false;
     if (arrCaption) arrCaption.textContent = '🏨 Checking in…';
-    const d = arrDir.cityEnd;
-    limo.position.copy(settleOn(d, 0.6, 0.02));
-    alignToSurface(limo, d, yawToFace(d, airAt(0, 0)));
+    sampleArrPath(uEnd, _apDir, _apTan);
+    const d = _apDir.clone();
+    limo.position.copy(dbl(d));
+    alignToSurface(limo, d, yawToFace(d, arrDir.cityEnd));   // nose toward the doors
     const look = resortHotel ? resortHotel.position : posOn(d, 3);
     _aTmp.copy(look).addScaledVector(d, 3.5).addScaledVector(_aTmp2.copy(d).cross(UP_Y).normalize(), 7);
     camera.position.lerp(_aTmp, 0.06);
@@ -5044,7 +5063,21 @@ let introT = 0;
 let navAcc = 0;
 const BIRDSEYE = new URLSearchParams(location.search).get('birdseye') === '1';
 let camZoom = parseFloat(localStorage.getItem('cam-zoom')) || 1.0;   // 0.5 close … 2.5 far
-let camOrbit = 0;                                                    // radians around the character
+let camOrbit = 0;                                                    // radians around the character (yaw)
+let camPitch = 0;                                                   // vertical orbit: -0.35 low … 1.05 top-down
+// drag anywhere on the world to swing the camera around her — see her side / front
+{
+  const el = renderer.domElement;
+  let dragging = false, lx = 0, ly = 0;
+  el.addEventListener('pointerdown', e => { if (e.button === 0) { dragging = true; lx = e.clientX; ly = e.clientY; } });
+  window.addEventListener('pointerup', () => { dragging = false; });
+  el.addEventListener('pointermove', e => {
+    if (!dragging || gameState !== 'play') return;
+    const dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
+    camOrbit += dx * 0.006;
+    camPitch = Math.max(-0.35, Math.min(1.05, camPitch - dy * 0.005));
+  });
+}
 {
   const zs = document.getElementById('zoom-slider'), zv = document.getElementById('zoom-val');
   if (zs) {
@@ -5396,7 +5429,7 @@ function animate() {
   const leanK = (transport === 'bike' ? 0.22 : transport === 'jeep' ? 0.12 : 0) * leanS;
   courierBody.rotation.z = THREE.MathUtils.lerp(courierBody.rotation.z, -ix * leanK, 0.09);
   courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.07 * (speed / TR.max) * leanS, 0.09);
-  for (const w of courierBody.userData.wheels) w.rotation.x += dt * speed / 0.34;
+  for (const w of courierBody.userData.wheels) w.rotation.x += dt * speed / (transport === 'bike' ? 0.85 : 0.34);
   // the rigged critic: walking & biking pump with ground speed; seated rides
   // (jeep/boat/train) and mount/dismount intros play at their own steady rate
   const critic = CRITIC.insts[transport];
@@ -5405,6 +5438,7 @@ function animate() {
     if (!critic.intro && (transport === 'walk' || transport === 'bike')) {
       const gait = Math.min(1, speed / TR.max);
       ts = gait > 0.04 ? 0.45 + gait * 1.6 : 0;      // freeze to a stand when stopped
+      if (transport === 'bike') ts *= 0.55;          // unhurried pedalling
     }
     if (critic.cur) critic.cur.timeScale = ts;
     critic.mixer.update(dt);
@@ -5434,11 +5468,14 @@ function animate() {
   // chase camera — user zoom scales the distance, user orbit swings it around
   introT = Math.min(1, introT + dt / 2.6);
   const ease = introT * introT * (3 - 2 * introT);
-  // heading rotated by the orbit angle, around the local up (dir)
+  // heading rotated by the orbit angle, around the local up (dir); camPitch
+  // raises/lowers the eye so you can drag up to look down on her, or down to
+  // see her face — pitch 0 keeps the original over-the-shoulder framing
   const behind = heading.clone().applyAxisAngle(dir, camOrbit);
+  const bd = TR.camD * camZoom;
   const camPos = courier.position.clone()
-    .addScaledVector(dir, TR.camH * (0.6 + camZoom * 0.4))
-    .addScaledVector(behind, -TR.camD * camZoom);
+    .addScaledVector(dir, TR.camH * (0.6 + camZoom * 0.4) + bd * Math.sin(camPitch))
+    .addScaledVector(behind, -bd * Math.cos(camPitch));
   flyCameraTo(camPos, (0.02 + 0.05 * ease), 0.9);
   // comfort: snap the up-vector to the planet normal harder so the horizon stays
   // level (no camera roll) — the artificial-horizon trick motion-sickness glasses use.
