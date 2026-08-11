@@ -138,6 +138,25 @@
   .verdict.lose { background: #fdeaea; color: #a02a2a; }
   .solved { margin-top: 10px; color: #1c6b3a; font-weight: 700; font-size: 13px; }
 
+  /* ── camera zoom slider + rotate ── */
+  #cam-controls {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 16;
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(255, 250, 242, 0.9); border: 2px solid var(--panel-edge);
+    border-radius: 999px; padding: 6px 10px; backdrop-filter: blur(8px);
+  }
+  #cam-controls button {
+    cursor: pointer; border: none; background: #f0eafc; color: var(--ink);
+    width: 30px; height: 30px; border-radius: 50%; font-size: 16px; font-weight: 700;
+  }
+  #cam-controls button:hover { background: #e4d9f4; }
+  .zoom-wrap { display: flex; align-items: center; gap: 7px; }
+  .zoom-ic { font-size: 13px; }
+  #zoom-slider { width: clamp(90px, 22vw, 180px); accent-color: var(--accent); }
+  #zoom-val { font-size: 12px; font-weight: 700; color: var(--ink); min-width: 34px; text-align: right; }
+  body.title-mode #cam-controls { display: none; }
+  @media (max-width: 640px) { #cam-controls { bottom: 84px; } }
+
   /* ── the arrival cinematic caption + skip ── */
   #arrival-ui { position: fixed; inset: 0; z-index: 44; pointer-events: none; }
   #arr-caption {
@@ -418,6 +437,16 @@
     <div id="note-list"></div>
   </div>
 
+  <div id="cam-controls">
+    <button id="rot-left" title="rotate left (Q)">⟲</button>
+    <div class="zoom-wrap">
+      <span class="zoom-ic">🔍</span>
+      <input id="zoom-slider" type="range" min="0.5" max="2.5" step="0.1" value="1" />
+      <span id="zoom-val">1.0×</span>
+    </div>
+    <button id="rot-right" title="rotate right (E)">⟳</button>
+  </div>
+
   <div id="phone">
     <div class="p-frame">
       <div class="p-notch"></div>
@@ -538,6 +567,6 @@
     }
   }
   </script>
-  <script type="module" src="./planet.js?cb=p26"></script>
+  <script type="module" src="./planet.js?cb=p27"></script>
 </body>
 </html>

@@ -8,6 +8,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ─── tunables ────────────────────────────────────────────────────────────────
 const R = 30;
@@ -27,7 +28,7 @@ const VIBES = {
     terr: { deep: 0xd9a1b8, sand: 0xffe9b3, mid: 0xff9fc2, high: 0xf2c9e0, snow: 0xfff6fa },
     water: 0xff9fc0, leafA: 0xff8ab5, leafB: 0xffc2d8, wood: 0xf2e0d0, rock: 0xf4d9e8,
     cloud: 0xffe4ef, trail: 0xffc2d8,
-    road: 0x9c8295, roadLine: 0xfff2d8,
+    road: 0x9c8295, roadLine: 0xfff2d8, roadMark: 0x4a3a45,
   },
   bratz: {
     label: '😎 bratz',
@@ -38,7 +39,7 @@ const VIBES = {
     terr: { deep: 0xb5a582, sand: 0xe8dcc0, mid: 0x8fbf7f, high: 0xbfae8e, snow: 0xf4f1e8 },
     water: 0x3f9db2, leafA: 0x4f8f5f, leafB: 0x7fb56f, wood: 0x8a6248, rock: 0xc2b8a4,
     cloud: 0xffffff, trail: 0xffe2b8,
-    road: 0x8d8f96, roadLine: 0xf2ecd8,
+    road: 0x8d8f96, roadLine: 0xf2ecd8, roadMark: 0x3a3d44,
   },
 };
 let vibe = (new URLSearchParams(location.search).get('vibe'))
@@ -473,8 +474,8 @@ function surfH(d) {
     Math.sin(d.x * 3.1 + 1.3) * Math.sin(d.y * 2.7 + 2.1) * Math.sin(d.z * 3.7 + 0.5) * 0.55 +
     Math.sin(d.x * 6.4 + 4.2) * Math.sin(d.z * 5.2 + 1.1) * 0.24 +
     Math.sin(d.y * 7.3 + 0.7) * 0.10;
-  const stepH = 0.55;                                    // terraced cliffs
-  h = h - (h - Math.round(h / stepH) * stepH) * 0.55;
+  const stepH = 0.55;                                    // gentle terraces, not cliffs
+  h = h - (h - Math.round(h / stepH) * stepH) * 0.22;
   // rolling hills fill the empty country between districts
   h += 0.9 * Math.exp(-(2 - 2 * d.dot(HILL_A)) / (0.22 * 0.22));
   h += 0.7 * Math.exp(-(2 - 2 * d.dot(HILL_B)) / (0.20 * 0.20));
@@ -495,8 +496,11 @@ function surfH(d) {
   }
   // downtown is built on a plateau — a grid can't sit on terraced hillside
   const aC = Math.acos(THREE.MathUtils.clamp(d.dot(DOWNTOWN), -1, 1));
-  const kC = Math.exp(-Math.pow(aC / 0.70, 6));
-  h = h * (1 - kC) + (SEA_H + 0.92) * kC;
+  const kC = Math.exp(-Math.pow(aC / 0.92, 6));
+  // roll: broad low swells across the city so streets rise and dip
+  const roll = (Math.sin(d.x * 9 + 1.0) * Math.sin(d.z * 8 + 2.0) * 0.20
+              + Math.sin(d.y * 11 + 0.5) * 0.12);
+  h = h * (1 - kC) + (SEA_H + 0.92 + roll) * kC;
   // level ground under each outlying district so nothing sits on a slope
   for (let i = 0; i < FLATS.length; i++) {
     const a2 = 2 - 2 * d.dot(FLATS[i]);
@@ -589,7 +593,9 @@ function randomWaterDir() {
 }
 
 const planet = (() => {
-  let g = new THREE.IcosahedronGeometry(R, 4).toNonIndexed();   // 5,120 faces: plenty at this scale
+  // level 6 gives a fine sphere; merging shared vertices lets computeVertexNormals
+  // AVERAGE across faces → smooth, bevelled ground instead of hard facets
+  let g = mergeVertices(new THREE.IcosahedronGeometry(R, 6));
   const p = g.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) {
@@ -599,7 +605,7 @@ const planet = (() => {
   }
   g.computeVertexNormals();
   const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-    vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0,
+    vertexColors: true, roughness: 0.95, metalness: 0,   // smooth-shaded, no facets
   }));
   mesh.receiveShadow = true;
   scene.add(mesh);
@@ -619,41 +625,43 @@ function paintTerrain(T) {
   const jr = mulberry32(7);   // stable jitter across repaints
   const cDeep = new THREE.Color(T.deep), cSand = new THREE.Color(T.sand);
   const cMid = new THREE.Color(T.mid), cHigh = new THREE.Color(T.high), cSnow = new THREE.Color(T.snow);
-  const c = new THREE.Color(), v = new THREE.Vector3();
-  for (let f = 0; f < p.count; f += 3) {
-    let h = 0;
-    for (let k = 0; k < 3; k++) { v.fromBufferAttribute(p, f + k); h += v.length() - R; }
-    h /= 3 * H_AMP;
+  const c = new THREE.Color(), v = new THREE.Vector3(), nd = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const h = (v.length() - R) / H_AMP;
     if (h < SEA_H - 0.25) c.copy(cDeep);
     else if (h < SEA_H + 0.10) c.copy(cSand);
     else if (h < 0.45) c.copy(cSand).lerp(cMid, Math.min(1, (h - SEA_H - 0.10) / 0.35));
     else if (h < 1.15) c.copy(cMid).lerp(cHigh, (h - 0.45) / 0.7);
     else c.copy(cHigh).lerp(cSnow, Math.min(1, (h - 1.15) / 0.8));
-    // downtown is PAVED. Grass under the towers is what made the city read as
-    // a forest with buildings in it.
-    v.set(0, 0, 0);
-    for (let k = 0; k < 3; k++) { const q = new THREE.Vector3().fromBufferAttribute(p, f + k); v.add(q); }
-    v.normalize();
-    const aCity = v.angleTo(DOWNTOWN);
-    if (aCity < 0.72 && h > SEA_H + 0.05) {
-      const k2 = THREE.MathUtils.smoothstep(aCity, 0.56, 0.72);   // fades into grass
+    nd.copy(v).normalize();
+    const aCity = nd.angleTo(DOWNTOWN);
+    if (aCity < 0.94 && h > SEA_H + 0.05) {
+      const k2 = THREE.MathUtils.smoothstep(aCity, 0.74, 0.94);
       c.lerp(CONCRETE, 1 - k2);
     }
-    const jit = 0.965 + jr() * 0.07;
-    for (let k = 0; k < 3; k++) colAttr.setXYZ(f + k, c.r * jit, c.g * jit, c.b * jit);
+    const jit = 0.98 + jr() * 0.035;   // subtler jitter on the smooth surface
+    colAttr.setXYZ(i, c.r * jit, c.g * jit, c.b * jit);
   }
   colAttr.needsUpdate = true;
 }
 paintTerrain(VIBES[vibe].terr);
+function roadMat(dark) {
+  return new THREE.MeshStandardMaterial({
+    roughness: 0.97, flatShading: true,
+    polygonOffset: true, polygonOffsetFactor: dark ? -2 : -1, polygonOffsetUnits: dark ? -2 : -1,
+  });
+}
 
 // ocean — faceted translucent sphere at sea level
 const ocean = new THREE.Mesh(
-  new THREE.IcosahedronGeometry(SEA_R, 3),
+  mergeVertices(new THREE.IcosahedronGeometry(SEA_R, 4)),
   new THREE.MeshStandardMaterial({
     color: 0x6cbcdf, transparent: true, opacity: 0.82, roughness: 0.2, metalness: 0.05,
-    flatShading: true, depthWrite: false,
+    depthWrite: false,   // smooth water, no faceted spikes
   })
 );
+ocean.geometry.computeVertexNormals();
 scene.add(ocean);
 
 progress(0.28, 'planting forests…');
@@ -923,15 +931,18 @@ function slerpDir(a, b, t) {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }));
+    const mesh = new THREE.Mesh(g, roadMat(key === 'roadMark'));
     mesh.receiveShadow = true;
     scene.add(mesh);
     roadParts.push({ mesh, key });
     return mesh;
   }
-  ribbon(1.62, 0.05, 'roadLine');            // pale shoulders peeking out
-  ribbon(1.45, 0.065, 'road');               // asphalt
-  ribbon(0.09, 0.08, 'roadLine', true);      // dashed centerline
+  // all three layers sit at the SAME height (flush with the ground); the
+  // polygon-offset ordering — shoulder, asphalt, then a DARK recessed centre
+  // groove — is what stacks them without z-fighting or raising anything
+  ribbon(1.62, 0.02, 'roadLine');            // pale shoulders, flush
+  ribbon(1.45, 0.02, 'road');                // asphalt, flush
+  ribbon(0.07, 0.02, 'roadMark', true);      // recessed dashed centre groove
 
   // pines line the road at regular intervals — planted, not scattered
   for (let i = 0; i < pts.length; i += 5) {
@@ -1565,9 +1576,9 @@ mark('downtown:start');
   // Every dimension below is derived, not guessed. A person is 0.6 wide and a
   // jeep 1.5, so the carriageway and footway are sized from those and the
   // buildable area is whatever is left. Nothing may be built outside it.
-  const BLOCK = 5.5;          // block pitch, centre to centre
-  const ROAD_W = 1.0;         // half-width of asphalt (2.0 total: a jeep is 1.5)
-  const WALK_W = 0.7;         // footway width (a person is 0.6 across)
+  const BLOCK = 7.5;          // block pitch — roomier so you can actually drive
+  const ROAD_W = 1.3;         // half-width of asphalt (2.6 total: a jeep is 1.5)
+  const WALK_W = 0.8;         // footway width (a person is 0.6 across)
   const EDGE = ROAD_W + WALK_W;                 // kerb outer edge from centreline
   const BUILDABLE = BLOCK / 2 - EDGE - 0.05;    // half-width of the plot
   const N = 2;                // blocks out from centre, each way
@@ -1596,7 +1607,7 @@ mark('downtown:start');
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ roughness: 0.96, flatShading: true }));
+    const mesh = new THREE.Mesh(g, roadMat(key === 'roadMark'));
     mesh.receiveShadow = true;
     scene.add(mesh);
     roadParts.push({ mesh, key });
@@ -1609,11 +1620,15 @@ mark('downtown:start');
     const w = Math.abs(i) <= N ? ROAD_W : ROAD_W * 0.72;   // lanes narrow outward
     const ext = Math.abs(i) <= N ? SPAN : BLOCK * (SUB + 0.2);
     if (Math.abs(i) <= N) {                       // kerbs downtown only
-      street(at(o, -ext), at(o, ext), w + 0.3, 0.05, 'roadLine');
-      street(at(-ext, o), at(ext, o), w + 0.3, 0.05, 'roadLine');
+      street(at(o, -ext), at(o, ext), w + 0.3, 0.02, 'roadLine');
+      street(at(-ext, o), at(ext, o), w + 0.3, 0.02, 'roadLine');
     }
-    street(at(o, -ext), at(o, ext), w, 0.07, 'road');
-    street(at(-ext, o), at(ext, o), w, 0.07, 'road');
+    street(at(o, -ext), at(o, ext), w, 0.02, 'road');
+    street(at(-ext, o), at(ext, o), w, 0.02, 'road');
+    if (Math.abs(i) <= N) {                       // dashed centre groove downtown
+      street(at(o, -ext), at(o, ext), 0.07, 0.02, 'roadMark');
+      street(at(-ext, o), at(ext, o), 0.07, 0.02, 'roadMark');
+    }
   }
 
   // windows, baked once into a texture — 40 buildings of window boxes would
@@ -1702,21 +1717,21 @@ mark('downtown:start');
       const fromCentre = ring / SUB;
 
       if (ring <= N * 0.55) {                          // ── core: towers
-        if (rand() < 0.06) { plaza(cx, cy); continue; }   // a square, not a wood
-        const per = 1 + Math.floor(rand() * 2);
+        if (rand() < 0.14) { plaza(cx, cy); continue; }   // more open squares
+        const per = 1;                                    // one tower per block
         for (let k = 0; k < per; k++) {
           const h = (7.5 + rand() * 6.5) * (1.15 - fromCentre * 0.35);
           plot(cx, cy, Math.max(6.0, h), 1.2 + rand() * 0.5, mi++);
         }
       } else if (ring <= N) {                          // ── midrise: shops + flats
-        if (rand() < 0.1) { plaza(cx, cy); continue; }
-        const per = 1 + Math.floor(rand() * 2);
+        if (rand() < 0.22) { plaza(cx, cy); continue; }
+        const per = 1;
         for (let k = 0; k < per; k++) {
           plot(cx, cy, 2.7 + rand() * 2.2, 1.2 + rand() * 0.5, mi++);
         }
       } else {                                         // ── suburbs: houses + yards
-        if (rand() < 0.2) { park(cx, cy, 3); continue; }
-        const homes = 1 + Math.floor(rand() * 2);
+        if (rand() < 0.34) { park(cx, cy, 3); continue; }
+        const homes = 1;
         for (let k = 0; k < homes; k++) {
           const room = Math.max(0, BUILDABLE - 0.85);
           const ox = (rand() - 0.5) * 2 * room, oy = (rand() - 0.5) * 2 * room;
@@ -1848,7 +1863,7 @@ mark('downtown:start');
     return g;
   }
   const LANE = ROAD_W * 0.5;
-  for (let n = 0; n < 22; n++) {
+  for (let n = 0; n < 11; n++) {              // half as many cars
     const axis = n % 2;
     const line = (Math.floor(rand() * (2 * N + 1)) - N) * BLOCK;
     const fwd = rand() > 0.5 ? 1 : -1;
@@ -1860,11 +1875,11 @@ mark('downtown:start');
     scene.add(car);
     traffic.push({ obj: car, a, b, t: rand(), speed: 0.055 + rand() * 0.05, kind: 'car' });
   }
-  for (let n = 0; n < 16; n++) {                   // pedestrians on the kerb
+  for (let n = 0; n < 12; n++) {                   // pedestrians on the kerb
     const axis = n % 2;
     const line = (Math.floor(rand() * (2 * N + 1)) - N) * BLOCK;
     const side = rand() > 0.5 ? 1 : -1;
-    const off = side * (ROAD_W + 0.42);
+    const off = side * (ROAD_W + WALK_W * 0.5);
     const ext = BLOCK * (N + 0.4);
     const dirSign = rand() > 0.5 ? 1 : -1;
     const a = axis ? at(-ext * dirSign, line + off) : at(line + off, -ext * dirSign);
@@ -3933,6 +3948,25 @@ function flyCameraTo(target, k, clearance = 1.2) {
 const clock = new THREE.Clock();
 let introT = 0;
 let navAcc = 0;
+let camZoom = parseFloat(localStorage.getItem('cam-zoom')) || 1.0;   // 0.5 close … 2.5 far
+let camOrbit = 0;                                                    // radians around the character
+{
+  const zs = document.getElementById('zoom-slider'), zv = document.getElementById('zoom-val');
+  if (zs) {
+    zs.value = camZoom;
+    const showZoom = () => { if (zv) zv.textContent = camZoom.toFixed(1) + '×'; };
+    showZoom();
+    zs.addEventListener('input', () => { camZoom = parseFloat(zs.value); localStorage.setItem('cam-zoom', camZoom); showZoom(); });
+  }
+  const rl = document.getElementById('rot-left'), rr = document.getElementById('rot-right');
+  rl?.addEventListener('click', () => { camOrbit -= Math.PI / 6; });
+  rr?.addEventListener('click', () => { camOrbit += Math.PI / 6; });
+  // Q / E also rotate
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyQ') camOrbit -= Math.PI / 12;
+    if (e.code === 'KeyE') camOrbit += Math.PI / 12;
+  });
+}
 {
   const _qs = new URLSearchParams(location.search);
   if (_qs.get('title') === '0') {
@@ -4226,12 +4260,14 @@ function animate() {
     AudioState.engineOsc.frequency.setTargetAtTime((transport === 'train' ? 54 : 72) + g * 46, AudioState.ctx.currentTime, 0.15);
   }
 
-  // chase camera
+  // chase camera — user zoom scales the distance, user orbit swings it around
   introT = Math.min(1, introT + dt / 2.6);
   const ease = introT * introT * (3 - 2 * introT);
+  // heading rotated by the orbit angle, around the local up (dir)
+  const behind = heading.clone().applyAxisAngle(dir, camOrbit);
   const camPos = courier.position.clone()
-    .addScaledVector(dir, TR.camH)
-    .addScaledVector(heading, -TR.camD);
+    .addScaledVector(dir, TR.camH * (0.6 + camZoom * 0.4))
+    .addScaledVector(behind, -TR.camD * camZoom);
   flyCameraTo(camPos, (0.02 + 0.05 * ease), 0.9);
   camera.up.lerp(dir, 0.06).normalize();
   camera.lookAt(courier.position.clone().addScaledVector(dir, 1.1));
