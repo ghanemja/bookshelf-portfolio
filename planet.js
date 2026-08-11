@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -2820,6 +2821,19 @@ function buildTrain() {
 }
 
 const bodies = { jeep: buildJeep(), walk: buildCritic(), bike: buildBike(), train: buildTrain(), boat: buildBoat() };
+// the Blender-rigged critic replaces the procedural one once the GLB lands
+let walkMixer = null, walkAction = null;
+new GLTFLoader().load('./models/critic-walk.glb', (glb) => {
+  const rig = glb.scene;
+  rig.scale.setScalar(0.82);                      // 1.06 blender units → game height
+  rig.traverse(m => { if (m.isMesh) { m.castShadow = !IS_TOUCH; m.frustumCulled = false; } });
+  bodies.walk.clear();                            // out with the pose-rigged boxes
+  bodies.walk.add(rig);
+  bodies.walk.userData.wheels = [];
+  walkMixer = new THREE.AnimationMixer(rig);
+  const clip = THREE.AnimationClip.findByName(glb.animations, 'walk') || glb.animations[0];
+  if (clip) { walkAction = walkMixer.clipAction(clip); walkAction.play(); }
+}, undefined, (e) => console.warn('critic GLB failed, keeping procedural rig:', e?.message || e));
 for (const k of Object.keys(bodies)) { bodies[k].visible = (k === 'jeep'); courier.add(bodies[k]); }
 let courierBody = bodies.jeep;
 scene.add(courier);
@@ -4363,10 +4377,22 @@ function animate() {
   courierBody.rotation.z = THREE.MathUtils.lerp(courierBody.rotation.z, -ix * leanK, 0.09);
   courierBody.rotation.x = THREE.MathUtils.lerp(courierBody.rotation.x, iz * 0.07 * (speed / TR.max), 0.09);
   for (const w of courierBody.userData.wheels) w.rotation.x += dt * speed / 0.34;
-  // on foot: swing the critic's arms and legs, paced to walking speed
+  // on foot: the baked Blender walk clip, its speed tied to ground speed
   if (transport === 'walk') {
     const gait = Math.min(1, speed / TRANSPORT.walk.max);
-    courierBody.traverse(o => { if (o.userData && o.userData.limbs) walkPerson(o, t * 1.3, gait * 0.9); });
+    if (walkMixer && walkAction) {
+      if (gait > 0.04) {
+        walkAction.paused = false;
+        walkMixer.timeScale = 0.4 + gait * 1.5;
+        walkMixer.update(dt);
+      } else {
+        // ease to the passing pose (frame 6 ≈ 0.25s) so they stand, not mid-stride
+        walkAction.time += (0.25 - walkAction.time) * Math.min(1, dt * 8);
+        walkMixer.update(0);
+      }
+    } else {
+      courierBody.traverse(o => { if (o.userData && o.userData.limbs) walkPerson(o, t * 1.3, gait * 0.9); });
+    }
   }
 
   // engine particles + hum
@@ -4508,6 +4534,22 @@ window.addEventListener('resize', () => {
 let collisionMesh = null;
 function buildCollisionBVH() {
   scene.updateMatrixWorld(true);
+  // EVERYTHING gets physics, not just buildings: trees, lamps, benches, signs,
+  // fences, rocks, stations, the moored boat, the rocket, the standing crowd.
+  // Skip only things too small or too flat to bump (flowers, rail ties, roads).
+  const _bb = new THREE.Box3(), _sz = new THREE.Vector3();
+  for (const child of deco.children) {
+    _bb.setFromObject(child); _bb.getSize(_sz);
+    const tall = Math.max(_sz.x, _sz.y, _sz.z);
+    const thin = Math.min(_sz.x, _sz.y, _sz.z);
+    if (tall < 0.45) continue;              // flowers, pebbles
+    if (tall > 0.8 && thin < 0.09 && !child.isGroup) continue;   // rail ties, planks
+    collidables.push(child);
+  }
+  for (const k of Object.keys(stopStructures)) collidables.push(stopStructures[k]);
+  if (typeof mooredBoat !== 'undefined' && mooredBoat) collidables.push(mooredBoat);
+  if (typeof rocketG !== 'undefined' && rocketG) collidables.push(rocketG);
+  for (const p of npcs) collidables.push(p);
   const geos = [];
   for (const grp of collidables) {
     grp.updateWorldMatrix(true, true);
