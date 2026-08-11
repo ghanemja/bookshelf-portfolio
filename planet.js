@@ -5689,7 +5689,5 @@ if (new URLSearchParams(location.search).get('debug') === '1') {
 }
 try { buildCollisionBVH(); } catch (e) { console.warn('BVH build skipped:', e.message); }
 progress(1, 'ready!');
-window.__step = () => animate();
-window.__dbg = () => ({ criticReady, insts: Object.keys(CRITIC.insts) });
 animate();
 setTimeout(() => loaderEl.classList.add('hide'), 450);
