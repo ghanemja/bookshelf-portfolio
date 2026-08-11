@@ -4682,8 +4682,23 @@ for (const btn of document.querySelectorAll('#phone .gm-modes button')) {
   });
 }
 pGo.addEventListener('click', () => {
-  if (!chosenTransport) return;
+  if (!chosenTransport) { if (runStarted) closePhone(); return; }
   if (runStarted) switchRide(chosenTransport); else beginRun(chosenTransport);
+});
+
+// mid-run the phone must always have a way back to the game
+function closePhone() {
+  if (gameState !== 'maps') return;
+  phoneEl.classList.remove('show');
+  scrMap.classList.remove('on');
+  document.body.classList.remove('title-mode');
+  gameState = 'play';
+  pGo.textContent = 'Go';
+  ping(560, 0.08);
+}
+document.querySelector('.gm-back')?.addEventListener('click', () => { if (runStarted) closePhone(); });
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && gameState === 'maps' && runStarted) closePhone();
 });
 
 // ── the phone stays in your pocket: pull it out mid-run to change your ride ──
@@ -4692,8 +4707,8 @@ const gmSearchDest = document.querySelector('#phone .gm-dest');
 document.getElementById('phone-btn').addEventListener('click', () => {
   if (gameState !== 'play' || dlgOpen) return;
   gameState = 'maps';
-  chosenTransport = null;
-  pGo.disabled = true;
+  chosenTransport = transport;         // current ride pre-selected: Switch just works
+  pGo.disabled = false;
   pGo.textContent = 'Switch';
   const next = currentStop();
   if (gmSearchDest) gmSearchDest.textContent = next ? next.name : 'The Downtown Museum';
@@ -4702,7 +4717,7 @@ document.getElementById('phone-btn').addEventListener('click', () => {
     const railFar = b.dataset.t === 'train' && !TRAIN_STATIONS.some(k => dir.angleTo(STOP_DIRS[k]) < 0.14);
     b.disabled = railFar;
     b.style.opacity = railFar ? 0.35 : '';
-    b.classList.remove('sel');
+    b.classList.toggle('sel', b.dataset.t === transport);
   }
   document.body.classList.add('title-mode');
   phoneEl.classList.add('show');
