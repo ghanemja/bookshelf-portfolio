@@ -589,6 +589,7 @@ const cityWindowMats = [];    // tower window materials, lit after dark
 const traffic = [];           // cars and pedestrians that actually move
 const bobbers = [];           // moored boats that rock on the swell
 let airportPlane = null, resortHotel = null;   // handles for the arrival intro
+let GAS_DIR = null;                            // gas station, off the airport spur
 let cityMapCtx = null, cityMapTex = null, cityMapDraw = null;   // the painted city floor
 const SKIN = [0xffd9b8, 0xe8b98f, 0xc68a5e, 0x8a5a3a];
 const HAIR = [0x2d2138, 0x5a3a22, 0x8a6a3a, 0x1c1620, 0x704020];
@@ -2618,6 +2619,48 @@ function buildFarm(anchor, label) {
   }
   districtSign(anchor, label, 0, -5.4);
 }
+// ── THE GAS STATION: halfway down the airport spur, just off the road ──
+{
+  const mid = slerpDir(DOWNTOWN, AIRPORT, 0.5);
+  const toAir = AIRPORT.clone().sub(mid.clone().multiplyScalar(mid.dot(AIRPORT))).normalize();
+  const lat = new THREE.Vector3().crossVectors(mid, toAir).normalize();
+  GAS_DIR = mid.clone().applyAxisAngle(toAir, 0).applyAxisAngle(lat.clone().cross(mid).normalize(), 0);
+  // shift ~2.3 units to the roadside
+  GAS_DIR = mid.clone().multiplyScalar(R).addScaledVector(lat, 2.3).normalize();
+  const g = new THREE.Group();
+  // forecourt slab
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.1, 2.8), M(0xb9b4a8));
+  slab.position.y = 0.1; g.add(slab);
+  // canopy on two pillars
+  for (const sx of [-1.2, 1.2]) {
+    const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1.7, 8), M(0xd8d8e0));
+    pil.position.set(sx, 0.95, 0); g.add(pil);
+  }
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.16, 2.2), M(0xff4d6e));
+  canopy.position.y = 1.85; g.add(canopy);
+  const canTrim = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.1, 2.3), M(0xfffaf2));
+  canTrim.position.y = 1.74; g.add(canTrim);
+  // two pumps
+  for (const sx of [-0.6, 0.6]) {
+    const pump = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.75, 0.26), M(0xe8433f));
+    pump.position.set(sx, 0.5, 0.4); g.add(pump);
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.18, 0.03), M(0xbfe8ff));
+    screen.position.set(sx, 0.72, 0.54); g.add(screen);
+  }
+  // the kiosk
+  const shop = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.1, 1.2), M(0xf0e6d2));
+  shop.position.set(0, 0.65, -1.4); g.add(shop);
+  const shopRoof = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.12, 1.35), M(0xc7572a));
+  shopRoof.position.set(0, 1.28, -1.4); g.add(shopRoof);
+  g.add(foundation(2.0, 2.2, 6));
+  g.position.copy(settleOn(GAS_DIR, 2.0, 0.1));
+  alignToSurface(g, GAS_DIR, yawToFace(GAS_DIR, mid));   // pumps face the road
+  g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+  scene.add(g);
+  addSolid(GAS_DIR, 1.9, g);
+  tinySign('⛽ Gas-N-Go', posOn(GAS_DIR, 3.4));
+}
+
 buildFarm(FARM_A, '🌾 Harvest Fields');
 buildFarm(FARM_B, '🌱 West Meadows');
 
@@ -3823,6 +3866,52 @@ function updateTitle3D(dt) {
 let arrivalT = 0, arrivalPhase = -1, limo = null;
 const _aTmp = new THREE.Vector3(), _aTmp2 = new THREE.Vector3(), _aPrev = new THREE.Vector3();
 const arrDir = { runwayA: null, runwayB: null, board: null, cityEnd: null };
+let arrPath = null, arrArcs = null, arrTotal = 0, uGas = 0.45;
+let gasDriver = null;
+function buildArrPath() {
+  // the same waypoints the spur roads are BUILT from, so the limo is always
+  // on painted road: airport → spur → downtown centre → spur → resort
+  const tA = Math.min(0.85, 0.55 / DOWNTOWN.angleTo(AIRPORT));
+  const tR = Math.min(0.85, 0.55 / DOWNTOWN.angleTo(RESORT));
+  const apron = frameAt(AIRPORT)(2.2, 12);       // where the limo waits
+  const way = [apron, slerpDir(DOWNTOWN, AIRPORT, tA), DOWNTOWN,
+               slerpDir(DOWNTOWN, RESORT, tR), RESORT];
+  let pts = [];
+  for (let i = 0; i < way.length - 1; i++) {
+    for (let k = 0; k < 20; k++) pts.push(slerpDir(way[i], way[i + 1], k / 20));
+  }
+  pts.push(RESORT.clone());
+  // soften the two grid-edge corners so the limo steers, not teleports
+  for (let pass = 0; pass < 3; pass++) {
+    const out = [pts[0]];
+    for (let i = 1; i < pts.length - 1; i++) {
+      out.push(pts[i].clone().multiplyScalar(2).add(pts[i - 1]).add(pts[i + 1]).normalize());
+    }
+    out.push(pts[pts.length - 1]);
+    pts = out;
+  }
+  arrPath = pts;
+  arrArcs = [0];
+  for (let i = 1; i < pts.length; i++) arrArcs.push(arrArcs[i - 1] + pts[i - 1].angleTo(pts[i]));
+  arrTotal = arrArcs[arrArcs.length - 1];
+  // where does the route pass the gas station?
+  let best = 0, bestA = 1e9;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i].angleTo(GAS_DIR);
+    if (a < bestA) { bestA = a; best = i; }
+  }
+  uGas = arrArcs[best] / arrTotal;
+}
+const _apDir = new THREE.Vector3(), _apTan = new THREE.Vector3();
+function sampleArrPath(u01, outDir, outTan) {
+  const u = THREE.MathUtils.clamp(u01, 0, 1) * arrTotal;
+  let i = 0;
+  while (i < arrArcs.length - 2 && arrArcs[i + 1] < u) i++;
+  const span = Math.max(1e-6, arrArcs[i + 1] - arrArcs[i]);
+  const f = THREE.MathUtils.clamp((u - arrArcs[i]) / span, 0, 1);
+  outDir.copy(slerpDir(arrPath[i], arrPath[i + 1], f));
+  outTan.copy(arrPath[i + 1]).sub(arrPath[i].clone().multiplyScalar(arrPath[i].dot(arrPath[i + 1]))).normalize();
+}
 const arrCaption = document.getElementById('arr-caption');
 
 // a stretch limousine — long black body, tinted glass, chrome trim
@@ -3921,6 +4010,13 @@ function startArrival() {
   startAudio();
   if (!limo) { limo = buildLimo(); scene.add(limo); }
   if (!cabin) cabin = buildCabin();
+  if (!arrPath) buildArrPath();
+  if (!gasDriver) {
+    gasDriver = makePerson(0x1c1620, 0x2d2138);   // black suit, chauffeur cap
+    gasDriver.scale.setScalar(0.78);
+    gasDriver.visible = false;
+    scene.add(gasDriver);
+  }
   const airAt = frameAt(AIRPORT);
   arrDir.runwayA = airAt(0, -16).normalize();
   arrDir.runwayB = airAt(0, 12).normalize();
@@ -3985,22 +4081,48 @@ function updateArrival(dt) {
     camera.position.lerp(_aTmp, 0.06);
     camera.up.lerp(d, 0.1).normalize();
     camera.lookAt(limo.position);
-  } else if (T < 0.88) {                           // 3. limo drives into the city
-    if (arrCaption) arrCaption.textContent = '🚘 Into the city…';
-    const k = (T - 0.54) / 0.34;
-    const e = k * k * (3 - 2 * k);
-    const d = slerpDir(limoWait, arrDir.cityEnd, e).normalize();
-    const ahead = slerpDir(limoWait, arrDir.cityEnd, Math.min(1, e + 0.02)).normalize();
+  } else if (T < 0.94) {                           // 3. the drive: spur road,
+    // gas stop halfway, then through downtown to the resort — ON the roads
+    const K = (T - 0.54) / 0.40;                   // 0..1 across the whole drive
+    const LEG1 = 0.42, STOP = 0.60;                // fractions of K
+    let u, driving = true;
+    if (K < LEG1) {                                // airport → gas station
+      const k = K / LEG1, e = k * k * (3 - 2 * k);
+      u = uGas * e;
+      if (arrCaption) arrCaption.textContent = '🚘 Heading into town…';
+    } else if (K < STOP) {                         // filling up
+      u = uGas; driving = false;
+      if (arrCaption) arrCaption.textContent = '⛽ Quick stop — topping up the tank';
+    } else {                                       // gas → downtown → hotel
+      const k = (K - STOP) / (1 - STOP), e = k * k * (3 - 2 * k);
+      u = uGas + (1 - uGas) * e;
+      if (arrCaption) arrCaption.textContent = '🚘 Into the city…';
+    }
+    sampleArrPath(u, _apDir, _apTan);
     limo.visible = true;
-    limo.position.copy(dbl(d));
-    alignToSurface(limo, d, yawToFace(d, ahead));
-    for (const w of limo.userData.wheels || []) w.rotation.x += dt * 9;
-    _aTmp.copy(limo.position).addScaledVector(d, 3.2)
-      .addScaledVector(_aTmp2.subVectors(ahead, d).normalize(), -6.5);
+    limo.position.copy(dbl(_apDir));
+    alignToSurface(limo, _apDir, yawToFace(_apDir, _apDir.clone().multiplyScalar(R).addScaledVector(_apTan, 2).normalize()));
+    if (driving) for (const w of limo.userData.wheels || []) w.rotation.x += dt * 9;
+    // the chauffeur hops out at the pumps
+    if (!driving) {
+      gasDriver.visible = true;
+      const side = GAS_DIR.clone().sub(_apDir.clone().multiplyScalar(_apDir.dot(GAS_DIR))).normalize();
+      gasDriver.position.copy(limo.position).addScaledVector(side, 1.1);
+      alignToSurface(gasDriver, _apDir, yawToFace(_apDir, GAS_DIR));
+      walkPerson(gasDriver, performance.now() / 1000, 0.25);   // fidgets with the pump
+    } else {
+      gasDriver.visible = false;
+    }
+    // camera trails the limo along the road; at the pumps it swings wide to
+    // frame the stop like a scene
+    _aTmp.copy(limo.position).addScaledVector(_apDir, driving ? 3.2 : 2.4)
+      .addScaledVector(_aTmp2.copy(_apTan).negate(), driving ? 6.5 : 3.5);
+    if (!driving) _aTmp.addScaledVector(_aTmp2.crossVectors(_apDir, _apTan).normalize(), 4.5);
     camera.position.lerp(_aTmp, 0.09);
-    camera.up.lerp(d, 0.1).normalize();
-    camera.lookAt(limo.position.clone().addScaledVector(d, 0.6));
+    camera.up.lerp(_apDir, 0.1).normalize();
+    camera.lookAt(limo.position.clone().addScaledVector(_apDir, 0.6));
   } else if (T < 1.0) {                            // 4. check in at the hotel
+    gasDriver.visible = false;
     if (arrCaption) arrCaption.textContent = '🏨 Checking in…';
     const d = arrDir.cityEnd;
     limo.position.copy(settleOn(d, 0.6, 0.02));
@@ -4013,6 +4135,7 @@ function updateArrival(dt) {
   } else {                                         // 5. done → the phone
     if (arrCaption) arrCaption.style.opacity = 0;
     limo.visible = false;
+    gasDriver.visible = false;
     enterPhone();
   }
 }
@@ -4446,8 +4569,10 @@ const _headPrev = new THREE.Vector3(1, 0, 0);
     const lp = _qs.get('launch');
     if (lp !== null) { startLaunch(); launchT = Math.min(0.99, parseFloat(lp) || 0); }
     if (_qs.get('sail') === '1') boardBoat();
-  } else if (_qs.get('arrival') === '1') {
-    startArrival();                 // watch the cinematic straight away (dev)
+  } else if (_qs.get('arrival') !== null) {
+    startArrival();                 // ?arrival=1 plays; ?arrival=0.65 seeks (dev)
+    const av = parseFloat(_qs.get('arrival'));
+    if (av > 0 && av < 1) arrivalT = av;
   } else if (_qs.get('gps')) {
     document.body.classList.remove('title-mode');
     titleEl.classList.add('hide'); title3D.visible = false;
