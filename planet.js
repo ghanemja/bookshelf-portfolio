@@ -594,6 +594,7 @@ let cityMapCtx = null, cityMapTex = null, cityMapDraw = null;   // the painted c
 const SKIN = [0xffd9b8, 0xe8b98f, 0xc68a5e, 0x8a5a3a];
 const HAIR = [0x2d2138, 0x5a3a22, 0x8a6a3a, 0x1c1620, 0x704020];
 const npcs = [];              // everyone standing around the world
+const camOccluders = [];      // big statics the camera must never hide behind
 const collidables = [];   // building groups merged into one BVH after build
 function addSolid(dirVec, worldRadius, group) {
   solids.push({ dir: dirVec.clone(), r: worldRadius / R });   // kept for broad hints
@@ -2098,7 +2099,7 @@ mark('bridge:start');
       scene.add(mesh);
       return mesh;
     }
-    deckRibbon(1.55, 0, DECK_M);
+    camOccluders.push(deckRibbon(1.55, 0, DECK_M));
     deckRibbon(1.62, -0.12, INTL_ORANGE);    // the deck's underside beam
 
     const towerAt = [0.28, 0.72];
@@ -2125,6 +2126,7 @@ mark('bridge:start');
       g.quaternion.setFromRotationMatrix(_m2);
       g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
       scene.add(g);
+      camOccluders.push(g);
       tops.push(d.clone().multiplyScalar(SEA_R - 0.6 + H));
     }
 
@@ -3945,56 +3947,103 @@ function buildLimo() {
 }
 
 let cabin = null;
+// the cabin is a PAINTING: a hand-drawn NetJets-style interior on one
+// billboard (the critic never walks, so it reads as a room), plus a real
+// porthole to the left that the camera turns to for the planet-below shot
+function drawCabinPainting() {
+  const W = 1024, H = 640;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const c = cv.getContext('2d');
+  const ink = '#241c28';
+  const line = (w) => { c.strokeStyle = ink; c.lineWidth = w; };
+  // walls: warm cream, arched ceiling band
+  c.fillStyle = '#f2ead9'; c.fillRect(0, 0, W, H);
+  const ceil = c.createLinearGradient(0, 0, 0, H * 0.3);
+  ceil.addColorStop(0, '#f9edd6'); ceil.addColorStop(1, '#f2ead9');
+  c.fillStyle = ceil; c.fillRect(0, 0, W, H * 0.3);
+  // ceiling spotlights
+  for (let i = 0; i < 6; i++) {
+    const x = W * (0.2 + i * 0.12), y = H * 0.07;
+    c.fillStyle = '#fff6d0'; c.beginPath(); c.ellipse(x, y, 16, 9, 0, 0, 7); c.fill();
+    line(3); c.stroke();
+  }
+  // carpet with perspective seams
+  c.fillStyle = '#c9b4a0'; c.fillRect(0, H * 0.72, W, H * 0.28);
+  line(3);
+  for (let i = 0; i < 7; i++) {
+    c.beginPath();
+    c.moveTo(W * (0.1 + i * 0.14), H);
+    c.lineTo(W * (0.34 + i * 0.055), H * 0.72);
+    c.stroke();
+  }
+  line(5); c.strokeRect(-4, H * 0.72, W + 8, H * 0.281);
+  // aft wood wall with the NETJETS screen
+  c.fillStyle = '#7a4a2e';
+  const wx = W * 0.33, wy = H * 0.16, ww = W * 0.34, wh = H * 0.58;
+  c.beginPath(); c.roundRect(wx, wy, ww, wh, 26); c.fill();
+  line(6); c.stroke();
+  c.strokeStyle = 'rgba(40,20,10,0.5)'; c.lineWidth = 2.5;   // wood grain
+  for (let i = 1; i < 9; i++) {
+    c.beginPath(); c.moveTo(wx + (ww / 9) * i, wy + 8); c.lineTo(wx + (ww / 9) * i, wy + wh - 8); c.stroke();
+  }
+  c.fillStyle = '#fffdf6';
+  c.beginPath(); c.roundRect(W * 0.415, H * 0.26, W * 0.17, H * 0.13, 8); c.fill();
+  line(4); c.stroke();
+  c.fillStyle = ink; c.font = '700 26px "Fredoka", sans-serif'; c.textAlign = 'center';
+  c.fillText('NETJETS', W * 0.5, H * 0.345);
+  // cream sofa, left — seat, back, arm cushions
+  function couch(x, y, w, h, flip) {
+    c.fillStyle = '#efe4ce';
+    c.beginPath(); c.roundRect(x, y, w, h * 0.55, 18); c.fill(); line(5); c.stroke();
+    c.fillStyle = '#f6ecd8';
+    c.beginPath(); c.roundRect(x, y - h * 0.5, w, h * 0.58, 16); c.fill(); c.stroke();
+    c.strokeStyle = 'rgba(36,28,40,0.55)'; c.lineWidth = 3;
+    for (let i = 1; i < 3; i++) {
+      c.beginPath(); c.moveTo(x + (w / 3) * i, y - h * 0.45); c.lineTo(x + (w / 3) * i, y + h * 0.4); c.stroke();
+    }
+  }
+  couch(W * 0.02, H * 0.56, W * 0.27, H * 0.3);
+  // two club chairs, right
+  for (const [cx2, cy2] of [[W * 0.71, H * 0.55], [W * 0.86, H * 0.60]]) {
+    c.fillStyle = '#f6ecd8';
+    c.beginPath(); c.roundRect(cx2, cy2 - H * 0.16, W * 0.115, H * 0.2, 16); c.fill(); line(5); c.stroke();
+    c.fillStyle = '#efe4ce';
+    c.beginPath(); c.roundRect(cx2 - 8, cy2, W * 0.135, H * 0.11, 12); c.fill(); c.stroke();
+  }
+  // wood side table with a glass
+  c.fillStyle = '#8a5a36';
+  c.beginPath(); c.ellipse(W * 0.63, H * 0.66, 44, 16, 0, 0, 7); c.fill(); line(4); c.stroke();
+  c.fillStyle = '#ffe4a8';
+  c.beginPath(); c.roundRect(W * 0.615, H * 0.585, 14, 26, 4); c.fill(); line(3); c.stroke();
+  // portholes upper left and right, sky blue
+  for (const px of [0.08, 0.19, 0.92]) {
+    c.fillStyle = '#bfe8ff';
+    c.beginPath(); c.ellipse(W * px, H * 0.30, 34, 44, 0, 0, 7); c.fill();
+    c.strokeStyle = '#fdfaf2'; c.lineWidth = 10; c.stroke();
+    line(4); c.stroke();
+  }
+  return cv;
+}
+
 function buildCabin() {
   const g = new THREE.Group();
-  const CREAM = M(0xf0e6d2), WALLM = M(0xf4f0e8), CARPET = M(0x7a4a5a);
-  // the shell: floor, ceiling, back wall, both side walls — a sealed set
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 3.2), CARPET);
-  floor.position.set(0, 0.36, 0); g.add(floor);
-  const ceil = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 3.2), WALLM);
-  ceil.position.set(0, 1.78, 0); g.add(ceil);
-  const backW = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.5, 0.08), WALLM);
-  backW.position.set(0, 1.06, -1.6); g.add(backW);
-  const frontW = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.5, 0.08), WALLM);
-  frontW.position.set(0, 1.06, 1.6); g.add(frontW);
-  for (const sx of [-1.1, 1.1]) {
-    const side = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.5, 3.2), WALLM);
-    side.position.set(sx, 1.06, 0); g.add(side);
-  }
-  // round windows down both sides, glowing sky-blue (their own light, no sun needed)
-  for (const sx of [-1.05, 1.05]) {
-    for (const wz of [-0.8, 0.2, 1.0]) {
-      const win = new THREE.Mesh(new THREE.CircleGeometry(0.22, 18),
-        new THREE.MeshBasicMaterial({ color: 0xbfe8ff }));
-      win.position.set(sx * 1.01, 1.05, wz);
-      win.rotation.y = sx > 0 ? -Math.PI / 2 : Math.PI / 2;
-      g.add(win);
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.035, 8, 18), M(0xd8d8e0));
-      ring.position.set(sx, 1.05, wz);
-      ring.rotation.y = Math.PI / 2;
-      g.add(ring);
-    }
-  }
-  // two rows of cream leather seats
-  for (const rz of [-0.9, -0.1]) {
-    for (const sx of [-0.5, 0.5]) {
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.18, 0.46), CREAM);
-      seat.position.set(sx, 0.56, rz); g.add(seat);
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.55, 0.15), M(0xe8dcc0));
-      back.position.set(sx, 0.86, rz - 0.26); g.add(back);
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.4), M(0xd8c8b0));
-      arm.position.set(sx + 0.24, 0.68, rz); g.add(arm);
-    }
-  }
-  // champagne on the front-row tray, of course
-  const tray = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.04, 0.22), M(0xcfd6de));
-  tray.position.set(-0.5, 0.82, 0.35); g.add(tray);
-  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.035, 0.16, 8),
-    new THREE.MeshStandardMaterial({ color: 0xffe4a8, transparent: true, opacity: 0.8 }));
-  glass.position.set(-0.5, 0.92, 0.35); g.add(glass);
-  // the cabin lights itself — the shot cannot go dark at night
-  const lamp = new THREE.PointLight(0xfff2dc, 2.2, 6);
-  lamp.position.set(0, 1.6, 0.2); g.add(lamp);
+  const tex = new THREE.CanvasTexture(drawCabinPainting());
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 4.5),
+    new THREE.MeshBasicMaterial({ map: tex }));
+  board.position.set(0, 1.1, 3.0);
+  board.rotation.y = Math.PI;                 // faces the camera at -z
+  g.add(board);
+  g.userData.board = board;
+  // the REAL porthole, hanging to the left: a frame with the world through it
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.18, 10, 26), M(0xf4efe6));
+  const ring2 = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.07, 8, 26), M(0x9aa0a8));
+  const winG = new THREE.Group();
+  winG.add(ring); winG.add(ring2);
+  winG.position.set(-3.6, 0.2, 0.6);
+  g.add(winG);
+  g.userData.window = winG;
   g.visible = false;
   scene.add(g);
   return g;
@@ -4039,20 +4088,32 @@ function updateArrival(dt) {
     airportPlane.visible = true;
   };
 
-  if (T < 0.14) {                                 // 0. INSIDE the cabin, first class
-    if (arrCaption) arrCaption.textContent = '✈ First class — welcome aboard';
-    // the set floats high over the airport in empty sky: the frame can only
-    // ever contain the cabin, whatever the time of day or graphics mode
+  if (T < 0.14) {                                 // 0. first class, then the view
     const up = AIRPORT.clone();
     cabin.visible = true;
     cabin.position.copy(up.clone().multiplyScalar(R + 34));
     alignToSurface(cabin, up);
-    airportPlane.visible = false;                  // the jet appears at landing
-    // camera at the back row, looking up the aisle toward the windows
-    _aTmp.copy(cabin.localToWorld(new THREE.Vector3(0, 1.12, -1.35)));
-    camera.position.lerp(_aTmp, T < 0.01 ? 1 : 0.15);
-    camera.up.lerp(up, 0.2).normalize();
-    camera.lookAt(cabin.localToWorld(new THREE.Vector3(0.15, 0.92, 0.9)));
+    airportPlane.visible = false;
+    // turbulence: the whole frame trembles like cruise altitude
+    const tt = performance.now() / 1000;
+    const jx = Math.sin(tt * 23.1) * 0.014 + Math.sin(tt * 13.7) * 0.02;
+    const jy = Math.cos(tt * 19.3) * 0.012 + Math.sin(tt * 7.9) * 0.016;
+    _aTmp.copy(cabin.localToWorld(new THREE.Vector3(jx, 1.1 + jy, 0)));
+    camera.position.copy(_aTmp);
+    camera.up.lerp(up, 0.25).normalize();
+    if (T < 0.085) {                               // gazing down the cabin
+      if (arrCaption) arrCaption.textContent = '✈ First class — welcome aboard';
+      camera.lookAt(cabin.localToWorld(new THREE.Vector3(jx * 2, 1.1, 3.0)));
+    } else {                                       // turn left: the planet below
+      if (arrCaption) arrCaption.textContent = '🌍 There it is — the tiny planet';
+      const k = (T - 0.085) / 0.055;
+      const e = k * k * (3 - 2 * k);
+      // window frame keeps facing the eye; gaze sweeps from wall to porthole
+      cabin.userData.window.lookAt(camera.position);
+      _aTmp2.copy(cabin.localToWorld(new THREE.Vector3(0, 1.1, 3.0))).lerp(
+        cabin.localToWorld(new THREE.Vector3(-9, -14, 1.4)), e);
+      camera.lookAt(_aTmp2);
+    }
   } else if (T < 0.42) {                           // 1. the jet lands, nose-forward
     cabin.visible = false;
     airportPlane.visible = true;
@@ -4468,6 +4529,16 @@ function flatOf(mat, wantDetail) {
   if (!pair) { pair = {}; flatCache.set(mat, pair); }
   const key = wantDetail ? 'detailed' : 'plain';
   if (!pair[key]) {
+    if (mat.map) {
+      // the city floor and other textured sheets read as clean 2D art —
+      // toon-shading them painted dark bands alongside every road
+      pair[key] = new THREE.MeshBasicMaterial({
+        map: mat.map, color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
+        transparent: !!mat.transparent, opacity: mat.opacity ?? 1,
+        side: mat.side ?? THREE.FrontSide,
+      });
+      return pair[key];
+    }
     pair[key] = new THREE.MeshToonMaterial({
       color: mat.color ? mat.color.clone() : new THREE.Color(0xffffff),
       // real maps always win; the sketch detail is only for surfaces that
@@ -4513,6 +4584,8 @@ function setGreasePencil(on) {
 
 
 // ─── main loop ───────────────────────────────────────────────────────────────
+const _occRay = new THREE.Raycaster();
+const _oHead = new THREE.Vector3(), _oRay = new THREE.Vector3();
 const clock = new THREE.Clock();
 let introT = 0;
 let navAcc = 0;
@@ -5070,6 +5143,7 @@ function buildCollisionBVH() {
   merged.computeBoundsTree();
   collisionMesh = new THREE.Mesh(merged);
   collisionMesh.matrixAutoUpdate = false;
+  camOccluders.push(collisionMesh);
   if (new URLSearchParams(location.search).get('debug') === '1')
     console.log('[bvh] collision tris:', merged.attributes.position.count / 3);
 }
