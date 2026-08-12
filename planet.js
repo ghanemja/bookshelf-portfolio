@@ -2697,6 +2697,8 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
 // placeholder for a real model once it streams in, so a slow/failed load never
 // leaves a hole (the box stays), and register each one with the grease-pencil /
 // boil-outline system so they draw correctly in Sketchbook + Wasteland modes.
+let limoTemplate = null;   // real limo model for the arrival cinematic (see buildLimo)
+let gearProto = null;      // one normalized landing-gear leg, cloned onto the jet
 {
   const draco = new DRACOLoader().setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
   const gltfV = new GLTFLoader().setDRACOLoader(draco);
@@ -2718,23 +2720,30 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   // Return a wrapper Group whose child is oriented forward = +Z, up = +Y, sitting
   // on the ground (wheels at y ≈ sink), scaled to targetLen. The wrapper stays at
   // identity so the traffic loop can drive its position/quaternion each frame.
-  function toTemplate(root, targetLen, sink, autoFace, extraYaw) {
-    // measure raw, decide facing: if built along X, yaw 90° so length lands on Z
-    _vb.setFromObject(root); _vb.getSize(_vs);
+  function toTemplate(root, targetLen, sink, autoFace, extraYaw, preRot) {
+    // preRot fixes a non-Y-up model (e.g. the Z-up limo) before anything else
+    const oriented = new THREE.Group();
+    if (preRot) oriented.rotation.copy(preRot);
+    oriented.add(root);
+    oriented.updateWorldMatrix(true, true);
+    // measure, decide facing: if built along X, yaw 90° so length lands on Z
+    _vb.setFromObject(oriented); _vb.getSize(_vs);
     let yaw = extraYaw || 0;
     if (autoFace && _vs.x > _vs.z) yaw += Math.PI / 2;
-    root.rotation.set(0, yaw, 0);
-    root.updateWorldMatrix(true, true);
-    _vb.setFromObject(root); _vb.getSize(_vs);
-    root.scale.setScalar(targetLen / Math.max(_vs.z, 1e-3));
-    root.updateWorldMatrix(true, true);
-    _vb.setFromObject(root); _vb.getCenter(_vc); _vb.getSize(_vs);
-    root.position.x -= _vc.x;                 // centre on the lane
-    root.position.z -= _vc.z;
-    root.position.y -= (_vc.y - _vs.y / 2);   // min-y → 0
-    root.position.y += sink;                  // then sink so wheels meet the road
+    const spin = new THREE.Group();
+    spin.rotation.y = yaw;
+    spin.add(oriented);
+    spin.updateWorldMatrix(true, true);
+    _vb.setFromObject(spin); _vb.getSize(_vs);
+    spin.scale.setScalar(targetLen / Math.max(_vs.z, 1e-3));
+    spin.updateWorldMatrix(true, true);
+    _vb.setFromObject(spin); _vb.getCenter(_vc); _vb.getSize(_vs);
+    spin.position.x -= _vc.x;                 // centre on the lane
+    spin.position.z -= _vc.z;
+    spin.position.y -= (_vc.y - _vs.y / 2);   // min-y → 0
+    spin.position.y += sink;                  // then sink so wheels meet the road
     const wrap = new THREE.Group();
-    wrap.add(root);
+    wrap.add(spin);
     return wrap;
   }
 
@@ -2764,7 +2773,8 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   // stream every car in parallel, then swap the placeholder boxes for real models
   Promise.all(FLEET.map(f =>
     gltfV.loadAsync(`./models/opt/${f.file}.glb`).then(g => {
-      const tpl = toTemplate(g.scene, f.len, -0.06, true, f.flip ? Math.PI : 0);
+      // sink −0.09 cancels the +0.09 lane lift so tyres sit ON the road, not above it
+      const tpl = toTemplate(g.scene, f.len, -0.09, true, f.flip ? Math.PI : 0);
       dressCar(tpl);
       return tpl;
     }).catch(err => { console.warn('car load failed', f.file, err); return null; })
@@ -2777,6 +2787,8 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
       const inst = ready[i++ % ready.length].clone(true);   // shares geo + mats
       inst.position.copy(v.obj.position);
       inst.quaternion.copy(v.obj.quaternion);
+      inst.userData.wheels = [];
+      inst.traverse(o => { if (o.isMesh && /wheel|tyre|tire|rim|hub/i.test(o.name)) inst.userData.wheels.push(o); });
       scene.remove(v.obj);
       scene.add(inst);
       v.obj = inst;
@@ -2789,11 +2801,13 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   gltfV.loadAsync('./models/opt/jet.glb').then(g => {
     // the jet's footprint is near-square (wingspan ≈ length), which fools
     // toTemplate's autoFace heuristic — its fuselage runs down -X natively, so
-    // it was left pointing sideways. Force the nose onto +Z ourselves.
-    const jw = toTemplate(g.scene, 5.0, -0.02, false, Math.PI / 2);
+    // it was left pointing sideways. Force the nose onto +Z ourselves. Raise it
+    // off the ground so it stands on its (added) landing gear instead of belly.
+    const jw = toTemplate(g.scene, 5.0, 0.30, false, Math.PI / 2);
     jw.traverse(o => {
       if (!o.isMesh) return;
       o.castShadow = !IS_TOUCH; o.receiveShadow = false;
+      o.userData._gpForce = true;   // opt every jet part into the boil contour
       // KEEP the jet's own materials — real livery: white body, gold cheatline,
       // tinted glass, dark engines. The old override matched English material
       // names but this model's are named in Russian, so every part fell through
@@ -2807,6 +2821,7 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
         m.needsUpdate = true;
       }
     });
+    jw.userData.rig = buildJetRig(jw);   // deployable gear + airstair
     if (airportPlane) {
       jw.position.copy(airportPlane.position);
       jw.quaternion.copy(airportPlane.quaternion);
@@ -2817,6 +2832,134 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
     scene.add(jw);
     gpRegister(jw);                // participate in the drawn modes too
   }).catch(err => console.warn('jet load failed', err));
+
+  // the limo the arrival cinematic drives — real model, kept textured + smooth.
+  // In three.js space it's already Y-up with the body length on +Z (node
+  // transforms handle it), so no pre-rotation — just size + face it.
+  gltfV.loadAsync('./models/opt/limo.glb').then(g => {
+    const tpl = toTemplate(g.scene, 4.6, -0.02, false, 0);
+    dressCar(tpl);
+    limoTemplate = tpl;
+  }).catch(err => console.warn('limo load failed', err));
+
+  // one landing-gear leg, normalized to unit height with the wheels at the
+  // bottom (y −1) and the mount at the top (y 0), so buildJetRig can clone it
+  // three times and scale each to the belly gap. Already Y-up (tall axis Y) in
+  // three.js space, so no turn. Textured + smooth + boil-tagged like everything.
+  gltfV.loadAsync('./models/opt/gear.glb').then(g => {
+    const root = g.scene;
+    const grp = new THREE.Group();
+    grp.add(root);
+    grp.updateWorldMatrix(true, true);
+    const b = new THREE.Box3().setFromObject(grp), s = b.getSize(new THREE.Vector3());
+    root.scale.multiplyScalar(1 / Math.max(s.y, 1e-3));
+    root.updateWorldMatrix(true, true);
+    const b2 = new THREE.Box3().setFromObject(grp), c2 = b2.getCenter(new THREE.Vector3());
+    root.position.x -= c2.x; root.position.z -= c2.z;
+    root.position.y -= b2.max.y;           // top of the leg at y = 0
+    dressCar(grp);
+    grp.traverse(o => { if (o.isMesh) o.userData._gpForce = true; });
+    gearProto = grp;
+  }).catch(err => console.warn('gear load failed', err));
+}
+
+// Landing gear + airstair that DEPLOY, built as children of the parked jet so
+// they ride its transform for free. The returned setters are driven by the
+// arrival cinematic: gear folds down on descent, the stair unfolds at step-off.
+function buildJetRig(jet) {
+  const bb = new THREE.Box3().setFromObject(jet);
+  const size = bb.getSize(new THREE.Vector3());
+  const len = size.z, wid = size.x;
+  const belly = bb.min.y;                    // jet was raised, so belly sits > 0
+  const DARK  = M(0x18161c, { roughness: 0.9 });                 // tyre
+  const HUB   = M(0xd8dae0, { roughness: 0.4, metalness: 0.3 }); // hub
+  const STRUT = M(0xaeb2ba, { roughness: 0.35, metalness: 0.5 });
+
+  // ── landing gear: three legs, each pivots about its top. deployed = straight
+  // down (rot 0); retracted = swung forward and up into the belly.
+  const RETRACT = -1.55;
+  const gearPivots = [];
+  const wheelGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.07, 12);
+  wheelGeo.rotateZ(Math.PI / 2);
+  function makeGear(x, z, twin) {
+    const piv = new THREE.Group();
+    piv.position.set(x, belly, z);
+    if (gearProto) {
+      // the real gear leg (unit height, wheels at −1), scaled to the belly gap
+      const leg = gearProto.clone(true);
+      leg.scale.setScalar(belly);
+      piv.add(leg);
+    } else {
+      // fallback if the gear model hasn't streamed in yet: a simple strut + wheels
+      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, belly, 6), STRUT);
+      strut.position.y = -belly / 2; piv.add(strut);
+      for (const wx of twin ? [-0.085, 0.085] : [0]) {
+        const w = new THREE.Mesh(wheelGeo, DARK);
+        w.position.set(wx, -belly, 0); piv.add(w);
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.075, 8), HUB);
+        hub.rotation.z = Math.PI / 2; hub.position.set(wx, -belly, 0); piv.add(hub);
+      }
+    }
+    piv.traverse(m => { if (m.isMesh) { m.userData._gpForce = true; if (!IS_TOUCH) m.castShadow = true; } });
+    jet.add(piv); gearPivots.push(piv);
+  }
+  makeGear(0,     len * 0.30, false);   // nose
+  makeGear(-0.20, -len * 0.03, true);   // main L
+  makeGear(0.20,  -len * 0.03, true);   // main R
+
+  // ── airstair: a flight of steps + a looping grab-rail, hinged at the door
+  // sill forward-left of the fuselage. deployed = folded down to the ground;
+  // stowed = swung up flat against the door.
+  const STEPN = 6, run = 0.17;
+  const doorX = -wid * 0.15, doorY = belly + 0.06, doorZ = len * 0.16;
+  const rise = doorY / STEPN;
+  const stair = new THREE.Group();
+  stair.position.set(doorX, doorY, doorZ);
+  const SIDE = M(0xf3f2ee, { roughness: 0.5 });   // white panel
+  const TREAD = M(0x39323a, { roughness: 0.85 }); // dark tread
+  const stepX = (i) => -0.14 - i * (run * 0.92);
+  const stepY = (i) => -i * rise - rise;
+  for (let i = 0; i < STEPN; i++) {
+    const step = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.03, run * 0.96), TREAD);
+    step.position.set(stepX(i), stepY(i), 0); stair.add(step);
+  }
+  // sloped white side panels down each edge
+  for (const sz of [-0.19, 0.19]) {
+    const pts = [];
+    for (let i = 0; i <= STEPN; i++) pts.push(new THREE.Vector3(stepX(i - 1), stepY(i - 1) + 0.02, sz));
+    const panel = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.03, 5, false), SIDE);
+    stair.add(panel);
+  }
+  // a grab-rail arching over the outer edge on posts
+  const railPts = [];
+  for (let i = -1; i <= STEPN; i++) railPts.push(new THREE.Vector3(stepX(i), stepY(i) + 0.36, 0.19));
+  const rail = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(railPts), 24, 0.012, 6, false), STRUT);
+  stair.add(rail);
+  for (let i = 0; i <= STEPN; i += 2) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.36, 5), STRUT);
+    post.position.set(stepX(i), stepY(i) + 0.18, 0.19); stair.add(post);
+  }
+  stair.traverse(m => { if (m.isMesh) { m.userData._gpForce = true; if (!IS_TOUCH) m.castShadow = true; } });
+  stair.visible = false;
+  jet.add(stair);
+  const STAIR_STOW = 1.78;   // radians about Z to fold flat against the fuselage
+
+  const rig = {
+    setGearDeploy(f) {
+      const a = (1 - THREE.MathUtils.clamp(f, 0, 1)) * RETRACT;
+      for (const p of gearPivots) p.rotation.x = a;
+    },
+    setStairDeploy(f) {
+      f = THREE.MathUtils.clamp(f, 0, 1);
+      stair.visible = f > 0.001;
+      stair.rotation.z = (1 - f) * STAIR_STOW;
+    },
+    // world-space foot of the stairs — where the passenger starts walking
+    footWorld(out) { return stair.localToWorld(out.set(stepX(STEPN - 1), stepY(STEPN - 1), 0)); },
+  };
+  rig.setGearDeploy(1);      // parked jet stands on its wheels by default
+  rig.setStairDeploy(0);
+  return rig;
 }
 
 // ── THE RESORT: a hotel tower, cabanas, palms ──
@@ -4381,7 +4524,7 @@ function updateTitle3D(dt) {
 // ─── THE ARRIVAL: plane lands, Uber to the hotel, check in, then the phone ───
 // A hands-off cinematic that plays after "enter", using the airport and resort
 // that already exist. Ends by handing off to the texts + GPS flow.
-let arrivalT = 0, arrivalPhase = -1, limo = null;
+let arrivalT = 0, arrivalPhase = -1, limo = null, arrivalPax = null;
 const _aTmp = new THREE.Vector3(), _aTmp2 = new THREE.Vector3(), _aPrev = new THREE.Vector3();
 const arrDir = { runwayA: null, runwayB: null, board: null, cityEnd: null };
 let arrPath = null, arrArcs = null, arrTotal = 0, uGas = 0.45, uEnd = 1;
@@ -4456,8 +4599,22 @@ function sampleArrPath(u01, outDir, outTan) {
 }
 const arrCaption = document.getElementById('arr-caption');
 
-// a stretch limousine — long black body, tinted glass, chrome trim
+// the limo: prefer the real textured model, fall back to the box build below
 function buildLimo() {
+  if (limoTemplate) {
+    const g = limoTemplate.clone(true);
+    const wheels = [];
+    g.traverse(o => {
+      if (o.isMesh && /wheel|tyre|tire|rim/i.test(o.name)) wheels.push(o);
+    });
+    g.userData.wheels = wheels;
+    gpRegister(g);                    // outlines + boil in the drawn modes
+    return g;
+  }
+  return buildLimoProc();
+}
+// a stretch limousine — long black body, tinted glass, chrome trim (fallback)
+function buildLimoProc() {
   const g = new THREE.Group();
   const BLK = M(0x14121a, { roughness: 0.35 });
   const body = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 4.4), BLK);
@@ -4633,14 +4790,19 @@ function greaseOverPhoto(img, seed) {
 // porthole to the left that the camera turns to for the planet-below shot
 function buildCabin() {
   const g = new THREE.Group();
-  // three traced drawings of the same cabin, each with a slightly different line
-  // wobble — swapped per frame they read as a hand-drawn boil
-  const boil = [1, 2, 3].map((s) => { const t = new THREE.CanvasTexture(drawCabinPainting(s)); t.colorSpace = THREE.SRGBColorSpace; return t; });
+  // the cabin interior is a supplied grease-pencil painting (models/cabin_refined.png).
+  // It already carries the drawn/boil look baked in, so we just hang it on the
+  // billboard — no per-frame canvas swap. (drawCabinPainting stays as the fallback.)
   const board = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 4.5),
-    new THREE.MeshBasicMaterial({ map: boil[0] }));
+    new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  new THREE.TextureLoader().load('./models/cabin_refined.png', (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    board.material.map = tex;
+    board.material.needsUpdate = true;
+  });
   board.position.set(0, 1.1, 3.0);
   board.rotation.y = Math.PI;                 // faces the camera at -z
-  board.userData.boil = boil;
+  board.userData.boil = null;                 // single image → no boil swap
   g.add(board);
   g.userData.board = board;
   // the porthole: cabin wall (annulus) filling the frame right to the screen
@@ -4678,6 +4840,12 @@ function startArrival() {
     gasDriver.visible = false;
     scene.add(gasDriver);
   }
+  if (!arrivalPax) {
+    arrivalPax = makePerson(0x8f5ad8, 0xd23b6b);  // the arriving critic: violet coat, pink beret
+    arrivalPax.scale.setScalar(0.82);
+    arrivalPax.visible = false;
+    scene.add(arrivalPax);
+  }
   const airAt = frameAt(AIRPORT);
   arrDir.runwayA = airAt(0, -16).normalize();
   arrDir.runwayB = airAt(0, 12).normalize();
@@ -4686,11 +4854,14 @@ function startArrival() {
   if (arrCaption) { arrCaption.style.opacity = 1; arrCaption.textContent = '✈ First class — welcome aboard'; }
 }
 
+const _paxA = new THREE.Vector3(), _paxB = new THREE.Vector3(), _paxP = new THREE.Vector3();
 function updateArrival(dt) {
   arrivalT += dt / 36;   // an unhurried scene, not a chase
   const T = arrivalT;
   const airAt = frameAt(AIRPORT);
   const limoWait = airAt(2.2, 12).normalize();
+  const rig = airportPlane && airportPlane.userData.rig;
+  const ease = (x) => x * x * (3 - 2 * x);
 
   // keep the jet parked at the gate whenever we're not actively flying it
   const parkJet = () => {
@@ -4699,6 +4870,9 @@ function updateArrival(dt) {
     alignToSurface(airportPlane, d, yawToFace(d, airAt(0, 24)));
     airportPlane.visible = true;
   };
+  // gear/stairs/passenger default to the resting state; each phase overrides
+  if (rig) { rig.setGearDeploy(1); rig.setStairDeploy(0); }
+  if (arrivalPax && T >= 0.54) arrivalPax.visible = false;
 
   if (T < 0.16) {                                 // 0. first class, then the view
     const up = AIRPORT.clone();
@@ -4706,6 +4880,7 @@ function updateArrival(dt) {
     cabin.position.copy(up.clone().multiplyScalar(R + 34));
     alignToSurface(cabin, up);
     airportPlane.visible = false;
+    if (rig) rig.setGearDeploy(0);                 // gear stowed at cruise
     // turbulence: the whole frame trembles like cruise altitude
     const tt = performance.now() / 1000;
     const brd = cabin.userData.board;
@@ -4753,6 +4928,7 @@ function updateArrival(dt) {
     const k = (T - 0.16) / 0.28;
     const along = -16 + k * 28;
     const alt = Math.max(0, (0.5 - k) * 24);
+    if (rig) rig.setGearDeploy(THREE.MathUtils.clamp((k - 0.05) / 0.35, 0, 1));  // gear down before touchdown
     const d = airAt(0, along).normalize();
     airportPlane.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.02 + alt));
     alignToSurface(airportPlane, d, yawToFace(d, airAt(0, along + 6)));
@@ -4768,6 +4944,24 @@ function updateArrival(dt) {
     limo.visible = true;
     limo.position.copy(settleOn(limoWait, 0.6, 0.02));
     alignToSurface(limo, limoWait, yawToFace(limoWait, arrDir.cityEnd));
+    // the airstair folds down, then the critic walks down it and into the limo
+    const kk = THREE.MathUtils.clamp((T - 0.44) / 0.10, 0, 1);
+    if (rig) {
+      rig.setGearDeploy(1);
+      rig.setStairDeploy(ease(THREE.MathUtils.clamp(kk / 0.35, 0, 1)));
+      if (arrivalPax) {
+        rig.footWorld(_paxA);
+        _paxB.copy(limo.position).addScaledVector(
+          _paxP.subVectors(airportPlane.position, limo.position).normalize(), 1.0);
+        const a = THREE.MathUtils.clamp((kk - 0.30) / 0.62, 0, 1);
+        _paxP.copy(_paxA).lerp(_paxB, ease(a));
+        const nrm = _paxP.clone().normalize();
+        arrivalPax.position.copy(nrm.clone().multiplyScalar(Math.max(radiusAt(nrm), SEA_R) + 0.02));
+        alignToSurface(arrivalPax, nrm, yawToFace(nrm, _paxB.clone().normalize()));
+        walkPerson(arrivalPax, performance.now() / 1000 * 1.3, a < 0.99 ? 0.95 : 0);
+        arrivalPax.visible = kk > 0.28 && a < 0.985;
+      }
+    }
     const d = airAt(0, 12).normalize();
     _aTmp.copy(airportPlane.position).addScaledVector(d, 3.5)
       .addScaledVector(_aTmp2.copy(d).cross(UP_Y).normalize(), 8);
@@ -5122,13 +5316,18 @@ function addBoilTo(o) {
   if (o.userData._gpDone) return;
   if (gpSkip.has(o) || gpBoilMats.includes(o.material)) return;
   if (!o.geometry?.attributes?.normal) return;
-  if (o.geometry.attributes.position.count > 5000) return;   // keep draws sane
+  // hero objects (the parked jet) opt IN to a contour no matter their size or
+  // shape — it's a single instance, so the extra draws are cheap, and without
+  // this its big fuselage mesh (>5k verts) and slab-thin wings get skipped and
+  // it ends up the ONE thing in the scene with no ink around it.
+  const force = !!o.userData._gpForce;
+  if (!force && o.geometry.attributes.position.count > 5000) return;   // keep draws sane
   if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
   const bb = o.geometry.boundingBox.getSize(new THREE.Vector3());
   const maxD = Math.max(bb.x, bb.y, bb.z), minD = Math.min(bb.x, bb.y, bb.z);
   // ground-like slabs (runway, decks, fields) get NO contour — a wobbling
   // outline around a flat sheet reads as scribble, not line art
-  if (minD < 0.13 && maxD > 3.0) return;
+  if (!force && minD < 0.13 && maxD > 3.0) return;
   o.userData._gpDone = true;
   const mat = maxD > 2.2 ? gpBoilHeavy : maxD > 0.6 ? gpBoilMid : gpBoilLight;
   const line = new THREE.Mesh(o.geometry, mat);
@@ -5136,7 +5335,7 @@ function addBoilTo(o) {
   o.add(line);                       // child: follows every transform for free
   gpOutlines.push(line);
   // buildings and props get the loose second stroke; small items stay clean
-  if (maxD > 0.6 && o.geometry.attributes.position.count < 2200) {
+  if (force || (maxD > 0.6 && o.geometry.attributes.position.count < 2200)) {
     const loose = new THREE.Mesh(o.geometry, gpBoilLoose);
     loose.visible = gpOn;
     o.add(loose);
@@ -5487,6 +5686,9 @@ function updateWorldAmbient(dt, t) {
     if (v.kind === 'ped') {                       // walk cycle + a little bounce
       v.obj.position.addScaledVector(d, Math.abs(Math.sin(t * 6 + v.phase)) * 0.05);
       walkPerson(v.obj, t + v.phase, 0.5 * block);
+    } else if (v.obj.userData.wheels) {           // roll the tyres for a sense of motion
+      const spin = v.speed * block * dt * 42;
+      for (const w of v.obj.userData.wheels) w.rotation.x += spin;
     }
   }
 

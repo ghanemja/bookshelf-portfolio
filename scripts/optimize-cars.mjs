@@ -1,33 +1,37 @@
-// Decimate + strip textures + Draco-compress the new car / jet GLBs so they
-// are light enough to ship to a browser. Original colours are discarded on
-// purpose — the scene re-materials everything with flat cartoon colours.
+// Shrink the huge photoreal car / jet GLBs enough to ship to a browser WHILE
+// keeping their original textures and a smooth, curved silhouette. Levers:
+//   • geometry: weld + meshopt simplify to a per-model target (~40-60k tris) —
+//     light enough to stay smooth, not so heavy it lags. Smooth normals kept.
+//   • textures: resized to 512² and re-encoded to WebP (the real size win).
+//   • Draco geometry compression on top.
+// Sources live in models/_raw/ (gitignored — kept local only for re-optimizing).
 import { NodeIO } from '@gltf-transform/core';
 import { KHRDracoMeshCompression } from '@gltf-transform/extensions';
-import { weld, simplify, dedup, prune, flatten, join } from '@gltf-transform/functions';
+import { weld, simplify, dedup, prune, flatten, join, textureCompress } from '@gltf-transform/functions';
 import { MeshoptSimplifier } from 'meshoptimizer';
 import draco3d from 'draco3dgltf';
-import { readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
-import { basename } from 'node:path';
+import sharp from 'sharp';
+import { mkdirSync, statSync } from 'node:fs';
 
 const OUT = 'models/opt';
 mkdirSync(OUT, { recursive: true });
 
-// Sources live in models/_raw/ (gitignored — kept local for re-optimizing only).
-// [source, outName, simplifyRatio]  — cars decimate hard (seen tiny), jet less.
-// ev9 is intentionally left out of the scene fleet: 43 material slots give the
-// simplifier a hard floor (~280k tris / 2MB), too heavy for background traffic.
 const RAW = 'models/_raw';
+// [source, outName, simplifyRatio] — ratio picked per model to land near ~45k
+// tris. ev9 stays OUT of the scene fleet (43 material slots floor the simplifier).
 const JOBS = [
-  [`${RAW}/1965_ford_mustang_coupe_289.glb`,                'mustang',   0.10],
-  [`${RAW}/2017_kia_picanto_gt-line.glb`,                   'picanto',   0.10],
-  [`${RAW}/2024_kia_ev9_gt-line.glb`,                       'ev9',       0.035],
-  [`${RAW}/2020_seat_tarraco_e-hybrid.glb`,                 'tarraco',   0.05],
+  [`${RAW}/1965_ford_mustang_coupe_289.glb`,                'mustang',   0.50],
+  [`${RAW}/2017_kia_picanto_gt-line.glb`,                   'picanto',   0.16],
+  [`${RAW}/2020_seat_tarraco_e-hybrid.glb`,                 'tarraco',   0.08],
   [`${RAW}/simca_1000_1966.glb`,                            'simca',     0.06],
-  [`${RAW}/ford_escort_xr3_i_cabriolet_convertible.glb`,    'escort',    0.08],
-  [`${RAW}/orion_skylark_gt.glb`,                           'skylark',   0.10],
-  [`${RAW}/2023_faraday_future_ff_91_2.0_futurist_alliance.glb`, 'faraday', 0.12],
-  [`${RAW}/2025-pagani-huayra-codalunga-speedster/source/2025 Pagani Huayra Codalunga Speedster.glb`, 'pagani', 0.05],
-  [`${RAW}/private-jet/source/самолет.glb`,                 'jet',       0.45],
+  [`${RAW}/ford_escort_xr3_i_cabriolet_convertible.glb`,    'escort',    0.07],
+  [`${RAW}/orion_skylark_gt.glb`,                           'skylark',   0.09],
+  [`${RAW}/2023_faraday_future_ff_91_2.0_futurist_alliance.glb`, 'faraday', 0.90],
+  [`${RAW}/2025-pagani-huayra-codalunga-speedster/source/2025 Pagani Huayra Codalunga Speedster.glb`, 'pagani', 0.15],
+  [`${RAW}/private-jet/source/самолет.glb`,                 'jet',       0.60],
+  [`${RAW}/limo.glb`,                                       'limo',      0.90],
+  [`${RAW}/landing_gear.glb`,                               'gear',      0.30],
+  [`${RAW}/yellow_bicycle.glb`,                             'bike',      0.60],
 ];
 
 const io = new NodeIO()
@@ -55,35 +59,18 @@ for (const [src, name, ratio] of JOBS) {
 
   const before = triCount(doc);
 
-  // strip every texture: keep material slots + their base colour factor, drop maps
-  for (const mat of doc.getRoot().listMaterials()) {
-    mat.setBaseColorTexture(null);
-    mat.setMetallicRoughnessTexture(null);
-    mat.setNormalTexture(null);
-    mat.setOcclusionTexture(null);
-    mat.setEmissiveTexture(null);
-    mat.setMetallicFactor(0);
-    mat.setRoughnessFactor(0.85);
-  }
-
   await doc.transform(
     dedup(),
     flatten(),
     join(),
     weld(),
-    simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.01 }),
-    prune({ keepAttributes: false, keepLeaves: false }),
+    // keep UVs, normals and tangents — normal maps need them, and smooth
+    // normals are what make the low-poly body still read as curved
+    simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.004 }),
+    // the actual weight: every texture down to 512² WebP
+    textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [512, 512], quality: 80 }),
+    prune(),
   );
-
-  // drop leftover texture data + tangents/uvs we no longer need
-  for (const tex of doc.getRoot().listTextures()) tex.dispose();
-  for (const m of doc.getRoot().listMeshes())
-    for (const p of m.listPrimitives()) {
-      p.setAttribute('TEXCOORD_0', null);
-      p.setAttribute('TEXCOORD_1', null);
-      p.setAttribute('TANGENT', null);
-    }
-  await doc.transform(prune());
 
   doc.createExtension(KHRDracoMeshCompression).setRequired(true)
     .setEncoderOptions({ method: KHRDracoMeshCompression.EncoderMethod.EDGEBREAKER });
@@ -92,6 +79,6 @@ for (const [src, name, ratio] of JOBS) {
   await io.write(outPath, doc);
   const kb = (statSync(outPath).size / 1024).toFixed(0);
   const srcMB = (statSync(src).size / 1048576).toFixed(1);
-  console.log(`${name.padEnd(9)} ${srcMB.padStart(5)}MB -> ${kb.padStart(5)}KB   tris ${before} -> ${triCount(doc)}   mats ${doc.getRoot().listMaterials().length}`);
+  console.log(`${name.padEnd(9)} ${srcMB.padStart(5)}MB -> ${kb.padStart(5)}KB   tris ${before} -> ${triCount(doc)}   tex ${doc.getRoot().listTextures().length}`);
 }
 console.log('done');
