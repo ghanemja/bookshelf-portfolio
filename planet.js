@@ -3268,7 +3268,19 @@ new GLTFLoader().load('./models/critic.glb', (glb) => {
   }
   criticReady = true;
   playRide(transport, null);
-}, undefined, (e) => console.warn('critic GLB failed, keeping procedural rig:', e?.message || e));
+}, undefined, (e) => {
+  // NO silent fallback: the main character must load. Fail loud and visible
+  // so a broken/missing critic.glb can never ship looking "fine but empty".
+  const msg = 'Main character (critic.glb) failed to load: ' + (e?.message || e);
+  console.error(msg);
+  const b = document.createElement('div');
+  b.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;'
+    + 'justify-content:center;text-align:center;padding:8vw;background:#160f1e;color:#ff8ab0;'
+    + 'font:600 clamp(15px,2.4vw,20px)/1.5 system-ui,sans-serif';
+  b.textContent = '⚠ ' + msg;
+  document.body.appendChild(b);
+  throw new Error(msg);
+});
 for (const k of Object.keys(bodies)) { bodies[k].visible = (k === 'jeep'); courier.add(bodies[k]); }
 let courierBody = bodies.jeep;
 scene.add(courier);
