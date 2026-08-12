@@ -2792,7 +2792,7 @@ let gearProto = null;      // one normalized landing-gear leg, cloned onto the j
       scene.remove(v.obj);
       scene.add(inst);
       v.obj = inst;
-      gpRegister(inst);            // draw with the crowd in Sketchbook / Wasteland
+      gpRegister(inst, false);     // flat fills + inked edges, but no scratchy boil hull
     }
   });
 
@@ -4608,7 +4608,7 @@ function buildLimo() {
       if (o.isMesh && /wheel|tyre|tire|rim/i.test(o.name)) wheels.push(o);
     });
     g.userData.wheels = wheels;
-    gpRegister(g);                    // outlines + boil in the drawn modes
+    gpRegister(g, false);             // flat fills + inked edges; skip scratchy boil hull
     return g;
   }
   return buildLimoProc();
@@ -4901,22 +4901,22 @@ function updateArrival(dt) {
       if (arrCaption) arrCaption.textContent = '✈ First class — welcome aboard';
       win.visible = false;
       camera.lookAt(cabin.localToWorld(new THREE.Vector3(jx * 2, 1.1, 3.0)));
-    } else {                                       // the porthole, and the pause
+    } else {                                       // TURN YOUR HEAD to the window
       if (arrCaption) arrCaption.textContent = '🌍 There it is — the tiny planet';
       const k = Math.min(1, (T - 0.065) / 0.035);
       const e = k * k * (3 - 2 * k);
-      // gaze swings from the cabin down through the floor of sky to the world
-      // out the LEFT window: sideways and a little down — the planet's curve
-      // fills the glass like a view from cruise altitude, not a hole in the floor
-      const sideDir = new THREE.Vector3(-1, 0, 0).applyQuaternion(cabin.quaternion).normalize();
-      const lookTarget = _aTmp2.copy(cabin.localToWorld(new THREE.Vector3(0, 1.1, 3.0)))
-        .lerp(cabin.position.clone().addScaledVector(sideDir, 13).addScaledVector(up, -32), e);
+      // A head-turn, not a flashcard swipe: the camera stays put and its GAZE
+      // yaws left about the cabin's up axis (level), with just a little downward
+      // tilt so the planet's curve rises into the bottom of the glass.
+      const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(cabin.quaternion).normalize();
+      const lookDir = fwd.applyAxisAngle(up, -e * 1.45)   // yaw ~83° to the LEFT window
+        .addScaledVector(up, -0.28 * e).normalize();       // a touch down, kept level otherwise
+      const lookTarget = _aTmp2.copy(camera.position).addScaledVector(lookDir, 6);
       camera.lookAt(lookTarget);
-      // the porthole hangs on that exact sight line, so the planet — clouds,
-      // coasts, the whole map from above — is seen through its glass
+      // the porthole hangs on that exact sight line, so the planet is seen
+      // through its glass
       win.visible = true;
-      _aTmp2.subVectors(lookTarget, camera.position).normalize();
-      win.position.copy(cabin.worldToLocal(camera.position.clone().addScaledVector(_aTmp2, 3.2)));
+      win.position.copy(cabin.worldToLocal(camera.position.clone().addScaledVector(lookDir, 3.2)));
       win.lookAt(camera.position);
       // ...and during the hold, drift very slowly so it feels alive
       if (k >= 1) camera.position.addScaledVector(camera.up, Math.sin(tt * 0.7) * 0.02);
@@ -4994,9 +4994,10 @@ function updateArrival(dt) {
     const gasSide = GAS_DIR.clone().sub(_apDir.clone().multiplyScalar(_apDir.dot(GAS_DIR))).normalize();
     // driving: stay on the painted road. stopped: pull OFF onto the forecourt so
     // the limo sits alongside the pumps, not idling in the middle of the road.
-    // 1.55 arc-units ≈ the pump line (station centre is ~2.3 off the road).
+    // road half-width is ~1.3, station centre 2.3 off, pumps ~1.9 off — so pull
+    // in ~2.0 to clear the kerb and sit under the canopy at the pump line.
     const parkDir = driving ? _apDir.clone()
-      : _apDir.clone().addScaledVector(gasSide, 1.55 / R).normalize();
+      : _apDir.clone().addScaledVector(gasSide, 2.0 / R).normalize();
     limo.position.copy(dbl(parkDir));
     alignToSurface(limo, parkDir, yawToFace(parkDir, parkDir.clone().multiplyScalar(R).addScaledVector(_apTan, 2).normalize()));
     if (driving) for (const w of limo.userData.wheels || []) w.rotation.x += dt * 5;
@@ -5497,8 +5498,12 @@ function setGreasePencil(on) {
 // drawn look: give its meshes boil contours, and if we're already in a drawn
 // mode, swap them to flat fills right now (so a car isn't left shaded-3D in a
 // scene full of ink). No-op until the player has visited a drawn mode once.
-function gpRegister(root) {
-  if (gpBuilt) root.traverse(addBoilTo);
+function gpRegister(root, boil = true) {
+  // boil = add the inverted-hull contour(s). Skip it for photoscan cars/limo:
+  // their decimated, multi-panel geometry turns the hull into dark "scratches"
+  // all over the body. They still get the flat grease-pencil fills + the
+  // Sketchbook screen-space ink, which read clean.
+  if (gpBuilt && boil) root.traverse(addBoilTo);
   if (gpOn) root.traverse(o => {
     if (!o.isMesh || gpBoilMats.includes(o.material) || o.userData._origMat) return;
     o.userData._origMat = o.material;
@@ -5686,10 +5691,10 @@ function updateWorldAmbient(dt, t) {
     if (v.kind === 'ped') {                       // walk cycle + a little bounce
       v.obj.position.addScaledVector(d, Math.abs(Math.sin(t * 6 + v.phase)) * 0.05);
       walkPerson(v.obj, t + v.phase, 0.5 * block);
-    } else if (v.obj.userData.wheels) {           // roll the tyres for a sense of motion
-      const spin = v.speed * block * dt * 42;
-      for (const w of v.obj.userData.wheels) w.rotation.x += spin;
     }
+    // NOTE: no tyre-spin — the wheel meshes share the car's origin, so rotating
+    // them flings the wheel around that origin (it flies off). The drawn-mode
+    // look already sells motion; a proper spin needs re-centred wheel pivots.
   }
 
   for (let i = 0; i < bobbers.length; i++) {          // boats rock at their moorings
