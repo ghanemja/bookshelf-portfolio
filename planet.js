@@ -2703,6 +2703,23 @@ let gearProto = null;      // one normalized landing-gear leg, cloned onto the j
   const draco = new DRACOLoader().setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
   const gltfV = new GLTFLoader().setDRACOLoader(draco);
 
+  // NO fallbacks for real-model assets: a missing/broken GLB is a hard error,
+  // same treatment as critic.glb — full-screen banner + throw, so a bad build
+  // can never quietly ship boxy stand-ins.
+  function assetFail(label) {
+    return (e) => {
+      const msg = `Asset ${label} failed to load: ` + (e?.message || e);
+      console.error(msg);
+      const b = document.createElement('div');
+      b.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;'
+        + 'justify-content:center;text-align:center;padding:8vw;background:#160f1e;color:#ff8ab0;'
+        + 'font:600 clamp(15px,2.4vw,20px)/1.5 system-ui,sans-serif';
+      b.textContent = '⚠ ' + msg;
+      document.body.appendChild(b);
+      throw new Error(msg);
+    };
+  }
+
   // len = how long the car should read in world units (a lane is ~2.6 wide);
   // flip if the model happens to be built nose-toward -Z.
   const FLEET = [
@@ -2777,7 +2794,7 @@ let gearProto = null;      // one normalized landing-gear leg, cloned onto the j
       const tpl = toTemplate(g.scene, f.len, -0.09, true, f.flip ? Math.PI : 0);
       dressCar(tpl);
       return tpl;
-    }).catch(err => { console.warn('car load failed', f.file, err); return null; })
+    }).catch(assetFail(`car ${f.file}.glb`))
   )).then(tpls => {
     const ready = tpls.filter(Boolean);
     if (!ready.length) return;
@@ -2831,7 +2848,7 @@ let gearProto = null;      // one normalized landing-gear leg, cloned onto the j
     }
     scene.add(jw);
     gpRegister(jw);                // participate in the drawn modes too
-  }).catch(err => console.warn('jet load failed', err));
+  }).catch(assetFail('jet.glb'));
 
   // the limo the arrival cinematic drives — real model, kept textured + smooth.
   // In three.js space it's already Y-up with the body length on +Z (node
@@ -2840,7 +2857,10 @@ let gearProto = null;      // one normalized landing-gear leg, cloned onto the j
     const tpl = toTemplate(g.scene, 4.6, -0.02, false, 0);
     dressCar(tpl);
     limoTemplate = tpl;
-  }).catch(err => console.warn('limo load failed', err));
+    // any limo group created before the GLB landed fills itself now
+    for (const holder of limoWaiters) if (!holder.children.length) holder.add(dressLimoClone());
+    limoWaiters.length = 0;
+  }).catch(assetFail('limo.glb'));
 
   // one landing-gear leg, normalized to unit height with the wheels at the
   // bottom (y −1) and the mount at the top (y 0), so buildJetRig can clone it
@@ -2860,7 +2880,7 @@ let gearProto = null;      // one normalized landing-gear leg, cloned onto the j
     dressCar(grp);
     grp.traverse(o => { if (o.isMesh) o.userData._gpForce = true; });
     gearProto = grp;
-  }).catch(err => console.warn('gear load failed', err));
+  }).catch(assetFail('gear.glb'));
 }
 
 // Landing gear + airstair that DEPLOY, built as children of the parked jet so
@@ -4599,49 +4619,27 @@ function sampleArrPath(u01, outDir, outTan) {
 }
 const arrCaption = document.getElementById('arr-caption');
 
-// the limo: prefer the real textured model, fall back to the box build below
-function buildLimo() {
-  if (limoTemplate) {
-    const g = limoTemplate.clone(true);
-    const wheels = [];
-    g.traverse(o => {
-      if (o.isMesh && /wheel|tyre|tire|rim/i.test(o.name)) wheels.push(o);
-    });
-    g.userData.wheels = wheels;
-    gpRegister(g, false);             // flat fills + inked edges; skip scratchy boil hull
-    return g;
-  }
-  return buildLimoProc();
-}
-// a stretch limousine — long black body, tinted glass, chrome trim (fallback)
-function buildLimoProc() {
-  const g = new THREE.Group();
-  const BLK = M(0x14121a, { roughness: 0.35 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 4.4), BLK);
-  body.position.y = 0.5; g.add(body);
-  const cab = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.4, 2.6),
-    new THREE.MeshStandardMaterial({ color: 0x0a0a10, roughness: 0.1 }));
-  cab.position.set(0, 0.9, -0.1); g.add(cab);
-  const hood = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.24, 0.9), BLK);
-  hood.position.set(0, 0.66, 2.1); g.add(hood);
-  const grille = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.18, 0.06), M(0xd8d8e0, { metalness: 0.6, roughness: 0.2 }));
-  grille.position.set(0, 0.5, 2.55); g.add(grille);
-  for (const s of [-1, 1]) {
-    const hl = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6),
-      new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0xffedb0, emissiveIntensity: 0.8 }));
-    hl.position.set(s * 0.32, 0.55, 2.56); g.add(hl);
-  }
+// the limo: ALWAYS the real textured model — the old procedural box limo is
+// gone. If the GLB hasn't streamed in yet the group starts empty (invisible
+// for a beat) and fills itself the moment the template lands, so an early
+// Enter can never resurrect a boxy stand-in.
+function dressLimoClone() {
+  const g = limoTemplate.clone(true);
   const wheels = [];
-  for (const wz of [1.7, 0.5, -0.7, -1.9]) {
-    for (const wx of [-0.52, 0.52]) {
-      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.16, 10), M(0x2d2138));
-      w.rotation.z = Math.PI / 2; w.position.set(wx, 0.24, wz); g.add(w); wheels.push(w);
-    }
-  }
+  g.traverse(o => {
+    if (o.isMesh && /wheel|tyre|tire|rim/i.test(o.name)) wheels.push(o);
+  });
   g.userData.wheels = wheels;
-  g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
+  gpRegister(g, false);             // flat fills + inked edges; skip scratchy boil hull
   return g;
 }
+function buildLimo() {
+  const holder = new THREE.Group();
+  if (limoTemplate) { holder.add(dressLimoClone()); return holder; }
+  limoWaiters.push(holder);         // fill in as soon as the GLB lands
+  return holder;
+}
+const limoWaiters = [];
 
 let cabin = null;
 // the cabin is a PAINTING: a hand-drawn NetJets-style interior on one

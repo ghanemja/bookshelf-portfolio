@@ -8,5 +8,8 @@ cd "$(dirname "$0")"
 echo "→ validating main character…"
 node scripts/validate-critic.mjs
 
+echo "→ validating real-model assets…"
+node scripts/validate-assets.mjs
+
 echo "→ deploying to shelfie-jg…"
 netlify deploy --prod --dir . --site c1677cd8-337d-4500-879c-3aed0433fe67
