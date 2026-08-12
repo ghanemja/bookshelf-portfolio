@@ -2688,51 +2688,31 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   districtSign(AIRPORT, '✈ Airport', 0, -19);
 }
 
-// ─── real 3-D vehicles: a diverse cartoon car fleet for the traffic, plus the
-// parked jet. The source GLBs are huge photoreal scans; scripts/optimize-cars.mjs
-// decimates them hard and strips every texture, and here we re-material each part
-// flat so it matches the low-poly toon world and stays cheap on a phone. Cars can
-// only ever ride the road because they REUSE the existing traffic lane system —
-// we just swap the boxy placeholder mesh for a real model once it streams in, so
-// a slow/failed load never leaves a hole (the box stays).
+// ─── real 3-D vehicles: a diverse car fleet for the traffic, plus the parked
+// jet. The source GLBs are huge photoreal scans; scripts/optimize-cars.mjs
+// decimates them to ~45k tris and shrinks their textures to 512² WebP but KEEPS
+// their real livery + smooth (curved) normals, so here we just wear the model's
+// own materials and let the scene light them. Cars can only ever ride the road
+// because they REUSE the existing traffic lane system — we swap the boxy
+// placeholder for a real model once it streams in, so a slow/failed load never
+// leaves a hole (the box stays), and register each one with the grease-pencil /
+// boil-outline system so they draw correctly in Sketchbook + Wasteland modes.
 {
   const draco = new DRACOLoader().setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
   const gltfV = new GLTFLoader().setDRACOLoader(draco);
 
-  // one flat cartoon body colour per model → instant fleet diversity. len = how
-  // long the car should read in world units (a lane is ~2.6 wide); flip if the
-  // model happens to be built nose-toward -Z.
+  // len = how long the car should read in world units (a lane is ~2.6 wide);
+  // flip if the model happens to be built nose-toward -Z.
   const FLEET = [
-    { file: 'mustang', body: 0xd6402f, len: 2.15, flip: false }, // classic muscle, red
-    { file: 'picanto', body: 0x37b6d8, len: 1.85, flip: false }, // little hatch, cyan
-    { file: 'tarraco', body: 0x2f9e5b, len: 2.35, flip: false }, // SUV, green
-    { file: 'simca',   body: 0xf0c33a, len: 1.90, flip: false }, // retro, yellow
-    { file: 'escort',  body: 0xe87ab0, len: 2.05, flip: false }, // convertible, pink
-    { file: 'skylark', body: 0x8f7ae8, len: 2.20, flip: false }, // retro, violet
-    { file: 'faraday', body: 0xeceae2, len: 2.30, flip: false }, // futurist, off-white
-    { file: 'pagani',  body: 0xf25c1e, len: 2.10, flip: false }, // supercar, orange
+    { file: 'mustang', len: 2.15, flip: false }, // '65 classic muscle
+    { file: 'picanto', len: 1.85, flip: false }, // little city hatch
+    { file: 'tarraco', len: 2.35, flip: false }, // SUV
+    { file: 'simca',   len: 1.90, flip: false }, // '66 retro
+    { file: 'escort',  len: 2.05, flip: false }, // convertible
+    { file: 'skylark', len: 2.20, flip: false }, // retro coupe
+    { file: 'faraday', len: 2.30, flip: false }, // futurist
+    { file: 'pagani',  len: 2.10, flip: false }, // supercar
   ];
-
-  // shared flat toon materials for the non-body parts, classified by the part's
-  // surviving material/mesh name (see partMat)
-  const V_GLASS = new THREE.MeshStandardMaterial({ color: 0x243544, flatShading: true, roughness: 0.15, metalness: 0, transparent: true, opacity: 0.5 });
-  const V_TIRE  = M(0x1c1a22, { roughness: 0.95 });
-  const V_RIM   = M(0xb9bcc4, { roughness: 0.4 });
-  const V_CHROME = M(0xcfd4dc, { roughness: 0.35 });
-  const V_HEAD  = new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xffcf5a, emissiveIntensity: 0.5, flatShading: true });
-  const V_TAIL  = new THREE.MeshStandardMaterial({ color: 0xff5a4d, emissive: 0x7a1710, emissiveIntensity: 0.5, flatShading: true });
-  const V_INT   = M(0x2b2732);
-  function partMat(name, bodyMat) {
-    const n = (name || '').toLowerCase();
-    if (/glass|window|windshield|windscreen|screen/.test(n)) return V_GLASS;
-    if (/tire|tyre|rubber/.test(n)) return V_TIRE;
-    if (/rim|hub|spoke|caliper|calliper|alloy|wheel/.test(n)) return V_RIM;
-    if (/tail|brake|rear.?light|stop/.test(n)) return V_TAIL;
-    if (/light|lamp|head|indicator|signal|led/.test(n)) return V_HEAD;
-    if (/chrome|metal|trim|mirror|grille|grill|bumper|exhaust|handle/.test(n)) return V_CHROME;
-    if (/interior|seat|dash|cabin|steer|floor|carpet/.test(n)) return V_INT;
-    return bodyMat;
-  }
 
   const _vb = new THREE.Box3(), _vs = new THREE.Vector3(), _vc = new THREE.Vector3();
   // Return a wrapper Group whose child is oriented forward = +Z, up = +Y, sitting
@@ -2758,12 +2738,26 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
     return wrap;
   }
 
-  function styleCar(wrap, bodyMat) {
+  // wear the model's OWN materials — keep the real textured livery, just make
+  // sure it shades smooth (curved, not faceted) and casts a shadow. Photoscans
+  // sometimes bake metalness to the max, which reads as near-black under our
+  // few lights, so clamp it back to something the toon lighting can catch.
+  function dressCar(wrap) {
     wrap.traverse(o => {
       if (!o.isMesh) return;
       o.castShadow = !IS_TOUCH; o.receiveShadow = false;
       o.frustumCulled = true;
-      o.material = partMat((o.material && o.material.name) || o.name, bodyMat);
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m) continue;
+        m.flatShading = false;                 // smooth normals → curved body
+        if (m.isMeshStandardMaterial) {
+          if (m.metalness > 0.6) m.metalness = 0.6;
+          if (m.roughness < 0.25) m.roughness = 0.25;
+          m.envMapIntensity = 1.0;
+        }
+        m.needsUpdate = true;
+      }
     });
   }
 
@@ -2771,7 +2765,7 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   Promise.all(FLEET.map(f =>
     gltfV.loadAsync(`./models/opt/${f.file}.glb`).then(g => {
       const tpl = toTemplate(g.scene, f.len, -0.06, true, f.flip ? Math.PI : 0);
-      styleCar(tpl, M(f.body, { roughness: 0.6 }));
+      dressCar(tpl);
       return tpl;
     }).catch(err => { console.warn('car load failed', f.file, err); return null; })
   )).then(tpls => {
@@ -2786,6 +2780,7 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
       scene.remove(v.obj);
       scene.add(inst);
       v.obj = inst;
+      gpRegister(inst);            // draw with the crowd in Sketchbook / Wasteland
     }
   });
 
@@ -2805,9 +2800,11 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
       // to flat white (why it looked untextured). Just add a little sheen.
       const m = o.material;
       if (m && m.isMeshStandardMaterial) {
+        m.flatShading = false;
         m.metalness = Math.max(m.metalness ?? 0, 0.25);
         m.roughness = Math.min(m.roughness ?? 1, 0.5);
         m.envMapIntensity = 1.1;
+        m.needsUpdate = true;
       }
     });
     if (airportPlane) {
@@ -2818,6 +2815,7 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
       airportPlane = jw;
     }
     scene.add(jw);
+    gpRegister(jw);                // participate in the drawn modes too
   }).catch(err => console.warn('jet load failed', err));
 }
 
@@ -3364,47 +3362,60 @@ function playClip(inst, name, { loop = true, fade = 0.18, then = null } = {}) {
 function playRide(t, prev) {
   const inst = CRITIC.insts[t]; if (!inst) return;
   const ride = RIDE_CLIP[t] || 'Walk';
+  // walking is procedural now — stop the mixer so procWalk fully owns the pose
+  // (the baked Walk / dismount clips were broken).
+  if (t === 'walk') { inst.intro = false; stopClip(inst); return; }
   let intro = null;
   if (t === 'bike') intro = 'MountBike';
   else if (t === 'boat') intro = 'BoardBoat';
-  else if (t === 'walk' && prev === 'bike') intro = 'DismountBike';
-  else if (t === 'walk' && prev === 'boat') intro = 'LeaveBoat';
   if (intro) { inst.intro = true; playClip(inst, intro, { loop: false, then: () => { inst.intro = false; playClip(inst, ride); } }); }
   else { inst.intro = false; playClip(inst, ride); }
 }
 
-// ── walk styling: the baked Walk clip keeps her arms pinned and elbows locked
-// with a narrow stride. Layer procedural bone offsets ON TOP of the mixer each
-// frame — a resting elbow bend, arm clearance from the torso, and a wider
-// stance/step. `intensity` (0..1 with gait speed) fades it in with movement.
-// axes derived from the rig's bind pose: every bone's length runs down local
-// +Y, so a fore/aft bend is about local X (elbow, leg stride) and a sideways
-// splay is about local Z (arm/leg clearance). Signs: −elbow bends the forearm
-// FORWARD; −armOut/−legOut open the limbs OUTWARD off the body.
-const GAIT = {
-  elbowBend: -0.42, elbowSwing: 0.22,  // rad: resting forward flexion + per-step swing
-  armOut: -0.20, armSwing: 0.10,       // rad: hold the arms off the torso, breathing room
-  legOut: -0.06, legSwing: 0.12,       // rad: a touch wider stance + longer step
-  ax: { elbow: [1, 0, 0], armOut: [0, 0, 1], legOut: [0, 0, 1], legSwing: [1, 0, 0] },
-};
+// ── walking is FULLY procedural. The baked Walk clip was broken (legs swinging
+// over the head), so we ignore it and drive the joints ourselves from a simple,
+// constrained gait: hips/spine, both legs (hip + knee) and both arms (shoulder +
+// elbow). Every angle is a small bounded sine, so nothing can flip out of range.
+// Axes from the rig's bind pose: limbs run down local +Y, so a fore/aft swing is
+// about local X and a sideways splay is about local Z. `dt` advances the step
+// clock (faster with speed); `gaitK` (0..1 with speed) fades the whole cycle in,
+// so a standstill relaxes to the bind pose.
 const _gq = new THREE.Quaternion(), _gax = new THREE.Vector3();
-function boneRot(b, ax, a) { if (!b || !a) return; _gax.set(ax[0], ax[1], ax[2]); _gq.setFromAxisAngle(_gax, a); b.quaternion.multiply(_gq); }
-function applyWalkStyle(inst, intensity) {
-  let pb = inst._pb;
-  if (!pb) { pb = inst._pb = {}; inst.holder.traverse(o => { if (o.isBone) pb[o.name] = o; }); }
-  const clip = inst.cur && inst.cur.getClip();
-  const ph = clip ? (inst.cur.time / clip.duration) * Math.PI * 2 : 0;
-  const s = Math.sin(ph), sO = Math.sin(ph + Math.PI), k = THREE.MathUtils.clamp(intensity, 0, 1);
-  const g = GAIT;
-  boneRot(pb.lowerarmL, g.ax.elbow, g.elbowBend + g.elbowSwing * s * k);
-  boneRot(pb.lowerarmR, g.ax.elbow, g.elbowBend + g.elbowSwing * sO * k);
-  boneRot(pb.upperarmL, g.ax.armOut,  g.armOut + g.armSwing * s * k);
-  boneRot(pb.upperarmR, g.ax.armOut, -(g.armOut + g.armSwing * sO * k));
-  boneRot(pb.upperlegL, g.ax.legOut,  g.legOut);
-  boneRot(pb.upperlegR, g.ax.legOut, -g.legOut);
-  boneRot(pb.upperlegL, g.ax.legSwing, g.legSwing * s * k);
-  boneRot(pb.upperlegR, g.ax.legSwing, g.legSwing * sO * k);
+const WALK = {
+  cadence: 6.2,                 // step speed (rad/s), scaled by gait
+  legFwd: 0.5, knee: 0.85,      // hip swing + knee flex (knee only bends one way)
+  arm: 0.4, elbowBase: 0.35, elbowSwing: 0.15,
+  armOut: 0.18, hipRoll: 0.05, torsoTwist: 0.06,
+};
+const WALK_BONES = ['hips', 'spine1', 'upperlegL', 'lowerlegL', 'upperlegR', 'lowerlegR',
+  'upperarmL', 'lowerarmL', 'upperarmR', 'lowerarmR'];
+function procWalk(inst, dt, gaitK) {
+  const pb = inst.bones, bq = inst.bind; if (!pb || !bq) return;
+  const k = THREE.MathUtils.clamp(gaitK, 0, 1);
+  inst._wc = (inst._wc || 0) + dt * WALK.cadence * (0.4 + 0.9 * k);
+  const p = inst._wc, s = Math.sin(p), sO = Math.sin(p + Math.PI);
+  const liftL = Math.max(0, sO), liftR = Math.max(0, s);   // each knee flexes on its own swing
+  // reset the walk bones to bind, then layer the constrained rotations on top
+  for (const nm of WALK_BONES) { const b = pb[nm]; if (b) b.quaternion.copy(bq[nm]); }
+  const rot = (name, ax, a) => { const b = pb[name]; if (!b || !a) return; _gax.set(ax[0], ax[1], ax[2]); _gq.setFromAxisAngle(_gax, a); b.quaternion.multiply(_gq); };
+  const W = WALK, X = [1, 0, 0], Y = [0, 1, 0], Z = [0, 0, 1];
+  // legs: hips swing fore/aft (opposite phase), knees flex on the forward swing
+  rot('upperlegL', X, -W.legFwd * s * k);
+  rot('upperlegR', X, -W.legFwd * sO * k);
+  rot('lowerlegL', X,  W.knee * liftL * k);
+  rot('lowerlegR', X,  W.knee * liftR * k);
+  // arms: shoulders swing opposite the legs, with resting clearance + elbow bend
+  rot('upperarmL', X,  W.arm * sO * k);
+  rot('upperarmR', X,  W.arm * s * k);
+  rot('upperarmL', Z, -W.armOut);
+  rot('upperarmR', Z,  W.armOut);
+  rot('lowerarmL', X, -(W.elbowBase + W.elbowSwing * k));
+  rot('lowerarmR', X, -(W.elbowBase + W.elbowSwing * k));
+  // torso: a little hip roll + counter-twist so it reads alive, not stiff
+  rot('hips',   Z, W.hipRoll * s * k);
+  rot('spine1', Y, W.torsoTwist * s * k);
 }
+function stopClip(inst) { if (inst.cur) { inst.cur.fadeOut(0.15); inst.cur = null; } }
 
 // critic.glb authoring bug: some body parts are baked into the WRONG mesh and
 // so wear the wrong material — the hands live in the jeans mesh (jeans-blue)
@@ -3461,7 +3472,10 @@ new GLTFLoader().load('./models/critic.glb', (glb) => {
     holder.rotation.x = xf.lean || 0;              // riding posture
     holder.add(rig);
     const mixer = new THREE.AnimationMixer(rig);
-    const inst = { holder, mixer, cur: null, intro: false, actions: {} };
+    const inst = { holder, mixer, cur: null, intro: false, actions: {}, bones: {}, bind: {} };
+    // capture the bind-pose bone quaternions now (rig is untouched) so procWalk
+    // can reset to them each frame before layering the walk cycle
+    rig.traverse(o => { if (o.isBone) { inst.bones[o.name] = o; inst.bind[o.name] = o.quaternion.clone(); } });
     for (const n of Object.keys(CRITIC.clips)) inst.actions[n] = mixer.clipAction(CRITIC.clips[n]);
     CRITIC.insts[key] = inst;
     const body = bodies[key];
@@ -5100,33 +5114,38 @@ const gpBoilLoose = makeBoilMat(0.03, 11.7, '0.16, 0.14, 0.18', 0.5);   // the l
 const gpBoilMats = [gpBoilHeavy, gpBoilMid, gpBoilLight, gpBoilLoose];
 const gpOutlines = [];
 let gpBuilt = false, gpOn = false;
+const gpSkip = new Set([planet, ocean, sky, skyStars]);
+// give ONE mesh its boiling inverted-hull contour(s). Idempotent (via _gpDone)
+// so it's safe to call again for models that stream in after the first build.
+function addBoilTo(o) {
+  if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh) return;
+  if (o.userData._gpDone) return;
+  if (gpSkip.has(o) || gpBoilMats.includes(o.material)) return;
+  if (!o.geometry?.attributes?.normal) return;
+  if (o.geometry.attributes.position.count > 5000) return;   // keep draws sane
+  if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+  const bb = o.geometry.boundingBox.getSize(new THREE.Vector3());
+  const maxD = Math.max(bb.x, bb.y, bb.z), minD = Math.min(bb.x, bb.y, bb.z);
+  // ground-like slabs (runway, decks, fields) get NO contour — a wobbling
+  // outline around a flat sheet reads as scribble, not line art
+  if (minD < 0.13 && maxD > 3.0) return;
+  o.userData._gpDone = true;
+  const mat = maxD > 2.2 ? gpBoilHeavy : maxD > 0.6 ? gpBoilMid : gpBoilLight;
+  const line = new THREE.Mesh(o.geometry, mat);
+  line.visible = gpOn;               // show at once if we're already drawn-mode
+  o.add(line);                       // child: follows every transform for free
+  gpOutlines.push(line);
+  // buildings and props get the loose second stroke; small items stay clean
+  if (maxD > 0.6 && o.geometry.attributes.position.count < 2200) {
+    const loose = new THREE.Mesh(o.geometry, gpBoilLoose);
+    loose.visible = gpOn;
+    o.add(loose);
+    gpOutlines.push(loose);
+  }
+}
 function buildGreasePencil() {
   if (gpBuilt) return; gpBuilt = true;
-  const skip = new Set([planet, ocean, sky, skyStars]);
-  scene.traverse(o => {
-    if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh) return;
-    if (skip.has(o) || gpBoilMats.includes(o.material)) return;
-    if (!o.geometry?.attributes?.normal) return;
-    if (o.geometry.attributes.position.count > 5000) return;   // keep draws sane
-    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-    const bb = o.geometry.boundingBox.getSize(new THREE.Vector3());
-    const maxD = Math.max(bb.x, bb.y, bb.z), minD = Math.min(bb.x, bb.y, bb.z);
-    // ground-like slabs (runway, decks, fields) get NO contour — a wobbling
-    // outline around a flat sheet reads as scribble, not line art
-    if (minD < 0.13 && maxD > 3.0) return;
-    const mat = maxD > 2.2 ? gpBoilHeavy : maxD > 0.6 ? gpBoilMid : gpBoilLight;
-    const line = new THREE.Mesh(o.geometry, mat);
-    line.visible = false;
-    o.add(line);                       // child: follows every transform for free
-    gpOutlines.push(line);
-    // buildings and props get the loose second stroke; small items stay clean
-    if (maxD > 0.6 && o.geometry.attributes.position.count < 2200) {
-      const loose = new THREE.Mesh(o.geometry, gpBoilLoose);
-      loose.visible = false;
-      o.add(loose);
-      gpOutlines.push(loose);
-    }
-  });
+  scene.traverse(addBoilTo);
 }
 // ── the fills: cel-shaded, not flat. A two-step gradient map is the exact
 // ColorRamp-set-to-Constant trick from the tutorial — one lit tone, one
@@ -5274,6 +5293,18 @@ function setGreasePencil(on) {
   sky.visible = !on;
   skyStars.visible = !on;
   scene.background = on ? new THREE.Color(0xf2efe7) : null;   // paper backdrop
+}
+// Bring a model that streamed in AFTER the first grease-pencil build into the
+// drawn look: give its meshes boil contours, and if we're already in a drawn
+// mode, swap them to flat fills right now (so a car isn't left shaded-3D in a
+// scene full of ink). No-op until the player has visited a drawn mode once.
+function gpRegister(root) {
+  if (gpBuilt) root.traverse(addBoilTo);
+  if (gpOn) root.traverse(o => {
+    if (!o.isMesh || gpBoilMats.includes(o.material) || o.userData._origMat) return;
+    o.userData._origMat = o.material;
+    o.material = Array.isArray(o.material) ? o.material.map(flatOf) : flatOf(o.material);
+  });
 }
 
 
@@ -5656,15 +5687,18 @@ function animate() {
   // (jeep/boat/train) and mount/dismount intros play at their own steady rate
   const critic = CRITIC.insts[transport];
   if (critic) {
-    let ts = 1;
-    if (!critic.intro && (transport === 'walk' || transport === 'bike')) {
-      const gait = Math.min(1, speed / TR.max);
-      ts = gait > 0.04 ? 0.45 + gait * 1.6 : 0;      // freeze to a stand when stopped
-      if (transport === 'bike') ts *= 0.55;          // unhurried pedalling
+    if (transport === 'walk' && !critic.intro) {
+      // fully procedural, constrained walk (no baked clip)
+      procWalk(critic, dt, Math.min(1, speed / TR.max));
+    } else {
+      let ts = 1;
+      if (!critic.intro && transport === 'bike') {
+        const gait = Math.min(1, speed / TR.max);
+        ts = gait > 0.04 ? (0.45 + gait * 1.6) * 0.55 : 0;   // unhurried pedalling, freeze when stopped
+      }
+      if (critic.cur) critic.cur.timeScale = ts;
+      critic.mixer.update(dt);
     }
-    if (critic.cur) critic.cur.timeScale = ts;
-    critic.mixer.update(dt);
-    if (transport === 'walk' && !critic.intro) applyWalkStyle(critic, Math.min(1, speed / TR.max));
   } else {
     courierBody.traverse(o => { if (o.userData && o.userData.limbs) walkPerson(o, t * 1.3, Math.min(1, speed / TR.max) * 0.9); });
   }
