@@ -7,3 +7,7 @@ node_modules/
 
 # Local Netlify folder
 .netlify
+
+# Heavy source GLBs for the car/jet fleet — kept locally so scripts/optimize-cars.mjs
+# can re-run, but never shipped. The scene loads only the decimated models/opt/*.glb.
+models/_raw/
