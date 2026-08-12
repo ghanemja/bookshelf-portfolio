@@ -2792,16 +2792,23 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   // swap the boxy parked jet for the real model, keeping its exact parked pose so
   // the arrival cinematic (which drives airportPlane) keeps working unchanged
   gltfV.loadAsync('./models/opt/jet.glb').then(g => {
-    const jw = toTemplate(g.scene, 5.0, -0.02, true, 0);
+    // the jet's footprint is near-square (wingspan ≈ length), which fools
+    // toTemplate's autoFace heuristic — its fuselage runs down -X natively, so
+    // it was left pointing sideways. Force the nose onto +Z ourselves.
+    const jw = toTemplate(g.scene, 5.0, -0.02, false, Math.PI / 2);
     jw.traverse(o => {
       if (!o.isMesh) return;
       o.castShadow = !IS_TOUCH; o.receiveShadow = false;
-      const n = ((o.material && o.material.name) || o.name || '').toLowerCase();
-      o.material = /glass|window|cockpit|windshield/.test(n) ? V_GLASS
-        : /wheel|tire|tyre|gear/.test(n) ? V_TIRE
-        : /engine|turbine|dark|metal|tail.?fin/.test(n) ? M(0x2d3540)
-        : /nav|beacon|light/.test(n) ? V_HEAD
-        : M(0xf4f6f8, { roughness: 0.35 });
+      // KEEP the jet's own materials — real livery: white body, gold cheatline,
+      // tinted glass, dark engines. The old override matched English material
+      // names but this model's are named in Russian, so every part fell through
+      // to flat white (why it looked untextured). Just add a little sheen.
+      const m = o.material;
+      if (m && m.isMeshStandardMaterial) {
+        m.metalness = Math.max(m.metalness ?? 0, 0.25);
+        m.roughness = Math.min(m.roughness ?? 1, 0.5);
+        m.envMapIntensity = 1.1;
+      }
     });
     if (airportPlane) {
       jw.position.copy(airportPlane.position);
