@@ -3399,26 +3399,33 @@ function applyWalkStyle(inst, intensity) {
   boneRot(pb.upperlegR, g.ax.legSwing, g.legSwing * sO * k);
 }
 
-// critic.glb authoring bug: the hand geometry is baked INTO the jeans mesh and
-// weighted to the hand bones, so the hands render jeans-blue (the skin mesh
-// isn't weighted to the hands at all). Repaint only the hand-weighted verts of
-// any mesh with the true skin colour via vertex colours — legs stay blue,
-// hands become skin. (The clean fix is re-exporting the model.)
-function fixCriticHands(root) {
-  let skinCol = new THREE.Color(0xf9efe5);
-  root.traverse(o => { if (o.material && o.material.name === 'skin') skinCol = o.material.color.clone(); });
+// critic.glb authoring bug: some body parts are baked into the WRONG mesh and
+// so wear the wrong material — the hands live in the jeans mesh (jeans-blue)
+// and the nape hair lives in the sweater mesh (shirt-grey). Repaint just those
+// mis-assigned verts (identified by which bone drives them) with the correct
+// material's colour via vertex colours; the rest of each mesh is untouched.
+// (The clean fix is re-exporting the model with the right material assignment.)
+const CRITIC_REPAINT = {
+  jeans:   { bones: ['handL', 'handR'], to: 'skin' },   // hands baked into the jeans mesh
+  sweater: { bones: ['head'],           to: 'hair' },   // nape hair baked into the sweater mesh
+};
+function fixCriticColors(root) {
+  const colOf = {};
+  root.traverse(o => { if (o.material && o.material.name) colOf[o.material.name] = o.material.color; });
   root.traverse(o => {
-    if (!o.isSkinnedMesh || o.material.name === 'skin') return;
+    if (!o.isSkinnedMesh) return;
+    const rule = CRITIC_REPAINT[o.material.name]; if (!rule) return;
+    const tgt = colOf[rule.to]; if (!tgt) return;
     const g = o.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
     if (!si) return;
-    const hand = new Set();
-    o.skeleton.bones.forEach((b, i) => { if (b.name === 'handL' || b.name === 'handR') hand.add(i); });
-    if (!hand.size) return;
+    const pick = new Set();
+    o.skeleton.bones.forEach((b, i) => { if (rule.bones.includes(b.name)) pick.add(i); });
+    if (!pick.size) return;
     const n = g.attributes.position.count, col = new Float32Array(n * 3), bc = o.material.color;
     let touched = false;
     for (let v = 0; v < n; v++) {
-      let hw = 0; for (let k = 0; k < 4; k++) if (hand.has(si.getComponent(v, k))) hw += sw.getComponent(v, k);
-      const c = hw > 0.5 ? (touched = true, skinCol) : bc;
+      let w = 0; for (let k = 0; k < 4; k++) if (pick.has(si.getComponent(v, k))) w += sw.getComponent(v, k);
+      const c = w > 0.5 ? (touched = true, tgt) : bc;
       col[v * 3] = c.r; col[v * 3 + 1] = c.g; col[v * 3 + 2] = c.b;
     }
     if (touched) {
@@ -3429,7 +3436,7 @@ function fixCriticHands(root) {
 }
 
 new GLTFLoader().load('./models/critic.glb', (glb) => {
-  fixCriticHands(glb.scene);
+  fixCriticColors(glb.scene);
   const base = glb.animations[0];
   // strides / arm-swing / swag are baked into the clip itself (see the Blender
   // bake), so we just slice each named sub-clip out of the one timeline
