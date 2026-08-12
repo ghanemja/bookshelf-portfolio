@@ -1,6 +1,9 @@
 [build]
   publish = "."
-  command = ""
+  # Gate builds on the main character: a missing/invalid critic.glb fails the
+  # build so it can't ship empty. (Runs on git-connected builds and on
+  # `netlify deploy --build`; the manual path is guarded by ./deploy.sh.)
+  command = "node scripts/validate-critic.mjs"
 
 [[redirects]]
   from = "/*"

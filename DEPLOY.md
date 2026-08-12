@@ -1,40 +1,30 @@
 # Deploy
 
-This is a static three.js site with no build step. Pick one host below.
+Static three.js site, no build step. Hosted on **Netlify** (site `shelfie-jg`,
+id `c1677cd8-337d-4500-879c-3aed0433fe67`) → https://shelfie-jg.netlify.app
 
-## First-time setup: create GitHub remote
-
-This repo doesn't have a GitHub remote yet. Create one:
+Deploys are **manual** — this site is NOT git-connected, so `git push` does not
+publish. Ship with:
 
 ```bash
-gh repo create ghanemja/bookshelf-portfolio --public --source=. --push
+./deploy.sh
 ```
 
-## Option A: GitHub Pages (recommended)
+`deploy.sh` validates the main character (`scripts/validate-critic.mjs`) before
+uploading, so a missing/broken `critic.glb` aborts before anything goes live,
+then runs `netlify deploy --prod` against the `shelfie-jg` site id.
 
-A workflow is wired up at `.github/workflows/deploy.yml` — it deploys every push to `main` straight from the repo root, no build step.
+## Gotchas
 
-After the first push:
-
-1. Go to **Settings → Pages** in the GitHub repo.
-2. Under **Build and deployment**, set **Source** to **GitHub Actions**.
-3. The workflow runs automatically on push; the URL appears in the Actions tab on success.
-
-Final URL: `https://ghanemja.github.io/bookshelf-portfolio/`
-
-## Option B: Netlify
-
-A `netlify.toml` is included that publishes the repo root with no build command.
-
-1. Push to GitHub (see above).
-2. On [netlify.com](https://app.netlify.com/), **Add new site → Import from Git** → pick this repo.
-3. Accept the defaults — `netlify.toml` already configures publish dir and SPA-style redirects.
+- **Bump the cache token.** `index.html` loads `planet.js?cb=pNN`. Bump `NN`
+  whenever `planet.js` changes, or browsers/CDN keep the stale bundle (new CSS +
+  old JS = "nothing changed").
+- **Check the link.** This folder's Netlify CLI has been mis-linked to other
+  sites before. Confirm with `netlify status` (should say `shelfie-jg`);
+  `deploy.sh` also pins the site id explicitly.
 
 ## Local preview
 
 ```bash
-python3 -m http.server 5173
-# → http://localhost:5173
+python3 -m http.server 5173   # → http://localhost:5173
 ```
-
-Or `npx serve .`
