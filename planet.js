@@ -3239,6 +3239,39 @@ function playRide(t, prev) {
   else { inst.intro = false; playClip(inst, ride); }
 }
 
+// ── walk styling: the baked Walk clip keeps her arms pinned and elbows locked
+// with a narrow stride. Layer procedural bone offsets ON TOP of the mixer each
+// frame — a resting elbow bend, arm clearance from the torso, and a wider
+// stance/step. `intensity` (0..1 with gait speed) fades it in with movement.
+// axes derived from the rig's bind pose: every bone's length runs down local
+// +Y, so a fore/aft bend is about local X (elbow, leg stride) and a sideways
+// splay is about local Z (arm/leg clearance). Signs: −elbow bends the forearm
+// FORWARD; −armOut/−legOut open the limbs OUTWARD off the body.
+const GAIT = {
+  elbowBend: -0.42, elbowSwing: 0.22,  // rad: resting forward flexion + per-step swing
+  armOut: -0.20, armSwing: 0.10,       // rad: hold the arms off the torso, breathing room
+  legOut: -0.06, legSwing: 0.12,       // rad: a touch wider stance + longer step
+  ax: { elbow: [1, 0, 0], armOut: [0, 0, 1], legOut: [0, 0, 1], legSwing: [1, 0, 0] },
+};
+const _gq = new THREE.Quaternion(), _gax = new THREE.Vector3();
+function boneRot(b, ax, a) { if (!b || !a) return; _gax.set(ax[0], ax[1], ax[2]); _gq.setFromAxisAngle(_gax, a); b.quaternion.multiply(_gq); }
+function applyWalkStyle(inst, intensity) {
+  let pb = inst._pb;
+  if (!pb) { pb = inst._pb = {}; inst.holder.traverse(o => { if (o.isBone) pb[o.name] = o; }); }
+  const clip = inst.cur && inst.cur.getClip();
+  const ph = clip ? (inst.cur.time / clip.duration) * Math.PI * 2 : 0;
+  const s = Math.sin(ph), sO = Math.sin(ph + Math.PI), k = THREE.MathUtils.clamp(intensity, 0, 1);
+  const g = GAIT;
+  boneRot(pb.lowerarmL, g.ax.elbow, g.elbowBend + g.elbowSwing * s * k);
+  boneRot(pb.lowerarmR, g.ax.elbow, g.elbowBend + g.elbowSwing * sO * k);
+  boneRot(pb.upperarmL, g.ax.armOut,  g.armOut + g.armSwing * s * k);
+  boneRot(pb.upperarmR, g.ax.armOut, -(g.armOut + g.armSwing * sO * k));
+  boneRot(pb.upperlegL, g.ax.legOut,  g.legOut);
+  boneRot(pb.upperlegR, g.ax.legOut, -g.legOut);
+  boneRot(pb.upperlegL, g.ax.legSwing, g.legSwing * s * k);
+  boneRot(pb.upperlegR, g.ax.legSwing, g.legSwing * sO * k);
+}
+
 new GLTFLoader().load('./models/critic.glb', (glb) => {
   const base = glb.animations[0];
   // strides / arm-swing / swag are baked into the clip itself (see the Blender
@@ -5460,6 +5493,7 @@ function animate() {
     }
     if (critic.cur) critic.cur.timeScale = ts;
     critic.mixer.update(dt);
+    if (transport === 'walk' && !critic.intro) applyWalkStyle(critic, Math.min(1, speed / TR.max));
   } else {
     courierBody.traverse(o => { if (o.userData && o.userData.limbs) walkPerson(o, t * 1.3, Math.min(1, speed / TR.max) * 0.9); });
   }
