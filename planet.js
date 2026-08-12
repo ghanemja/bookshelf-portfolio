@@ -4785,9 +4785,62 @@ function greaseOverPhoto(img, seed) {
   return cv;
 }
 
+// a warm cabin-wall texture (cream/tan panels) for the annulus around the
+// porthole, so the frame reads as interior, not a flat grey card
+function makeCabinWallTex() {
+  const S = 256, cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const c = cv.getContext('2d');
+  const g = c.createLinearGradient(0, 0, 0, S);
+  g.addColorStop(0, '#f4ead4'); g.addColorStop(0.6, '#ecdcbe'); g.addColorStop(1, '#dcc8a6');
+  c.fillStyle = g; c.fillRect(0, 0, S, S);
+  c.strokeStyle = 'rgba(120,98,64,0.14)'; c.lineWidth = 2;              // faint panel seams
+  for (let y = 42; y < S; y += 60) { c.beginPath(); c.moveTo(0, y); c.lineTo(S, y); c.stroke(); }
+  c.strokeStyle = 'rgba(255,250,240,0.35)'; c.lineWidth = 1;
+  for (let y = 44; y < S; y += 60) { c.beginPath(); c.moveTo(0, y); c.lineTo(S, y); c.stroke(); }
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 3);
+  return t;
+}
+// a wide, seamlessly-tiling city-skyline-at-dusk with a water reflection —
+// scrolled behind the porthole so it reads as the plane cruising over the city
+function makeSkylineTex() {
+  const W = 2048, H = 1024, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const c = cv.getContext('2d'); const rr = mulberry32(9);
+  const horizon = H * 0.60;
+  const sky = c.createLinearGradient(0, 0, 0, horizon);
+  sky.addColorStop(0, '#39205a'); sky.addColorStop(0.5, '#6d2b63'); sky.addColorStop(1, '#c15c7d');
+  c.fillStyle = sky; c.fillRect(0, 0, W, horizon);
+  const wat = c.createLinearGradient(0, horizon, 0, H);
+  wat.addColorStop(0, '#8a4064'); wat.addColorStop(1, '#33203f');
+  c.fillStyle = wat; c.fillRect(0, horizon, W, H - horizon);
+  // one continuous run of buildings, drawn twice (upright + faded reflection)
+  const cells = [];
+  let x = 0;
+  while (x < W) { const bw = 26 + rr() * 74, bh = 90 + rr() * 340; cells.push([x, bw, bh]); x += bw + 2 + rr() * 7; }
+  const winCol = (m) => `rgba(255,${(150 + rr() * 80) | 0},${(80 + rr() * 60) | 0},${m ? 0.28 : 0.95})`;
+  for (const mirror of [false, true]) {
+    for (const [bx, bw, bh] of cells) {
+      const top = horizon - bh;
+      c.fillStyle = `rgb(${(206 + rr() * 34) | 0},${(198 + rr() * 30) | 0},${(214 + rr() * 24) | 0})`;
+      if (!mirror) c.fillRect(bx, top, bw, bh);
+      else { c.save(); c.globalAlpha = 0.3; c.fillRect(bx, horizon, bw, bh * 0.7); c.restore(); }
+      const cols = Math.max(1, Math.floor(bw / 9)), rows = Math.floor(bh / 13);
+      for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+        if (rr() > 0.55) continue;
+        c.fillStyle = winCol(mirror);
+        const wx = bx + 3 + i * 9, wy = mirror ? horizon + j * 13 + 3 : top + 3 + j * 13;
+        if (wy > horizon - 2 && !mirror) continue;
+        c.fillRect(wx, wy, 5, 6);
+      }
+    }
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
+  t.colorSpace = THREE.SRGBColorSpace; t.repeat.set(0.42, 1);
+  return t;
+}
 // the cabin is a PAINTING: a hand-drawn NetJets-style interior on one
-// billboard (the critic never walks, so it reads as a room), plus a real
-// porthole to the left that the camera turns to for the planet-below shot
+// billboard, plus a porthole whose glass shows a scrolling skyline (below)
 function buildCabin() {
   const g = new THREE.Group();
   // the cabin interior is a supplied grease-pencil painting (models/cabin_refined.png).
@@ -4809,12 +4862,20 @@ function buildCabin() {
   // edges, a cream outer rim and a steel inner ring — the planet shows only
   // through the glass
   const winG = new THREE.Group();
-  const wall = new THREE.Mesh(new THREE.RingGeometry(1.0, 7.5, 36),
-    new THREE.MeshBasicMaterial({ color: 0xf2ead9, side: THREE.DoubleSide }));
+  const wall = new THREE.Mesh(new THREE.RingGeometry(1.0, 7.5, 48),
+    new THREE.MeshBasicMaterial({ map: makeCabinWallTex(), side: THREE.DoubleSide }));
   winG.add(wall);
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.02, 0.16, 10, 30), M(0xf4efe6));
-  const rim2 = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.06, 8, 30), M(0x9aa0a8));
+  // warm tan outer rim to match the cabin, thin steel inner ring
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.02, 0.16, 12, 36), new THREE.MeshBasicMaterial({ color: 0xe4d3b0 }));
+  const rim2 = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.055, 8, 36), new THREE.MeshBasicMaterial({ color: 0x8f95a0 }));
   winG.add(rim); winG.add(rim2);
+  // the world outside the glass: a wide dusk skyline that scrolls right→left
+  const skyTex = makeSkylineTex();
+  const skyline = new THREE.Mesh(new THREE.PlaneGeometry(9, 5),
+    new THREE.MeshBasicMaterial({ map: skyTex }));
+  skyline.position.set(0, 0, -0.7);          // just behind the ring, seen through the hole
+  winG.add(skyline);
+  winG.userData.skyTex = skyTex;
   winG.position.set(-3.6, 0.2, 0.6);
   g.add(winG);
   g.userData.window = winG;
@@ -4906,18 +4967,19 @@ function updateArrival(dt) {
       const k = Math.min(1, (T - 0.065) / 0.035);
       const e = k * k * (3 - 2 * k);
       // A head-turn, not a flashcard swipe: the camera stays put and its GAZE
-      // yaws left about the cabin's up axis (level), with just a little downward
-      // tilt so the planet's curve rises into the bottom of the glass.
+      // yaws LEFT about the cabin's up axis (the seat faces that window), staying
+      // level with just a hair of downward tilt.
       const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(cabin.quaternion).normalize();
-      const lookDir = fwd.applyAxisAngle(up, -e * 1.45)   // yaw ~83° to the LEFT window
-        .addScaledVector(up, -0.28 * e).normalize();       // a touch down, kept level otherwise
+      const lookDir = fwd.applyAxisAngle(up, e * 1.45)    // yaw ~83° to the LEFT
+        .addScaledVector(up, -0.12 * e).normalize();
       const lookTarget = _aTmp2.copy(camera.position).addScaledVector(lookDir, 6);
       camera.lookAt(lookTarget);
-      // the porthole hangs on that exact sight line, so the planet is seen
-      // through its glass
+      // the porthole hangs on that exact sight line; the skyline scrolls behind
+      // its glass so it reads as the plane cruising over the city
       win.visible = true;
       win.position.copy(cabin.worldToLocal(camera.position.clone().addScaledVector(lookDir, 3.2)));
       win.lookAt(camera.position);
+      if (win.userData.skyTex) win.userData.skyTex.offset.x = (win.userData.skyTex.offset.x + dt * 0.05) % 1;
       // ...and during the hold, drift very slowly so it feels alive
       if (k >= 1) camera.position.addScaledVector(camera.up, Math.sin(tt * 0.7) * 0.02);
     }
