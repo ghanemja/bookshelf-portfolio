@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
@@ -2687,6 +2688,132 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   districtSign(AIRPORT, '✈ Airport', 0, -19);
 }
 
+// ─── real 3-D vehicles: a diverse cartoon car fleet for the traffic, plus the
+// parked jet. The source GLBs are huge photoreal scans; scripts/optimize-cars.mjs
+// decimates them hard and strips every texture, and here we re-material each part
+// flat so it matches the low-poly toon world and stays cheap on a phone. Cars can
+// only ever ride the road because they REUSE the existing traffic lane system —
+// we just swap the boxy placeholder mesh for a real model once it streams in, so
+// a slow/failed load never leaves a hole (the box stays).
+{
+  const draco = new DRACOLoader().setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
+  const gltfV = new GLTFLoader().setDRACOLoader(draco);
+
+  // one flat cartoon body colour per model → instant fleet diversity. len = how
+  // long the car should read in world units (a lane is ~2.6 wide); flip if the
+  // model happens to be built nose-toward -Z.
+  const FLEET = [
+    { file: 'mustang', body: 0xd6402f, len: 2.15, flip: false }, // classic muscle, red
+    { file: 'picanto', body: 0x37b6d8, len: 1.85, flip: false }, // little hatch, cyan
+    { file: 'tarraco', body: 0x2f9e5b, len: 2.35, flip: false }, // SUV, green
+    { file: 'simca',   body: 0xf0c33a, len: 1.90, flip: false }, // retro, yellow
+    { file: 'escort',  body: 0xe87ab0, len: 2.05, flip: false }, // convertible, pink
+    { file: 'skylark', body: 0x8f7ae8, len: 2.20, flip: false }, // retro, violet
+    { file: 'faraday', body: 0xeceae2, len: 2.30, flip: false }, // futurist, off-white
+    { file: 'pagani',  body: 0xf25c1e, len: 2.10, flip: false }, // supercar, orange
+  ];
+
+  // shared flat toon materials for the non-body parts, classified by the part's
+  // surviving material/mesh name (see partMat)
+  const V_GLASS = new THREE.MeshStandardMaterial({ color: 0x243544, flatShading: true, roughness: 0.15, metalness: 0, transparent: true, opacity: 0.5 });
+  const V_TIRE  = M(0x1c1a22, { roughness: 0.95 });
+  const V_RIM   = M(0xb9bcc4, { roughness: 0.4 });
+  const V_CHROME = M(0xcfd4dc, { roughness: 0.35 });
+  const V_HEAD  = new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xffcf5a, emissiveIntensity: 0.5, flatShading: true });
+  const V_TAIL  = new THREE.MeshStandardMaterial({ color: 0xff5a4d, emissive: 0x7a1710, emissiveIntensity: 0.5, flatShading: true });
+  const V_INT   = M(0x2b2732);
+  function partMat(name, bodyMat) {
+    const n = (name || '').toLowerCase();
+    if (/glass|window|windshield|windscreen|screen/.test(n)) return V_GLASS;
+    if (/tire|tyre|rubber/.test(n)) return V_TIRE;
+    if (/rim|hub|spoke|caliper|calliper|alloy|wheel/.test(n)) return V_RIM;
+    if (/tail|brake|rear.?light|stop/.test(n)) return V_TAIL;
+    if (/light|lamp|head|indicator|signal|led/.test(n)) return V_HEAD;
+    if (/chrome|metal|trim|mirror|grille|grill|bumper|exhaust|handle/.test(n)) return V_CHROME;
+    if (/interior|seat|dash|cabin|steer|floor|carpet/.test(n)) return V_INT;
+    return bodyMat;
+  }
+
+  const _vb = new THREE.Box3(), _vs = new THREE.Vector3(), _vc = new THREE.Vector3();
+  // Return a wrapper Group whose child is oriented forward = +Z, up = +Y, sitting
+  // on the ground (wheels at y ≈ sink), scaled to targetLen. The wrapper stays at
+  // identity so the traffic loop can drive its position/quaternion each frame.
+  function toTemplate(root, targetLen, sink, autoFace, extraYaw) {
+    // measure raw, decide facing: if built along X, yaw 90° so length lands on Z
+    _vb.setFromObject(root); _vb.getSize(_vs);
+    let yaw = extraYaw || 0;
+    if (autoFace && _vs.x > _vs.z) yaw += Math.PI / 2;
+    root.rotation.set(0, yaw, 0);
+    root.updateWorldMatrix(true, true);
+    _vb.setFromObject(root); _vb.getSize(_vs);
+    root.scale.setScalar(targetLen / Math.max(_vs.z, 1e-3));
+    root.updateWorldMatrix(true, true);
+    _vb.setFromObject(root); _vb.getCenter(_vc); _vb.getSize(_vs);
+    root.position.x -= _vc.x;                 // centre on the lane
+    root.position.z -= _vc.z;
+    root.position.y -= (_vc.y - _vs.y / 2);   // min-y → 0
+    root.position.y += sink;                  // then sink so wheels meet the road
+    const wrap = new THREE.Group();
+    wrap.add(root);
+    return wrap;
+  }
+
+  function styleCar(wrap, bodyMat) {
+    wrap.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = !IS_TOUCH; o.receiveShadow = false;
+      o.frustumCulled = true;
+      o.material = partMat((o.material && o.material.name) || o.name, bodyMat);
+    });
+  }
+
+  // stream every car in parallel, then swap the placeholder boxes for real models
+  Promise.all(FLEET.map(f =>
+    gltfV.loadAsync(`./models/opt/${f.file}.glb`).then(g => {
+      const tpl = toTemplate(g.scene, f.len, -0.06, true, f.flip ? Math.PI : 0);
+      styleCar(tpl, M(f.body, { roughness: 0.6 }));
+      return tpl;
+    }).catch(err => { console.warn('car load failed', f.file, err); return null; })
+  )).then(tpls => {
+    const ready = tpls.filter(Boolean);
+    if (!ready.length) return;
+    let i = 0;
+    for (const v of traffic) {
+      if (v.kind !== 'car') continue;
+      const inst = ready[i++ % ready.length].clone(true);   // shares geo + mats
+      inst.position.copy(v.obj.position);
+      inst.quaternion.copy(v.obj.quaternion);
+      scene.remove(v.obj);
+      scene.add(inst);
+      v.obj = inst;
+    }
+  });
+
+  // swap the boxy parked jet for the real model, keeping its exact parked pose so
+  // the arrival cinematic (which drives airportPlane) keeps working unchanged
+  gltfV.loadAsync('./models/opt/jet.glb').then(g => {
+    const jw = toTemplate(g.scene, 5.0, -0.02, true, 0);
+    jw.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = !IS_TOUCH; o.receiveShadow = false;
+      const n = ((o.material && o.material.name) || o.name || '').toLowerCase();
+      o.material = /glass|window|cockpit|windshield/.test(n) ? V_GLASS
+        : /wheel|tire|tyre|gear/.test(n) ? V_TIRE
+        : /engine|turbine|dark|metal|tail.?fin/.test(n) ? M(0x2d3540)
+        : /nav|beacon|light/.test(n) ? V_HEAD
+        : M(0xf4f6f8, { roughness: 0.35 });
+    });
+    if (airportPlane) {
+      jw.position.copy(airportPlane.position);
+      jw.quaternion.copy(airportPlane.quaternion);
+      jw.scale.copy(airportPlane.scale);
+      scene.remove(airportPlane);
+      airportPlane = jw;
+    }
+    scene.add(jw);
+  }).catch(err => console.warn('jet load failed', err));
+}
+
 // ── THE RESORT: a hotel tower, cabanas, palms ──
 {
   const at = frameAt(RESORT);
@@ -3272,7 +3399,37 @@ function applyWalkStyle(inst, intensity) {
   boneRot(pb.upperlegR, g.ax.legSwing, g.legSwing * sO * k);
 }
 
+// critic.glb authoring bug: the hand geometry is baked INTO the jeans mesh and
+// weighted to the hand bones, so the hands render jeans-blue (the skin mesh
+// isn't weighted to the hands at all). Repaint only the hand-weighted verts of
+// any mesh with the true skin colour via vertex colours — legs stay blue,
+// hands become skin. (The clean fix is re-exporting the model.)
+function fixCriticHands(root) {
+  let skinCol = new THREE.Color(0xf9efe5);
+  root.traverse(o => { if (o.material && o.material.name === 'skin') skinCol = o.material.color.clone(); });
+  root.traverse(o => {
+    if (!o.isSkinnedMesh || o.material.name === 'skin') return;
+    const g = o.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
+    if (!si) return;
+    const hand = new Set();
+    o.skeleton.bones.forEach((b, i) => { if (b.name === 'handL' || b.name === 'handR') hand.add(i); });
+    if (!hand.size) return;
+    const n = g.attributes.position.count, col = new Float32Array(n * 3), bc = o.material.color;
+    let touched = false;
+    for (let v = 0; v < n; v++) {
+      let hw = 0; for (let k = 0; k < 4; k++) if (hand.has(si.getComponent(v, k))) hw += sw.getComponent(v, k);
+      const c = hw > 0.5 ? (touched = true, skinCol) : bc;
+      col[v * 3] = c.r; col[v * 3 + 1] = c.g; col[v * 3 + 2] = c.b;
+    }
+    if (touched) {
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      o.material = o.material.clone(); o.material.vertexColors = true; o.material.color.set(0xffffff);
+    }
+  });
+}
+
 new GLTFLoader().load('./models/critic.glb', (glb) => {
+  fixCriticHands(glb.scene);
   const base = glb.animations[0];
   // strides / arm-swing / swag are baked into the clip itself (see the Blender
   // bake), so we just slice each named sub-clip out of the one timeline
