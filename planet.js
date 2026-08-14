@@ -2699,6 +2699,8 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
 // boil-outline system so they draw correctly in Sketchbook + Wasteland modes.
 let limoTemplate = null;   // real limo model for the arrival cinematic (see buildLimo)
 let gearProto = null;      // one normalized landing-gear leg, cloned onto the jet
+let stationG = null;       // real Central Station building (walk through to board)
+let subwayInt = null;      // subway car interior, wrapped around the camera mid-ride
 {
   const draco = new DRACOLoader().setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
   const gltfV = new GLTFLoader().setDRACOLoader(draco);
@@ -2885,6 +2887,46 @@ let gearProto = null;      // one normalized landing-gear leg, cloned onto the j
     grp.traverse(o => { if (o.isMesh) o.userData._gpForce = true; });
     gearProto = grp;
   }).catch(assetFail('gear.glb'));
+
+  // ── THE TRAIN STATION: the real model replaces procedural Central Station.
+  // Placed with the same off-track math as the stand-in (long axis along the
+  // rail tangent, shifted aside so the Express pulls up alongside). It is
+  // deliberately NOT in the collision BVH — you walk THROUGH it to board.
+  gltfV.loadAsync('./models/opt/station.glb').then(g => {
+    const tpl = toTemplate(g.scene, 9.0, 0.02, true, 0);
+    dressCar(tpl);
+    tpl.traverse(o => { if (o.isMesh) o.userData._gpForce = true; });
+    const d = STOP_DIRS.central;
+    const nb = trackPts[1];
+    const tang = nb.clone().sub(d.clone().multiplyScalar(d.dot(nb))).normalize();
+    const sd = d.clone().applyAxisAngle(tang, -2.4 / R).normalize();
+    tpl.position.copy(settleOn(sd, 2.6, 0.02));
+    const xAxis = new THREE.Vector3().crossVectors(sd, tang).normalize();
+    tpl.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, sd, tang));
+    const old = stopStructures.central;
+    if (old) scene.remove(old);
+    stopStructures.central = tpl;
+    scene.add(tpl);
+    gpRegister(tpl, false);
+    stationG = tpl;
+  }).catch(assetFail('station.glb'));
+
+  // ── THE SUBWAY INTERIOR: normalized car cabin (floor y=0, length on Z) that
+  // wraps the camera while riding the Express — see the train camera override.
+  gltfV.loadAsync('./models/opt/subway.glb').then(g => {
+    const tpl = toTemplate(g.scene, 4.2, 0, true, 0);
+    tpl.traverse(o => {
+      if (!o.isMesh) return;
+      o.frustumCulled = false;               // wrapped around the eye: never cull
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) if (m) { m.flatShading = false; m.needsUpdate = true; }
+    });
+    subwayInt = new THREE.Group();
+    subwayInt.add(tpl);
+    subwayInt.visible = false;
+    scene.add(subwayInt);
+    gpRegister(subwayInt, false);
+  }).catch(assetFail('subway.glb'));
 }
 
 // Landing gear + airstair that DEPLOY, built as children of the parked jet so
@@ -5634,6 +5676,7 @@ function gpRegister(root, boil = true) {
 
 // ─── main loop ───────────────────────────────────────────────────────────────
 const _occRay = new THREE.Raycaster();
+const _swR = new THREE.Vector3(), _swM = new THREE.Matrix4();   // subway-interior temps
 const _oHead = new THREE.Vector3(), _oRay = new THREE.Vector3();
 const clock = new THREE.Clock();
 let introT = 0;
@@ -6048,8 +6091,25 @@ function animate() {
     camera.position.copy(posOn(DOWNTOWN, 46));
     camera.up.set(0, 1, 0);
     camera.lookAt(posOn(DOWNTOWN, 0));
+  } else if (transport === 'train' && subwayInt) {
+  // RIDING THE EXPRESS FROM INSIDE: the subway car interior wraps the camera.
+  // The wrapper rides the courier's transform, the eye sits at seat height in
+  // the aisle looking down the car, and the world streams past the windows.
+  subwayInt.visible = true;
+  courierBody.visible = false;               // don't clip the exterior train shell
+  subwayInt.position.copy(courier.position);
+  _swR.crossVectors(dir, heading);
+  _swM.makeBasis(_swR, dir, heading);
+  subwayInt.quaternion.setFromRotationMatrix(_swM);
+  camera.position.copy(courier.position).addScaledVector(dir, 1.05).addScaledVector(heading, -0.6);
+  camera.up.lerp(dir, 0.3).normalize();
+  camera.lookAt(courier.position.clone().addScaledVector(heading, 4).addScaledVector(dir, 0.9));
   } else {
   // chase camera — user zoom scales the distance, user orbit swings it around
+  if (subwayInt && subwayInt.visible) {       // stepping off: restore the shell
+    subwayInt.visible = false;
+    courierBody.visible = true;
+  }
   introT = Math.min(1, introT + dt / 2.6);
   const ease = introT * introT * (3 - 2 * introT);
   // heading rotated by the orbit angle, around the local up (dir); camPitch
@@ -6068,6 +6128,19 @@ function animate() {
   }
 
   updateWorldAmbient(dt, t);
+
+  // walk into Central Station → board the Express. The trigger arms only once
+  // you're properly outside (>4 units), so stepping OFF the train doesn't
+  // instantly re-board you in a loop.
+  if (transport === 'walk' && gameState === 'play' && !dlgOpen) {
+    const stArc = dir.angleTo(STOP_DIRS.central) * R;
+    if (stArc > 4.0) window._stationArmed = true;
+    else if (stArc < 1.6 && window._stationArmed) {
+      window._stationArmed = false;
+      showToast('🚇 Through the station hall — all aboard the Museum Express');
+      switchRide('train');
+    }
+  }
 
   // landmark proximity → card + delivery
   let nearest = null, nearestArc = 1e9;
@@ -6192,7 +6265,9 @@ function buildCollisionBVH() {
     if (tall > 0.8 && thin < 0.09 && !child.isGroup) continue;   // rail ties, planks
     collidables.push(child);
   }
-  for (const k of Object.keys(stopStructures)) collidables.push(stopStructures[k]);
+  // central is NOT collidable: you walk through the station hall to board the
+  // train (and its GLB replacement streams in after this BVH is baked anyway)
+  for (const k of Object.keys(stopStructures)) if (k !== 'central') collidables.push(stopStructures[k]);
   if (typeof mooredBoat !== 'undefined' && mooredBoat) collidables.push(mooredBoat);
   if (typeof rocketG !== 'undefined' && rocketG) collidables.push(rocketG);
   for (const p of npcs) collidables.push(p);

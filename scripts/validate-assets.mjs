@@ -18,6 +18,8 @@ const REQUIRED = [
   ['models/opt/limo.glb',     15_000],
   ['models/opt/gear.glb',     50_000],
   ['models/opt/bike.glb',     20_000],
+  ['models/opt/station.glb', 300_000],
+  ['models/opt/subway.glb',  150_000],
 ];
 
 let bad = 0;

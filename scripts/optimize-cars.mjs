@@ -32,6 +32,8 @@ const JOBS = [
   [`${RAW}/limo.glb`,                                       'limo',      0.90],
   [`${RAW}/landing_gear.glb`,                               'gear',      0.30],
   [`${RAW}/yellow_bicycle.glb`,                             'bike',      0.60],
+  [`${RAW}/train_ride.glb`,                                 'station',   0.22],
+  [`${RAW}/subway_train_interior.glb`,                      'subway',    0.04],
 ];
 
 const io = new NodeIO()
