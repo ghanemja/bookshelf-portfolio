@@ -2894,6 +2894,11 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
   // deliberately NOT in the collision BVH — you walk THROUGH it to board.
   gltfV.loadAsync('./models/opt/station.glb').then(g => {
     const tpl = toTemplate(g.scene, 9.0, 0.02, true, 0);
+    // Sketchfab bakes a big translucent ground "Plane" under the scene — on
+    // the planet it lies across the road as a weird clear oval. Delete it.
+    const junk = [];
+    tpl.traverse(o => { if (o.isMesh && /^plane/i.test(o.name)) junk.push(o); });
+    for (const o of junk) o.removeFromParent();
     dressCar(tpl);
     tpl.traverse(o => { if (o.isMesh) o.userData._gpForce = true; });
     const d = STOP_DIRS.central;
@@ -2915,9 +2920,20 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
   // wraps the camera while riding the Express — see the train camera override.
   gltfV.loadAsync('./models/opt/subway.glb').then(g => {
     const tpl = toTemplate(g.scene, 4.2, 0, true, 0);
+    const GLASS = new THREE.MeshBasicMaterial({
+      color: 0xcfe2ec, transparent: true, opacity: 0.30,
+      side: THREE.DoubleSide, depthWrite: false,
+    });
     tpl.traverse(o => {
       if (!o.isMesh) return;
       o.frustumCulled = false;               // wrapped around the eye: never cull
+      // the source model's windows used KHR transmission (dropped in the
+      // optimizer), leaving open holes — reglaze anything window-named with a
+      // simple translucent pane so the world outside reads as behind glass
+      if (/glass|window/i.test(o.name) || /glass|window/i.test(o.material?.name || '')) {
+        o.material = GLASS;
+        return;
+      }
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of mats) if (m) { m.flatShading = false; m.needsUpdate = true; }
     });
@@ -5677,6 +5693,7 @@ function gpRegister(root, boil = true) {
 // ─── main loop ───────────────────────────────────────────────────────────────
 const _occRay = new THREE.Raycaster();
 const _swR = new THREE.Vector3(), _swM = new THREE.Matrix4();   // subway-interior temps
+let _railR = null;   // low-passed rail ride height (train only)
 const _oHead = new THREE.Vector3(), _oRay = new THREE.Vector3();
 const clock = new THREE.Clock();
 let introT = 0;
@@ -6043,7 +6060,15 @@ function animate() {
     ? Math.abs(Math.sin(t * 9)) * 0.07 * (speed / TR.max)
     : Math.sin(t * 8.5) * 0.03 * (0.3 + speed / TR.max)) * bobK;
   const groundR = Math.max(radiusAt(dir), SEA_R);
-  courier.position.copy(dir.clone().multiplyScalar(groundR + TR.hover + bob));
+  // rails are graded: the roadbed doesn't follow every terrain ripple, and a
+  // subway car doesn't shiver like an engine — low-pass the radius hard and
+  // drop the bob so the inside-the-car ride reads glass-smooth
+  let rideR = groundR + TR.hover + bob;
+  if (TR.rail) {
+    _railR = _railR == null ? groundR : THREE.MathUtils.lerp(_railR, groundR, 1 - Math.exp(-dt * 2.5));
+    rideR = _railR + TR.hover;
+  } else _railR = null;
+  courier.position.copy(dir.clone().multiplyScalar(rideR));
   _right.crossVectors(dir, heading);
   _m.makeBasis(_right, dir, heading);
   _q.setFromRotationMatrix(_m);
@@ -6106,10 +6131,6 @@ function animate() {
   camera.lookAt(courier.position.clone().addScaledVector(heading, 4).addScaledVector(dir, 0.9));
   } else {
   // chase camera — user zoom scales the distance, user orbit swings it around
-  if (subwayInt && subwayInt.visible) {       // stepping off: restore the shell
-    subwayInt.visible = false;
-    courierBody.visible = true;
-  }
   introT = Math.min(1, introT + dt / 2.6);
   const ease = introT * introT * (3 - 2 * introT);
   // heading rotated by the orbit angle, around the local up (dir); camPitch
@@ -6129,13 +6150,28 @@ function animate() {
 
   updateWorldAmbient(dt, t);
 
+  // stepping off the Express (any state — dialog, phone, cinematic): put the
+  // interior away and show the courier again. Unconditional so no path leaves
+  // the subway car parked visibly in the world.
+  if (transport !== 'train' && subwayInt && subwayInt.visible) {
+    subwayInt.visible = false;
+    courierBody.visible = true;
+  }
+
   // walk into Central Station → board the Express. The trigger arms only once
   // you're properly outside (>4 units), so stepping OFF the train doesn't
   // instantly re-board you in a loop.
-  if (transport === 'walk' && gameState === 'play' && !dlgOpen) {
-    const stArc = dir.angleTo(STOP_DIRS.central) * R;
-    if (stArc > 4.0) window._stationArmed = true;
-    else if (stArc < 1.6 && window._stationArmed) {
+  if (transport === 'walk' && gameState === 'play' && !dlgOpen && stationG) {
+    // the boarding zone is the PLATFORM EDGE — the strip between the station
+    // hall and the rails. Coming from the city you physically cross the hall
+    // to reach it, so boarding reads as walking through the station.
+    if (!window._boardDir) {
+      const sd = stationG.position.clone().normalize();
+      window._boardDir = slerpDir(sd, STOP_DIRS.central, 0.65);
+    }
+    const stArc = dir.angleTo(window._boardDir) * R;
+    if (stArc > 3.0) window._stationArmed = true;
+    else if (stArc < 0.9 && window._stationArmed) {
       window._stationArmed = false;
       showToast('🚇 Through the station hall — all aboard the Museum Express');
       switchRide('train');
