@@ -89,6 +89,8 @@ function progress(p, msg) {
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));   // cartoon world: 2x retina is wasted fill
+// perf probe (dev): draw calls / triangles / programs from the last frame
+window.__perf = () => ({ ...renderer.info.render, programs: renderer.info.programs?.length });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -96,6 +98,11 @@ renderer.toneMappingExposure = 1.0;
 const IS_TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 renderer.shadowMap.enabled = !IS_TOUCH;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// the shadow pass re-renders every caster into a 2048² map — at 60fps that's
+// a third full-geometry pass. The world is static and the sun crawls, so
+// refresh shadows every OTHER frame (30Hz, imperceptible) and halve the cost.
+renderer.shadowMap.autoUpdate = false;
+let _shFrame = 0;
 app.appendChild(renderer.domElement);
 if (IS_TOUCH) document.body.classList.add('touch');
 
@@ -179,7 +186,9 @@ function ensureInk() {
   rtColor = new THREE.WebGLRenderTarget(w * dpr, h * dpr, {
     depthTexture: new THREE.DepthTexture(w * dpr, h * dpr),
   });
-  rtNormal = new THREE.WebGLRenderTarget(w * dpr, h * dpr, {
+  // the normal buffer only feeds edge detection — half resolution halves the
+  // fill cost of the second scene pass, and the ink lines just soften a hair
+  rtNormal = new THREE.WebGLRenderTarget(Math.ceil(w * dpr / 2), Math.ceil(h * dpr / 2), {
     minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter,
   });
   normalOverride = new THREE.MeshNormalMaterial({ flatShading: true });
@@ -2174,7 +2183,7 @@ mark('downtown:start');
     return g;
   }
   const LANE = ROAD_W * 0.5;
-  for (let n = 0; n < 8; n++) {               // fewer cars: real models cost more
+  for (let n = 0; n < 7; n++) {               // fewer cars: real models cost more
     const axis = n % 2;
     const line = (Math.floor(rand() * (2 * N + 1)) - N) * BLOCK;
     const fwd = rand() > 0.5 ? 1 : -1;
@@ -2726,7 +2735,7 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
   // flip if the model happens to be built nose-toward -Z.
   const FLEET = [
     { file: 'mustang', len: 2.15, flip: false }, // '65 classic muscle
-    { file: 'picanto', len: 1.85, flip: false }, // little city hatch
+    // picanto dropped: 31 fragmented materials = 31 draw calls for one car
     // tarraco dropped from traffic: 23 fragmented materials resist decimation
     // (130k tris even at ratio .025) — one SUV isn't worth a third of the budget
     { file: 'simca',   len: 1.90, flip: false }, // '66 retro
@@ -5926,6 +5935,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
+  renderer.shadowMap.needsUpdate = (++_shFrame & 1) === 0;   // 30Hz shadows
 
   // the space tour: cinematic, hands off the controls
   if (gameState === 'launch') {
@@ -6302,7 +6312,7 @@ window.addEventListener('resize', () => {
     const dpr = renderer.getPixelRatio();
     const w = window.innerWidth * dpr, h = window.innerHeight * dpr;
     rtColor.setSize(w, h);
-    rtNormal.setSize(w, h);
+    rtNormal.setSize(Math.ceil(w / 2), Math.ceil(h / 2));   // edge pass stays half-res
     inkQuad.material.uniforms.res.value.set(w, h);
   }
 });
