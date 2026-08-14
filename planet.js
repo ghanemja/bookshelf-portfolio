@@ -4993,7 +4993,10 @@ function buildCabin() {
     barrel.add(patch);
   }
   barrel.rotation.x = Math.PI / 2;            // axis down Z (cabin length)
-  barrel.rotation.z = 0.55;                   // roll: left window looks DOWN at the planet
+  // roll about the tube's own axis (local Y before the X-tilt): the slot +
+  // window slide down the LEFT wall to look at the planet. Rolling local Z
+  // instead sheared the slot diagonally and put the window behind the seat.
+  barrel.rotation.y = 0.55;
   barrel.position.set(0, 0.6, 0);
   g.add(barrel);
   // back cap: the NetJets painting, a flat image closing the tube
@@ -5200,12 +5203,13 @@ function updateArrival(dt) {
     limo.visible = true;
     // lateral surface direction from the road toward the station
     const gasSide = GAS_DIR.clone().sub(_apDir.clone().multiplyScalar(_apDir.dot(GAS_DIR))).normalize();
-    // driving: stay on the painted road. stopped: pull OFF onto the forecourt so
-    // the limo sits alongside the pumps, not idling in the middle of the road.
-    // road half-width is ~1.3, station centre 2.3 off, pumps ~1.9 off — so pull
-    // in ~2.0 to clear the kerb and sit under the canopy at the pump line.
+    // driving: stay on the painted road. stopped: pull OFF the road toward the
+    // station itself — 85% of the arc from the road point to the station centre
+    // lands at the pump line UNDER the canopy, regardless of which way the
+    // road bends here (the old fixed lateral offset inherited along-road error
+    // and kept stopping the limo at the kerb).
     const parkDir = driving ? _apDir.clone()
-      : _apDir.clone().addScaledVector(gasSide, 2.0 / R).normalize();
+      : slerpDir(_apDir, GAS_DIR, 0.85);
     limo.position.copy(dbl(parkDir));
     alignToSurface(limo, parkDir, yawToFace(parkDir, parkDir.clone().multiplyScalar(R).addScaledVector(_apTan, 2).normalize()));
     if (driving) for (const w of limo.userData.wheels || []) w.rotation.x += dt * 5;
