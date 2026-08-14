@@ -2905,23 +2905,38 @@ function buildJetRig(jet) {
   const gearPivots = [];
   const wheelGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.07, 12);
   wheelGeo.rotateZ(Math.PI / 2);
+  // the belly bbox min is set by the LOWEST geometry (engine pods), not the
+  // fuselage skin above each wheel — mounting there leaves the legs floating
+  // with a gap under the body. Probe the real underside at each station with
+  // an upward raycast and hang the leg from the hit, tucked slightly inside.
+  const _gRay = new THREE.Raycaster(), _gO = new THREE.Vector3(), _gD = new THREE.Vector3();
+  function undersideAt(x, z) {
+    jet.updateWorldMatrix(true, true);
+    _gO.set(x, belly - 0.5, z); jet.localToWorld(_gO);
+    _gD.set(0, 1, 0).applyQuaternion(jet.getWorldQuaternion(_gq)).normalize();
+    _gRay.set(_gO, _gD); _gRay.far = 4;
+    const hit = _gRay.intersectObject(jet, true)[0];
+    return hit ? jet.worldToLocal(hit.point.clone()).y : belly;
+  }
   function makeGear(x, z, twin) {
     const piv = new THREE.Group();
-    piv.position.set(x, belly, z);
+    const mountY = undersideAt(x, z) + 0.05;   // 0.05 tucked into the skin
+    piv.position.set(x, mountY, z);
     if (gearProto) {
-      // the real gear leg (unit height, wheels at −1), scaled to the belly gap
+      // the real gear leg (unit height, wheels at −1), scaled mount→ground
       const leg = gearProto.clone(true);
-      leg.scale.setScalar(belly);
+      leg.scale.setScalar(Math.max(mountY, 0.1));
       piv.add(leg);
     } else {
       // fallback if the gear model hasn't streamed in yet: a simple strut + wheels
-      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, belly, 6), STRUT);
-      strut.position.y = -belly / 2; piv.add(strut);
+      const drop = Math.max(mountY, 0.1);
+      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, drop, 6), STRUT);
+      strut.position.y = -drop / 2; piv.add(strut);
       for (const wx of twin ? [-0.085, 0.085] : [0]) {
         const w = new THREE.Mesh(wheelGeo, DARK);
-        w.position.set(wx, -belly, 0); piv.add(w);
+        w.position.set(wx, -drop, 0); piv.add(w);
         const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.075, 8), HUB);
-        hub.rotation.z = Math.PI / 2; hub.position.set(wx, -belly, 0); piv.add(hub);
+        hub.rotation.z = Math.PI / 2; hub.position.set(wx, -drop, 0); piv.add(hub);
       }
     }
     piv.traverse(m => { if (m.isMesh) { m.userData._gpForce = true; if (!IS_TOUCH) m.castShadow = true; } });
@@ -4823,12 +4838,18 @@ function makeSkylineTex() {
   let x = 0;
   while (x < W) { const bw = 26 + rr() * 74, bh = 90 + rr() * 340; cells.push([x, bw, bh]); x += bw + 2 + rr() * 7; }
   const winCol = (m) => `rgba(255,${(150 + rr() * 80) | 0},${(80 + rr() * 60) | 0},${m ? 0.28 : 0.95})`;
+  const ink = '#26202b';
   for (const mirror of [false, true]) {
     for (const [bx, bw, bh] of cells) {
       const top = horizon - bh;
       c.fillStyle = `rgb(${(206 + rr() * 34) | 0},${(198 + rr() * 30) | 0},${(214 + rr() * 24) | 0})`;
-      if (!mirror) c.fillRect(bx, top, bw, bh);
-      else { c.save(); c.globalAlpha = 0.3; c.fillRect(bx, horizon, bw, bh * 0.7); c.restore(); }
+      if (!mirror) {
+        c.fillRect(bx, top, bw, bh);
+        // cartoony ink contour around each tower, wobbled a touch so it reads
+        // hand-drawn like the rest of the world
+        c.strokeStyle = ink; c.lineWidth = 3.5 + rr() * 1.5;
+        c.strokeRect(bx + (rr() - 0.5) * 2, top + (rr() - 0.5) * 2, bw, bh);
+      } else { c.save(); c.globalAlpha = 0.3; c.fillRect(bx, horizon, bw, bh * 0.7); c.restore(); }
       const cols = Math.max(1, Math.floor(bw / 9)), rows = Math.floor(bh / 13);
       for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
         if (rr() > 0.55) continue;
@@ -4839,6 +4860,9 @@ function makeSkylineTex() {
       }
     }
   }
+  // ink the waterline so the reflection reads as water, not a smudge
+  c.strokeStyle = ink; c.lineWidth = 5;
+  c.beginPath(); c.moveTo(0, horizon + 1); c.lineTo(W, horizon + 1); c.stroke();
   const t = new THREE.CanvasTexture(cv);
   t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
   t.colorSpace = THREE.SRGBColorSpace; t.repeat.set(0.42, 1);
@@ -4877,15 +4901,23 @@ function buildCabin() {
   // the porthole rides ON the left wall of the tube (inner face at -X),
   // rim + glass turned to face inward at the camera
   const winG = new THREE.Group();
+  // ink contour behind the rim so the porthole wears the same cartoony outline
+  // as everything else
+  const rimInk = new THREE.Mesh(new THREE.TorusGeometry(1.03, 0.21, 12, 36), new THREE.MeshBasicMaterial({ color: 0x26202b }));
+  rimInk.position.z = -0.015;
   const rim = new THREE.Mesh(new THREE.TorusGeometry(1.02, 0.16, 12, 36), new THREE.MeshBasicMaterial({ color: 0xe4d3b0 }));
   const rim2 = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.055, 8, 36), new THREE.MeshBasicMaterial({ color: 0x8f95a0 }));
-  winG.add(rim); winG.add(rim2);
-  // the world outside the glass: a wide dusk skyline that scrolls right→left,
-  // hung just beyond the wall so it only shows through the ring
+  winG.add(rimInk); winG.add(rim); winG.add(rim2);
+  // the world outside: the dusk skyline lives on a GLASS DISC inside the ring —
+  // the tube wall behind it is solid, so the disc IS the view (the old plane
+  // hung beyond the wall and all you saw was cream). Texture repeat shows a
+  // porthole-sized slice; offset scrolls it right→left like the plane cruising.
   const skyTex = makeSkylineTex();
-  const skyline = new THREE.Mesh(new THREE.PlaneGeometry(9, 5),
+  skyTex.repeat.set(0.30, 0.92);
+  skyTex.offset.y = 0.04;
+  const skyline = new THREE.Mesh(new THREE.CircleGeometry(0.87, 36),
     new THREE.MeshBasicMaterial({ map: skyTex }));
-  skyline.position.set(0, 0, -0.9);
+  skyline.position.set(0, 0, 0.02);           // just proud of the wall, behind the rims
   winG.add(skyline);
   winG.userData.skyTex = skyTex;
   winG.position.set(-RAD + 0.08, 0.7, 0.4);   // on the left wall, seat height
