@@ -570,7 +570,7 @@ function surfH(d) {
   // level ground under each outlying district so nothing sits on a slope
   for (let i = 0; i < FLATS.length; i++) {
     const a2 = 2 - 2 * d.dot(FLATS[i]);
-    const wide = FLATS[i] === AIRPORT ? 0.16 : 0.11;
+    const wide = FLATS[i] === AIRPORT ? 0.21 : 0.11;   // broad apron round the runway
     if (a2 > wide * wide * 6) continue;
     const kF = Math.exp(-a2 / (wide * wide));
     h = h * (1 - kF) + (SEA_H + (FLATS[i] === RESORT ? 0.30 : 0.62)) * kF;
@@ -4590,11 +4590,15 @@ function buildArrPath() {
   // on painted road: airport → spur → downtown centre → spur → resort
   const tA = Math.min(0.9, 0.94 / DOWNTOWN.angleTo(AIRPORT));
   const tR = Math.min(0.9, 0.94 / DOWNTOWN.angleTo(RESORT));
-  const apron = frameAt(AIRPORT)(2.2, 12);       // where the limo waits
+  const apron = frameAt(AIRPORT)(5.2, 12);       // where the limo waits (matches limoWait)
   const eA = slerpDir(DOWNTOWN, AIRPORT, tA);    // airport gate on the boulevard
   const eR = slerpDir(DOWNTOWN, RESORT, tR);     // resort gate
   let pts = [];
-  for (let k = 0; k < 22; k++) pts.push(slerpDir(apron, eA, k / 22));
+  // taxi across the apron to the spur's turning circle, then FOLLOW THE SPUR
+  // ROAD to the boulevard gate — the old straight apron→gate slerp cut
+  // cross-country and never touched the painted road (or the gas station)
+  for (let k = 0; k < 6; k++) pts.push(slerpDir(apron, AIRPORT, k / 6));
+  for (let k = 0; k < 18; k++) pts.push(slerpDir(AIRPORT, eA, k / 18));
   // around the ring boulevard, the short way — NEVER across downtown
   const bE1 = new THREE.Vector3(0, 1, 0).cross(DOWNTOWN).normalize();
   const bE2 = new THREE.Vector3().crossVectors(DOWNTOWN, bE1).normalize();
@@ -4979,7 +4983,7 @@ function updateArrival(dt) {
   arrivalT += dt / 36;   // an unhurried scene, not a chase
   const T = arrivalT;
   const airAt = frameAt(AIRPORT);
-  const limoWait = airAt(2.2, 12).normalize();
+  const limoWait = airAt(5.2, 12).normalize();   // clear of the rolled-out jet
   const rig = airportPlane && airportPlane.userData.rig;
   const ease = (x) => x * x * (3 - 2 * x);
 
