@@ -32,7 +32,7 @@ const JOBS = [
   [`${RAW}/limo.glb`,                                       'limo',      0.90],
   [`${RAW}/landing_gear.glb`,                               'gear',      0.30],
   [`${RAW}/yellow_bicycle.glb`,                             'bike',      0.60],
-  [`${RAW}/train_ride.glb`,                                 'station',   0.22],
+  [`${RAW}/train_ride.glb`,                                 'station',   0.10, 0.08],
   [`${RAW}/subway_train_interior.glb`,                      'subway',    0.04],
 ];
 
@@ -54,7 +54,7 @@ function triCount(doc) {
   return Math.round(t);
 }
 
-for (const [src, name, ratio] of JOBS) {
+for (const [src, name, ratio, err] of JOBS) {
   let doc;
   try { doc = await io.read(src); }
   catch (e) { console.log(`SKIP ${name}: ${e.message}`); continue; }
@@ -68,7 +68,7 @@ for (const [src, name, ratio] of JOBS) {
     weld(),
     // keep UVs, normals and tangents — normal maps need them, and smooth
     // normals are what make the low-poly body still read as curved
-    simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.02 }),
+    simplify({ simplifier: MeshoptSimplifier, ratio, error: err ?? 0.02 }),
     // the actual weight: every texture down to 512² WebP
     textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [256, 256], quality: 80 }),
     prune(),

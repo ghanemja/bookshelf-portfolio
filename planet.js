@@ -88,7 +88,7 @@ function progress(p, msg) {
 // ─── renderer / scene ────────────────────────────────────────────────────────
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));   // cartoon world: 2x retina is wasted fill
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -2779,6 +2779,7 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
       // (limo) opt back in via `shadow`.
       o.castShadow = shadow && !IS_TOUCH; o.receiveShadow = false;
       o.frustumCulled = true;
+      o.userData._gpThin = true;             // thin clean contour in drawn modes
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of mats) {
         if (!m) continue;
@@ -2815,7 +2816,7 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
       scene.remove(v.obj);
       scene.add(inst);
       v.obj = inst;
-      gpRegister(inst, false);     // flat fills + inked edges, but no scratchy boil hull
+      gpRegister(inst);            // thin boil contour + flat fills in drawn modes
     }
   });
 
@@ -2831,6 +2832,7 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
       if (!o.isMesh) return;
       o.castShadow = !IS_TOUCH; o.receiveShadow = false;
       o.userData._gpForce = true;   // opt every jet part into the boil contour
+      o.userData._gpThin = true;    // ...as a thin clean stroke
       // KEEP the jet's own materials — real livery: white body, gold cheatline,
       // tinted glass, dark engines. The old override matched English material
       // names but this model's are named in Russian, so every part fell through
@@ -2908,11 +2910,12 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
     tpl.position.copy(settleOn(sd, 2.6, 0.02));
     const xAxis = new THREE.Vector3().crossVectors(sd, tang).normalize();
     tpl.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, sd, tang));
+    tpl.traverse(o => { if (o.isMesh) o.userData._gpThin = true; });
     const old = stopStructures.central;
     if (old) scene.remove(old);
     stopStructures.central = tpl;
     scene.add(tpl);
-    gpRegister(tpl, false);
+    gpRegister(tpl);
     stationG = tpl;
   }).catch(assetFail('station.glb'));
 
@@ -2937,11 +2940,12 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of mats) if (m) { m.flatShading = false; m.needsUpdate = true; }
     });
+    tpl.traverse(o => { if (o.isMesh) o.userData._gpThin = true; });
     subwayInt = new THREE.Group();
     subwayInt.add(tpl);
     subwayInt.visible = false;
     scene.add(subwayInt);
-    gpRegister(subwayInt, false);
+    gpRegister(subwayInt);
   }).catch(assetFail('subway.glb'));
 }
 
@@ -4567,13 +4571,13 @@ const TITLE_STEPS = [];
     { strokes: LINE_C, paint: PAINTS[2] },
   ];
   for (const ln of lines) {
-    TITLE_STEPS.push({ kind: 'dip', dur: 0.30, paint: ln.paint });
+    TITLE_STEPS.push({ kind: 'dip', dur: 0.16, paint: ln.paint });
     for (const st of ln.strokes) {
-      TITLE_STEPS.push({ kind: 'fly', dur: 0.10, to: st.curve.getPoint(0), paint: ln.paint });
-      TITLE_STEPS.push({ kind: 'paint', dur: Math.max(0.16, st.curve.getLength() * 0.05), stroke: st, paint: ln.paint });
+      TITLE_STEPS.push({ kind: 'fly', dur: 0.06, to: st.curve.getPoint(0), paint: ln.paint });
+      TITLE_STEPS.push({ kind: 'paint', dur: Math.max(0.09, st.curve.getLength() * 0.027), stroke: st, paint: ln.paint });
     }
   }
-  TITLE_STEPS.push({ kind: 'park', dur: 0.35 });
+  TITLE_STEPS.push({ kind: 'park', dur: 0.20 });
 }
 let tiStep = 0, tiT = 0, tiDone = false;
 const _tiPrev = new THREE.Vector3(999, 999, 999);
@@ -4728,7 +4732,7 @@ function dressLimoClone() {
     if (o.isMesh && /wheel|tyre|tire|rim/i.test(o.name)) wheels.push(o);
   });
   g.userData.wheels = wheels;
-  gpRegister(g, false);             // flat fills + inked edges; skip scratchy boil hull
+  gpRegister(g);                    // thin boil contour + flat fills in drawn modes
   return g;
 }
 function buildLimo() {
@@ -4956,12 +4960,29 @@ function buildCabin() {
   const RAD = 2.7, LEN = 10;
   const wallTex = makeCabinWallTex();
   wallTex.repeat.set(6, 2);
-  const tube = new THREE.Mesh(
-    new THREE.CylinderGeometry(RAD, RAD, LEN, 40, 1, true),
-    new THREE.MeshBasicMaterial({ map: wallTex, side: THREE.BackSide }));
-  tube.rotation.x = Math.PI / 2;              // axis down Z (cabin length)
-  tube.position.set(0, 0.6, 0);
-  g.add(tube);
+  const tubeMat = new THREE.MeshBasicMaterial({ map: wallTex, side: THREE.BackSide });
+  // the BARREL holds the wall segments + porthole, and is ROLLED so the left
+  // window tips toward the planet — through the real hole you see the actual
+  // world below (sky, coastline, the whole map), not a painted stand-in
+  const barrel = new THREE.Group();
+  // wall with a REAL slot cut out of the -X side (two arc segments)...
+  const SLOT = 0.60;                          // arc width of the porthole slot
+  const TH0 = Math.PI * 1.5;                  // slot centred on -X (the left wall)
+  barrel.add(new THREE.Mesh(
+    new THREE.CylinderGeometry(RAD, RAD, LEN, 40, 1, true, TH0 + SLOT / 2, Math.PI * 2 - SLOT), tubeMat));
+  // ...closed again above and below the porthole, leaving a ~1.6 opening that
+  // the rim rings fully overlap
+  const WIN_Z = 0.4, HALF = 0.8;
+  for (const [lo, hi] of [[-LEN / 2, WIN_Z - HALF], [WIN_Z + HALF, LEN / 2]]) {
+    const patch = new THREE.Mesh(
+      new THREE.CylinderGeometry(RAD, RAD, hi - lo, 8, 1, true, TH0 - SLOT / 2, SLOT), tubeMat);
+    patch.position.y = (lo + hi) / 2;
+    barrel.add(patch);
+  }
+  barrel.rotation.x = Math.PI / 2;            // axis down Z (cabin length)
+  barrel.rotation.z = 0.55;                   // roll: left window looks DOWN at the planet
+  barrel.position.set(0, 0.6, 0);
+  g.add(barrel);
   // back cap: the NetJets painting, a flat image closing the tube
   const board = new THREE.Mesh(new THREE.PlaneGeometry(2 * RAD * 1.42, 2 * RAD * 1.02),
     new THREE.MeshBasicMaterial({ color: 0xffffff }));
@@ -4984,21 +5005,18 @@ function buildCabin() {
   const rim = new THREE.Mesh(new THREE.TorusGeometry(1.02, 0.16, 12, 36), new THREE.MeshBasicMaterial({ color: 0xe4d3b0 }));
   const rim2 = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.055, 8, 36), new THREE.MeshBasicMaterial({ color: 0x8f95a0 }));
   winG.add(rimInk); winG.add(rim); winG.add(rim2);
-  // the world outside: the dusk skyline lives on a GLASS DISC inside the ring —
-  // the tube wall behind it is solid, so the disc IS the view (the old plane
-  // hung beyond the wall and all you saw was cream). Texture repeat shows a
-  // porthole-sized slice; offset scrolls it right→left like the plane cruising.
-  const skyTex = makeSkylineTex();
-  skyTex.repeat.set(0.30, 0.92);
-  skyTex.offset.y = 0.04;
-  const skyline = new THREE.Mesh(new THREE.CircleGeometry(0.87, 36),
-    new THREE.MeshBasicMaterial({ map: skyTex }));
-  skyline.position.set(0, 0, 0.02);           // just proud of the wall, behind the rims
-  winG.add(skyline);
-  winG.userData.skyTex = skyTex;
-  winG.position.set(-RAD + 0.08, 0.7, 0.4);   // on the left wall, seat height
-  winG.rotation.y = Math.PI / 2;              // face inward (+X, at the camera)
-  g.add(winG);
+  // the glass: a faint translucent pane over the REAL hole — the world outside
+  // is the live scene (sky above, the planet's coasts and city sliding below)
+  const glass = new THREE.Mesh(new THREE.CircleGeometry(0.87, 36),
+    new THREE.MeshBasicMaterial({ color: 0xd6e8f2, transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false }));
+  glass.position.set(0, 0, 0.02);
+  winG.add(glass);
+  // barrel-local frame (pre-roll): x=-RAD is the left wall, y runs down the
+  // cabin length, z is vertical — the roll carries the window with the slot
+  winG.position.set(-RAD + 0.08, WIN_Z, 0);
+  winG.rotation.z = Math.PI / 2;              // stand the rings up in the slot
+  winG.rotation.y = Math.PI / 2;              // and face them inward at the camera
+  barrel.add(winG);
   g.userData.window = winG;
   g.visible = false;
   scene.add(g);
@@ -5082,7 +5100,6 @@ function updateArrival(dt) {
     // the porthole is FIXED to the tube's left wall now — always visible, the
     // skyline behind it always sliding right→left like the plane is cruising
     win.visible = true;
-    if (win.userData.skyTex) win.userData.skyTex.offset.x = (win.userData.skyTex.offset.x + dt * 0.05) % 1;
     if (T < 0.065) {                               // gazing down the cabin
       if (arrCaption) arrCaption.textContent = '✈ First class — welcome aboard';
       camera.lookAt(cabin.localToWorld(_aTmp2.set(jx * 2, 0.8, 4.0)));
@@ -5094,7 +5111,7 @@ function updateArrival(dt) {
       // the cabin to the porthole on the left wall — one smooth level yaw whose
       // panning sweeps across the curved wall between them
       const paintingAt = cabin.localToWorld(_aTmp2.set(0, 0.8, 4.0)).clone();
-      const windowAt = cabin.localToWorld(_aTmp3.set(-2.6, 0.7, 0.4));
+      const windowAt = cabin.userData.window.getWorldPosition(_aTmp3);
       camera.lookAt(_aTmp2.copy(paintingAt).lerp(windowAt, e));
       // ...and during the hold, drift very slowly so it feels alive
       if (k >= 1) camera.position.addScaledVector(camera.up, Math.sin(tt * 0.7) * 0.02);
@@ -5500,7 +5517,8 @@ function addBoilTo(o) {
   // this its big fuselage mesh (>5k verts) and slab-thin wings get skipped and
   // it ends up the ONE thing in the scene with no ink around it.
   const force = !!o.userData._gpForce;
-  if (!force && o.geometry.attributes.position.count > 5000) return;   // keep draws sane
+  const vcap = o.userData._gpThin ? 2500 : 5000;   // dense GLB panels: hull cost >> contour value
+  if (!force && o.geometry.attributes.position.count > vcap) return;   // keep draws sane
   if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
   const bb = o.geometry.boundingBox.getSize(new THREE.Vector3());
   const maxD = Math.max(bb.x, bb.y, bb.z), minD = Math.min(bb.x, bb.y, bb.z);
@@ -5508,13 +5526,17 @@ function addBoilTo(o) {
   // outline around a flat sheet reads as scribble, not line art
   if (!force && minD < 0.13 && maxD > 3.0) return;
   o.userData._gpDone = true;
-  const mat = maxD > 2.2 ? gpBoilHeavy : maxD > 0.6 ? gpBoilMid : gpBoilLight;
+  // photoscan GLBs (cars, station, subway, jet) opt into THIN strokes: a light
+  // single contour reads hand-drawn on dense decimated panels, where the heavy
+  // hull + loose over-stroke turned them into dark scratches
+  const thin = !!o.userData._gpThin;
+  const mat = thin ? gpBoilLight : maxD > 2.2 ? gpBoilHeavy : maxD > 0.6 ? gpBoilMid : gpBoilLight;
   const line = new THREE.Mesh(o.geometry, mat);
   line.visible = gpOn;               // show at once if we're already drawn-mode
   o.add(line);                       // child: follows every transform for free
   gpOutlines.push(line);
   // buildings and props get the loose second stroke; small items stay clean
-  if (force || (maxD > 0.6 && o.geometry.attributes.position.count < 2200)) {
+  if (!thin && (force || (maxD > 0.6 && o.geometry.attributes.position.count < 2200))) {
     const loose = new THREE.Mesh(o.geometry, gpBoilLoose);
     loose.visible = gpOn;
     o.add(loose);
