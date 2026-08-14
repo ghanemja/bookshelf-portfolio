@@ -2988,25 +2988,37 @@ function buildJetRig(jet) {
   // the ground plane, which leaves the fuselage on stilts — so first drop the
   // whole airframe until the belly at the main-gear station sits LEG above
   // the road, then cut each leg mount→surface so wheels rest ON the ground.
-  const GROUND = 0.02;                        // road surface in jet-local Y
+  // terrain under the parked jet is NOT flat: settleOn seats the wrapper on
+  // the lowest sample of its footprint, so the actual runway surface at each
+  // wheel station sits at a different jet-local height. Physics = each leg
+  // reaches ITS OWN ground contact, probed from the terrain field.
+  const _gyP = new THREE.Vector3();
+  function groundYAt(x, z) {
+    _gyP.set(x, 0, z); jet.localToWorld(_gyP);
+    const d = _gyP.clone().normalize();
+    _gyP.copy(d).multiplyScalar(Math.max(radiusAt(d), SEA_R));
+    return jet.worldToLocal(_gyP.clone()).y;
+  }
   const LEG = Math.min(0.45, len * 0.09);     // visible strut, proportional
   {
+    const mainG = groundYAt(0.2, -len * 0.03);
     const underMain = undersideAt(0, -len * 0.03);
-    const drop = underMain - (GROUND + LEG);
+    const drop = underMain - (mainG + LEG);
     if (drop > 0) for (const c of jet.children) c.position.y -= drop;
   }
   function makeGear(x, z, twin) {
     const piv = new THREE.Group();
     const mountY = undersideAt(x, z) + 0.05;   // 0.05 tucked into the skin
     piv.position.set(x, mountY, z);
+    const gY = groundYAt(x, z);              // this station's own ground height
     if (gearProto) {
-      // the real gear leg (unit height, wheels at −1), scaled mount→surface
+      // the real gear leg (unit height, wheels at −1), scaled mount→contact
       const leg = gearProto.clone(true);
-      leg.scale.setScalar(Math.max(mountY - GROUND, 0.1));
+      leg.scale.setScalar(Math.max(mountY - gY, 0.1));
       piv.add(leg);
     } else {
       // fallback if the gear model hasn't streamed in yet: a simple strut + wheels
-      const drop = Math.max(mountY - GROUND, 0.1);
+      const drop = Math.max(mountY - gY, 0.1);
       const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, drop, 6), STRUT);
       strut.position.y = -drop / 2; piv.add(strut);
       for (const wx of twin ? [-0.085, 0.085] : [0]) {
