@@ -3642,7 +3642,10 @@ new GLTFLoader().load('./models/critic.glb', (glb) => {
     const inst = { holder, mixer, cur: null, intro: false, actions: {}, bones: {}, bind: {} };
     // capture the bind-pose bone quaternions now (rig is untouched) so procWalk
     // can reset to them each frame before layering the walk cycle
-    rig.traverse(o => { if (o.isBone) { inst.bones[o.name] = o; inst.bind[o.name] = o.quaternion.clone(); } });
+    // the rig names bones with Blender-style dots (upperleg.L) but WALK_BONES
+    // uses flat names (upperlegL) — normalize here or procWalk finds nothing
+    // and the whole walk collapses to hip-roll (body rocking, limbs frozen)
+    rig.traverse(o => { if (o.isBone) { const k = o.name.replace(/\./g, ''); inst.bones[k] = o; inst.bind[k] = o.quaternion.clone(); } });
     for (const n of Object.keys(CRITIC.clips)) inst.actions[n] = mixer.clipAction(CRITIC.clips[n]);
     CRITIC.insts[key] = inst;
     const body = bodies[key];
