@@ -2918,18 +2918,30 @@ function buildJetRig(jet) {
     const hit = _gRay.intersectObject(jet, true)[0];
     return hit ? jet.worldToLocal(hit.point.clone()).y : belly;
   }
+  // real bizjets squat LOW: the belly rides less than half a metre over the
+  // tarmac on stubby legs. The model parks with its lowest stray geometry on
+  // the ground plane, which leaves the fuselage on stilts — so first drop the
+  // whole airframe until the belly at the main-gear station sits LEG above
+  // the road, then cut each leg mount→surface so wheels rest ON the ground.
+  const GROUND = 0.02;                        // road surface in jet-local Y
+  const LEG = Math.min(0.45, len * 0.09);     // visible strut, proportional
+  {
+    const underMain = undersideAt(0, -len * 0.03);
+    const drop = underMain - (GROUND + LEG);
+    if (drop > 0) for (const c of jet.children) c.position.y -= drop;
+  }
   function makeGear(x, z, twin) {
     const piv = new THREE.Group();
     const mountY = undersideAt(x, z) + 0.05;   // 0.05 tucked into the skin
     piv.position.set(x, mountY, z);
     if (gearProto) {
-      // the real gear leg (unit height, wheels at −1), scaled mount→ground
+      // the real gear leg (unit height, wheels at −1), scaled mount→surface
       const leg = gearProto.clone(true);
-      leg.scale.setScalar(Math.max(mountY, 0.1));
+      leg.scale.setScalar(Math.max(mountY - GROUND, 0.1));
       piv.add(leg);
     } else {
       // fallback if the gear model hasn't streamed in yet: a simple strut + wheels
-      const drop = Math.max(mountY, 0.1);
+      const drop = Math.max(mountY - GROUND, 0.1);
       const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, drop, 6), STRUT);
       strut.position.y = -drop / 2; piv.add(strut);
       for (const wx of twin ? [-0.085, 0.085] : [0]) {
@@ -2950,7 +2962,9 @@ function buildJetRig(jet) {
   // sill forward-left of the fuselage. deployed = folded down to the ground;
   // stowed = swung up flat against the door.
   const STEPN = 6, run = 0.17;
-  const doorX = -wid * 0.15, doorY = belly + 0.06, doorZ = len * 0.16;
+  // hinge the stair at the (freshly lowered) fuselage side, not the stale bbox
+  const doorX = -wid * 0.15, doorZ = len * 0.16;
+  const doorY = undersideAt(doorX * 0.5, doorZ) + 0.10;
   const rise = doorY / STEPN;
   const stair = new THREE.Group();
   stair.position.set(doorX, doorY, doorZ);
