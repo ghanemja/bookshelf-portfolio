@@ -2916,7 +2916,11 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
     const nb = trackPts[1];
     const tang = nb.clone().sub(d.clone().multiplyScalar(d.dot(nb))).normalize();
     const sd = d.clone().applyAxisAngle(tang, -2.4 / R).normalize();
-    tpl.position.copy(settleOn(sd, 2.6, 0.02));
+    // the plateau's roll swells undulate ±0.2 under the station's 9-unit
+    // footprint and settleOn seats it on the LOWEST sample — half the model
+    // ended up under the lawn. Lift it clear; the platform skirt hides the
+    // sliver of air over the dips.
+    tpl.position.copy(settleOn(sd, 2.6, 0.32));
     const xAxis = new THREE.Vector3().crossVectors(sd, tang).normalize();
     tpl.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, sd, tang));
     tpl.traverse(o => { if (o.isMesh) o.userData._gpThin = true; });
