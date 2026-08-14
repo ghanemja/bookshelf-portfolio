@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import CITY_PLAN from './city_plan.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -1858,43 +1859,28 @@ mark('downtown:start');
     grad.addColorStop(1, 'rgba(156,154,149,0)');
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(SZ/2, SZ/2, SZ/2, 0, Math.PI*2); ctx.fill();
-    for (let i = -SUB; i <= SUB; i++) {
-      const o = i * BLOCK;
-      const w = Math.abs(i) <= N ? ROAD_W : ROAD_W * 0.72;
-      const ext = Math.abs(i) <= N ? SPAN : BLOCK * (SUB + 0.2);
-      // kerbs (pale), then asphalt (dark)
-      ctx.fillStyle = hex(P.roadLine);
-      ctx.fillRect(X(o - w - 0.3), Y(ext), (w + 0.3) * 2 * u, 2 * ext * u);
-      ctx.fillRect(X(-ext), Y(o + w + 0.3), 2 * ext * u, (w + 0.3) * 2 * u);
-      ctx.fillStyle = hex(P.road);
-      ctx.fillRect(X(o - w), Y(ext), w * 2 * u, 2 * ext * u);
-      ctx.fillRect(X(-ext), Y(o + w), 2 * ext * u, w * 2 * u);
-    }
-    // dashed centre lines
-    ctx.strokeStyle = hex(P.roadMark); ctx.lineWidth = 0.14 * u;
-    ctx.setLineDash([0.9 * u, 0.9 * u]);
-    for (let i = -N; i <= N; i++) {
-      const o = i * BLOCK;
-      ctx.beginPath(); ctx.moveTo(X(o), Y(SPAN)); ctx.lineTo(X(o), Y(-SPAN)); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(X(-SPAN), Y(o)); ctx.lineTo(X(SPAN), Y(o)); ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    // zebra crossings on every approach of alternating intersections
-    ctx.fillStyle = hex(P.roadMark);
-    for (let i = -N; i <= N; i++) {
-      for (let j = -N; j <= N; j++) {
-        if ((i + j) % 2) continue;
-        const cx = i * BLOCK, cy = j * BLOCK;
-        for (const sgn of [-1, 1]) {
-          for (let k = -1; k <= 1; k++) {
-            // stripes across the N-S road
-            ctx.fillRect(X(cx + k * 0.44 - 0.15), Y(cy + sgn * (ROAD_W + 0.55)), 0.3 * u, 0.5 * u);
-            // stripes across the E-W road
-            ctx.fillRect(X(cx + sgn * (ROAD_W + 0.55) - 0.25), Y(cy + k * 0.44 + 0.1), 0.5 * u, 0.3 * u);
-          }
-        }
+    // the street network is GROWN, not gridded: paint every edge of the
+    // procedural road graph (josauder/procedural_city_generation, baked into
+    // city_plan.js). Kerb underlay first, then asphalt, then centre dashes on
+    // the major roads — same three layers the grid used to get.
+    const NP = CITY_PLAN.nodes;
+    const stroke = (w, col, dash, majorOnly) => {
+      ctx.strokeStyle = col; ctx.lineWidth = w * u;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.setLineDash(dash || []);
+      ctx.beginPath();
+      for (const [ai, bi, minor] of CITY_PLAN.edges) {
+        if (majorOnly && minor) continue;
+        ctx.moveTo(X(NP[ai][0]), Y(NP[ai][1]));
+        ctx.lineTo(X(NP[bi][0]), Y(NP[bi][1]));
       }
-    }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+    stroke(ROAD_W * 2 + 0.6, hex(P.roadLine));               // pale kerb underlay
+    stroke(ROAD_W * 2, hex(P.road));                         // asphalt, all roads
+    stroke(ROAD_W * 1.35, hex(P.road), null, true);          // majors read wider
+    stroke(0.14, hex(P.roadMark), [0.9 * u, 0.9 * u], true); // dashes on majors
   }
 
   // the ground mesh: a disc of tangent-space quads conformed to the terrain,
@@ -2021,45 +2007,57 @@ mark('downtown:start');
   // Density falls off with distance: glass core -> midrise -> houses with
   // gardens. Cities read as cities because of the gradient, not the towers.
   const museumDir = LANDMARKS.find(l => l.key === 'artgarden').dir;
+  // the PCG roads must repel trees/terraces the same way painted roads do
+  for (const [ai, bi] of CITY_PLAN.edges) {
+    const A = CITY_PLAN.nodes[ai], B = CITY_PLAN.nodes[bi];
+    for (let k = 0; k <= 2; k++)
+      roadNetPts.push(at(A[0] + (B[0] - A[0]) * k / 2, A[1] + (B[1] - A[1]) * k / 2));
+  }
+  // ── buildings on the GROWN plan's parcels. Density still falls off with
+  // distance from the centre (that gradient is what reads as "city"), but the
+  // parcels themselves come from the road growth, so streets and buildings
+  // agree everywhere. Landmarks/monuments are separate systems and untouched.
   let mi = 0;
-  for (let bx = -SUB; bx < SUB; bx++) {
-    for (let by = -SUB; by < SUB; by++) {
-      const cx = bx * BLOCK + BLOCK / 2, cy = by * BLOCK + BLOCK / 2;
-      const ring = Math.max(Math.abs(bx + 0.5), Math.abs(by + 0.5));   // Chebyshev = square rings
-      const dd0 = at(cx, cy);
-      if (dd0.angleTo(museumDir) < 0.075) continue;
-      if (!isLand(dd0, 0.05)) continue;               // don't build into the strait
-      const fromCentre = ring / SUB;
-
-      if (ring <= N * 0.55) {                          // ── core: towers
-        if (rand() < 0.14) { plaza(cx, cy); continue; }   // more open squares
-        const per = 1;                                    // one tower per block
-        for (let k = 0; k < per; k++) {
-          const h = (7.5 + rand() * 6.5) * (1.15 - fromCentre * 0.35);
-          plot(cx, cy, Math.max(6.0, h), 1.2 + rand() * 0.5, mi++);
-        }
-      } else if (ring <= N) {                          // ── midrise: shops + flats
-        if (rand() < 0.22) { plaza(cx, cy); continue; }
-        const per = 1;
-        for (let k = 0; k < per; k++) {
-          plot(cx, cy, 2.7 + rand() * 2.2, 1.2 + rand() * 0.5, mi++);
-        }
-      } else {                                         // ── suburbs: EUROPEAN
-        // row-house terraces — many buildings shoulder to shoulder, vivid
-        // facades under one shared terracotta roof, like the reference
-        if (rand() < 0.22) { park(cx, cy, 3); continue; }
-        const terrace = buildTerrace(cx, cy, (bx + by) % 2 ? 0 : Math.PI / 2);
-        if (terrace && rand() > 0.55) {                // a tree by the terrace
-          const td = at(cx + (rand() - 0.5) * 3, cy + (rand() - 0.5) * 3);
-          if (isLand(td, 0.05) && !nearRoad(td, 2.2)) {
-            const tr = roundTree();
-            tr.position.copy(settleOn(td, 0.4, 0.1));
-            alignToSurface(tr, td, rand() * Math.PI * 2);
-            deco.add(tr);
-          }
+  const CORE_R = BLOCK * N * 0.55, MID_R = BLOCK * N;
+  for (const lot of CITY_PLAN.lots) {
+    const [cx, cy] = lot.c;
+    const dd0 = at(cx, cy);
+    if (dd0.angleTo(museumDir) < 0.075) continue;    // museum plaza stays open
+    if (!isLand(dd0, 0.05)) continue;                // don't build into the strait
+    const rr2 = Math.hypot(cx, cy);
+    const half = Math.min(1.7, Math.max(0.55, Math.sqrt(lot.a) * 0.34));
+    if (rr2 <= CORE_R) {                             // ── core: towers
+      if (rand() < 0.10) { plaza(cx, cy); continue; }
+      const h = (7.5 + rand() * 6.5) * (1.15 - (rr2 / MID_R) * 0.35);
+      tower(cx, cy, Math.max(6.0, h), half * 2, half * 2,
+        towerMats[mi++ % towerMats.length], lotYaw(lot));
+    } else if (rr2 <= MID_R) {                       // ── midrise: shops + flats
+      if (rand() < 0.18) { plaza(cx, cy); continue; }
+      tower(cx, cy, 2.7 + rand() * 2.2, half * 2, half * 2,
+        towerMats[mi++ % towerMats.length], lotYaw(lot));
+    } else {                                         // ── outskirts: terraces
+      if (rand() < 0.20) { park(cx, cy, 3); continue; }
+      const terrace = buildTerrace(cx, cy, lotYaw(lot));
+      if (terrace && rand() > 0.55) {
+        const td = at(cx + (rand() - 0.5) * 3, cy + (rand() - 0.5) * 3);
+        if (isLand(td, 0.05) && !nearRoad(td, 2.2)) {
+          const tr = roundTree();
+          tr.position.copy(settleOn(td, 0.4, 0.1));
+          alignToSurface(tr, td, rand() * Math.PI * 2);
+          deco.add(tr);
         }
       }
     }
+  }
+  // face the building along the lot's longest frontage edge
+  function lotYaw(lot) {
+    let bx = 0, by = 0, bl = -1;
+    for (let i = 0; i < lot.v.length; i++) {
+      const A = lot.v[i], B = lot.v[(i + 1) % lot.v.length];
+      const l = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      if (l > bl) { bl = l; bx = B[0] - A[0]; by = B[1] - A[1]; }
+    }
+    return Math.atan2(by, bx);
   }
 
   // a European terrace: 4-5 contiguous units, each its own vivid colour, tall
@@ -2155,19 +2153,8 @@ mark('downtown:start');
     }
   }
 
-  // ── kerbs: a raised sidewalk slab down each block frontage. This is what
-  // actually separates "buildings on grass" from "buildings on a street".
-  for (let i = -N; i <= N; i++) {
-    for (const axis of [0, 1]) {
-      for (const side of [-1, 1]) {
-        const o = i * BLOCK + side * (ROAD_W + WALK_W / 2);
-        const ext = BLOCK * (N + 0.5);
-        const a = axis ? at(-ext, o) : at(o, -ext);
-        const b = axis ? at(ext, o) : at(o, ext);
-        street(a, b, WALK_W / 2, 0.14, 'roadLine');
-      }
-    }
-  }
+  // (kerbs are painted into the ground texture — ribbon kerbs made sense on a
+  // grid but would cost 120 meshes on the grown network)
   // ── traffic: cars driving the grid, and people on the sidewalks
   const carBody = [0xff4d6e, 0x4e8eff, 0xffd23d, 0xfffaf2, 0x2dd47b, 0x8f7ae8];
   function makeCar(hex) {
@@ -2182,45 +2169,48 @@ mark('downtown:start');
     }
     return g;
   }
-  const LANE = ROAD_W * 0.5;
-  for (let n = 0; n < 7; n++) {               // fewer cars: real models cost more
-    const axis = n % 2;
-    const line = (Math.floor(rand() * (2 * N + 1)) - N) * BLOCK;
-    const fwd = rand() > 0.5 ? 1 : -1;
-    const ext = BLOCK * (N + 0.5);
-    const lane = fwd * LANE;                       // keep right
-    const a = axis ? at(-ext * fwd, line + lane) : at(line - lane, -ext * fwd);
-    const b = axis ? at(ext * fwd, line + lane) : at(line - lane, ext * fwd);
+  // adjacency over the grown graph → random-walk chains; traffic loops those
+  // chains, so cars and pedestrians only ever travel the painted streets
+  const adj = CITY_PLAN.nodes.map(() => []);
+  for (const [ai, bi] of CITY_PLAN.edges) { adj[ai].push(bi); adj[bi].push(ai); }
+  function makeChain(len) {
+    let cur = Math.floor(rand() * CITY_PLAN.nodes.length), prev = -1;
+    const chain = [];
+    for (let k = 0; k < len; k++) {
+      chain.push(at(CITY_PLAN.nodes[cur][0], CITY_PLAN.nodes[cur][1]));
+      const opts = adj[cur].filter(nn => nn !== prev);
+      if (!opts.length) break;
+      prev = cur; cur = opts[Math.floor(rand() * opts.length)];
+    }
+    return chain.length >= 2 ? chain : null;
+  }
+  for (let n = 0; n < 7; n++) {               // cars: chains around the network
+    const chain = makeChain(6 + Math.floor(rand() * 5));
+    if (!chain) continue;
     const car = makeCar(carBody[n % carBody.length]);
     scene.add(car);
-    traffic.push({ obj: car, a, b, t: rand(), speed: 0.055 + rand() * 0.05, kind: 'car' });
+    traffic.push({ obj: car, chain, seg: 0, a: chain[0], b: chain[1],
+      t: rand(), speed: 0.055 + rand() * 0.05, kind: 'car' });
   }
-  for (let n = 0; n < 12; n++) {                   // pedestrians on the kerb
-    const axis = n % 2;
-    const line = (Math.floor(rand() * (2 * N + 1)) - N) * BLOCK;
-    const side = rand() > 0.5 ? 1 : -1;
-    const off = side * (ROAD_W + WALK_W * 0.5);
-    const ext = BLOCK * (N + 0.4);
-    const dirSign = rand() > 0.5 ? 1 : -1;
-    const a = axis ? at(-ext * dirSign, line + off) : at(line + off, -ext * dirSign);
-    const b = axis ? at(ext * dirSign, line + off) : at(line + off, ext * dirSign);
+  for (let n = 0; n < 12; n++) {              // pedestrians wander the same net
+    const chain = makeChain(4 + Math.floor(rand() * 4));
+    if (!chain) continue;
     const ped = makePerson(carBody[(n + 3) % carBody.length], n % 3 === 0 ? 0x2d2138 : null);
     ped.scale.setScalar(0.72);
     scene.add(ped);
-    traffic.push({ obj: ped, a, b, t: rand(), speed: 0.016 + rand() * 0.01, kind: 'ped', phase: n });
+    traffic.push({ obj: ped, chain, seg: 0, a: chain[0], b: chain[1],
+      t: rand(), speed: 0.016 + rand() * 0.01, kind: 'ped', phase: n });
   }
 
-  // street furniture at the intersections
-  for (let i = -N; i <= N; i++) {
-    for (let j = -N; j <= N; j++) {
-      if ((i + j) % 3) continue;
-      const dd = at(i * BLOCK + 1.6, j * BLOCK + 1.6);
-      const lamp = streetLamp();
-      lamp.position.copy(settleOn(dd, 0.4, 0.1));
-      alignToSurface(lamp, dd, rand() * Math.PI * 2);
-      deco.add(lamp);
-    }
-  }
+  // street furniture at every third junction of the grown network
+  CITY_PLAN.nodes.forEach((nd, i) => {
+    if (i % 3 || adj[i].length < 3) return;
+    const dd = at(nd[0] + 0.9, nd[1] + 0.9);
+    const lamp = streetLamp();
+    lamp.position.copy(settleOn(dd, 0.4, 0.1));
+    alignToSurface(lamp, dd, rand() * Math.PI * 2);
+    deco.add(lamp);
+  });
 }
 
 mark('bridge:start');
@@ -5897,7 +5887,14 @@ function updateWorldAmbient(dt, t) {
       }
     }
     v.t += v.speed * dt * block;
-    if (v.t > 1) v.t -= 1;
+    if (v.t > 1) {
+      v.t -= 1;
+      if (v.chain) {                      // advance along the grown-road chain
+        v.seg = (v.seg + 1) % (v.chain.length - 1);
+        v.a = v.chain[v.seg];
+        v.b = v.chain[v.seg + 1];
+      }
+    }
     const d = slerpDir(v.a, v.b, v.t);
     v.pos = d;
     const dn = slerpDir(v.a, v.b, (v.t + 0.004) % 1);
