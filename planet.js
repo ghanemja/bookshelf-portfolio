@@ -2174,7 +2174,7 @@ mark('downtown:start');
     return g;
   }
   const LANE = ROAD_W * 0.5;
-  for (let n = 0; n < 11; n++) {              // half as many cars
+  for (let n = 0; n < 8; n++) {               // fewer cars: real models cost more
     const axis = n % 2;
     const line = (Math.floor(rand() * (2 * N + 1)) - N) * BLOCK;
     const fwd = rand() > 0.5 ? 1 : -1;
@@ -2725,7 +2725,8 @@ let gearProto = null;      // one normalized landing-gear leg, cloned onto the j
   const FLEET = [
     { file: 'mustang', len: 2.15, flip: false }, // '65 classic muscle
     { file: 'picanto', len: 1.85, flip: false }, // little city hatch
-    { file: 'tarraco', len: 2.35, flip: false }, // SUV
+    // tarraco dropped from traffic: 23 fragmented materials resist decimation
+    // (130k tris even at ratio .025) — one SUV isn't worth a third of the budget
     { file: 'simca',   len: 1.90, flip: false }, // '66 retro
     { file: 'escort',  len: 2.05, flip: false }, // convertible
     { file: 'skylark', len: 2.20, flip: false }, // retro coupe
@@ -2768,10 +2769,13 @@ let gearProto = null;      // one normalized landing-gear leg, cloned onto the j
   // sure it shades smooth (curved, not faceted) and casts a shadow. Photoscans
   // sometimes bake metalness to the max, which reads as near-black under our
   // few lights, so clamp it back to something the toon lighting can catch.
-  function dressCar(wrap) {
+  function dressCar(wrap, shadow = false) {
     wrap.traverse(o => {
       if (!o.isMesh) return;
-      o.castShadow = !IS_TOUCH; o.receiveShadow = false;
+      // traffic never casts shadows — re-rendering 8 real models into the
+      // shadow map each frame was a big chunk of the lag. Hero vehicles
+      // (limo) opt back in via `shadow`.
+      o.castShadow = shadow && !IS_TOUCH; o.receiveShadow = false;
       o.frustumCulled = true;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of mats) {
@@ -2855,7 +2859,7 @@ let gearProto = null;      // one normalized landing-gear leg, cloned onto the j
   // transforms handle it), so no pre-rotation — just size + face it.
   gltfV.loadAsync('./models/opt/limo.glb').then(g => {
     const tpl = toTemplate(g.scene, 4.6, -0.02, false, 0);
-    dressCar(tpl);
+    dressCar(tpl, true);
     limoTemplate = tpl;
     // any limo group created before the GLB landed fills itself now
     for (const holder of limoWaiters) if (!holder.children.length) holder.add(dressLimoClone());
@@ -4545,7 +4549,7 @@ function updateTitle3D(dt) {
 // A hands-off cinematic that plays after "enter", using the airport and resort
 // that already exist. Ends by handing off to the texts + GPS flow.
 let arrivalT = 0, arrivalPhase = -1, limo = null, arrivalPax = null;
-const _aTmp = new THREE.Vector3(), _aTmp2 = new THREE.Vector3(), _aPrev = new THREE.Vector3();
+const _aTmp = new THREE.Vector3(), _aTmp2 = new THREE.Vector3(), _aTmp3 = new THREE.Vector3(), _aPrev = new THREE.Vector3();
 const arrDir = { runwayA: null, runwayB: null, board: null, cityEnd: null };
 let arrPath = null, arrArcs = null, arrTotal = 0, uGas = 0.45, uEnd = 1;
 let gasDriver = null;
@@ -4841,40 +4845,48 @@ function makeSkylineTex() {
 // billboard, plus a porthole whose glass shows a scrolling skyline (below)
 function buildCabin() {
   const g = new THREE.Group();
-  // the cabin interior is a supplied grease-pencil painting (models/cabin_refined.png).
-  // It already carries the drawn/boil look baked in, so we just hang it on the
-  // billboard — no per-frame canvas swap. (drawCabinPainting stays as the fallback.)
-  const board = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 4.5),
+  // THE CABIN IS A TUBE, like a real fuselage: an open cylinder around the
+  // camera whose interior wears the cabin-wall texture, capped at the back by
+  // the supplied NetJets painting (models/cabin_refined.png) as a flat image.
+  // The camera sits INSIDE and simply yaws — panning now sweeps across curved
+  // wall, so the head-turn reads geometrically instead of sliding a flashcard.
+  const RAD = 2.7, LEN = 10;
+  const wallTex = makeCabinWallTex();
+  wallTex.repeat.set(6, 2);
+  const tube = new THREE.Mesh(
+    new THREE.CylinderGeometry(RAD, RAD, LEN, 40, 1, true),
+    new THREE.MeshBasicMaterial({ map: wallTex, side: THREE.BackSide }));
+  tube.rotation.x = Math.PI / 2;              // axis down Z (cabin length)
+  tube.position.set(0, 0.6, 0);
+  g.add(tube);
+  // back cap: the NetJets painting, a flat image closing the tube
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(2 * RAD * 1.42, 2 * RAD * 1.02),
     new THREE.MeshBasicMaterial({ color: 0xffffff }));
   new THREE.TextureLoader().load('./models/cabin_refined.png', (tex) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     board.material.map = tex;
     board.material.needsUpdate = true;
   });
-  board.position.set(0, 1.1, 3.0);
-  board.rotation.y = Math.PI;                 // faces the camera at -z
-  board.userData.boil = null;                 // single image → no boil swap
+  board.position.set(0, 0.6, LEN / 2 - 0.4);
+  board.rotation.y = Math.PI;                 // faces the camera down the tube
   g.add(board);
   g.userData.board = board;
-  // the porthole: cabin wall (annulus) filling the frame right to the screen
-  // edges, a cream outer rim and a steel inner ring — the planet shows only
-  // through the glass
+  // the porthole rides ON the left wall of the tube (inner face at -X),
+  // rim + glass turned to face inward at the camera
   const winG = new THREE.Group();
-  const wall = new THREE.Mesh(new THREE.RingGeometry(1.0, 7.5, 48),
-    new THREE.MeshBasicMaterial({ map: makeCabinWallTex(), side: THREE.DoubleSide }));
-  winG.add(wall);
-  // warm tan outer rim to match the cabin, thin steel inner ring
   const rim = new THREE.Mesh(new THREE.TorusGeometry(1.02, 0.16, 12, 36), new THREE.MeshBasicMaterial({ color: 0xe4d3b0 }));
   const rim2 = new THREE.Mesh(new THREE.TorusGeometry(0.88, 0.055, 8, 36), new THREE.MeshBasicMaterial({ color: 0x8f95a0 }));
   winG.add(rim); winG.add(rim2);
-  // the world outside the glass: a wide dusk skyline that scrolls right→left
+  // the world outside the glass: a wide dusk skyline that scrolls right→left,
+  // hung just beyond the wall so it only shows through the ring
   const skyTex = makeSkylineTex();
   const skyline = new THREE.Mesh(new THREE.PlaneGeometry(9, 5),
     new THREE.MeshBasicMaterial({ map: skyTex }));
-  skyline.position.set(0, 0, -0.7);          // just behind the ring, seen through the hole
+  skyline.position.set(0, 0, -0.9);
   winG.add(skyline);
   winG.userData.skyTex = skyTex;
-  winG.position.set(-3.6, 0.2, 0.6);
+  winG.position.set(-RAD + 0.08, 0.7, 0.4);   // on the left wall, seat height
+  winG.rotation.y = Math.PI / 2;              // face inward (+X, at the camera)
   g.add(winG);
   g.userData.window = winG;
   g.visible = false;
@@ -4956,28 +4968,23 @@ function updateArrival(dt) {
     camera.position.copy(_aTmp);
     camera.up.lerp(up, 0.25).normalize();
     const win = cabin.userData.window;
+    // the porthole is FIXED to the tube's left wall now — always visible, the
+    // skyline behind it always sliding right→left like the plane is cruising
+    win.visible = true;
+    if (win.userData.skyTex) win.userData.skyTex.offset.x = (win.userData.skyTex.offset.x + dt * 0.05) % 1;
     if (T < 0.065) {                               // gazing down the cabin
       if (arrCaption) arrCaption.textContent = '✈ First class — welcome aboard';
-      win.visible = false;
-      camera.lookAt(cabin.localToWorld(new THREE.Vector3(jx * 2, 1.1, 3.0)));
+      camera.lookAt(cabin.localToWorld(_aTmp2.set(jx * 2, 0.8, 4.0)));
     } else {                                       // TURN YOUR HEAD to the window
       if (arrCaption) arrCaption.textContent = '🌍 There it is — the tiny planet';
       const k = Math.min(1, (T - 0.065) / 0.035);
       const e = k * k * (3 - 2 * k);
-      // A head-turn, not a flashcard swipe: the camera stays put and its GAZE
-      // yaws LEFT about the cabin's up axis (the seat faces that window), staying
-      // level with just a hair of downward tilt.
-      const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(cabin.quaternion).normalize();
-      const lookDir = fwd.applyAxisAngle(up, e * 1.45)    // yaw ~83° to the LEFT
-        .addScaledVector(up, -0.12 * e).normalize();
-      const lookTarget = _aTmp2.copy(camera.position).addScaledVector(lookDir, 6);
-      camera.lookAt(lookTarget);
-      // the porthole hangs on that exact sight line; the skyline scrolls behind
-      // its glass so it reads as the plane cruising over the city
-      win.visible = true;
-      win.position.copy(cabin.worldToLocal(camera.position.clone().addScaledVector(lookDir, 3.2)));
-      win.lookAt(camera.position);
-      if (win.userData.skyTex) win.userData.skyTex.offset.x = (win.userData.skyTex.offset.x + dt * 0.05) % 1;
+      // head-turn inside the tube: gaze slides from the painting at the back of
+      // the cabin to the porthole on the left wall — one smooth level yaw whose
+      // panning sweeps across the curved wall between them
+      const paintingAt = cabin.localToWorld(_aTmp2.set(0, 0.8, 4.0)).clone();
+      const windowAt = cabin.localToWorld(_aTmp3.set(-2.6, 0.7, 0.4));
+      camera.lookAt(_aTmp2.copy(paintingAt).lerp(windowAt, e));
       // ...and during the hold, drift very slowly so it feels alive
       if (k >= 1) camera.position.addScaledVector(camera.up, Math.sin(tt * 0.7) * 0.02);
     }

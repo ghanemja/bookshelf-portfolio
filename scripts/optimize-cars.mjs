@@ -20,14 +20,14 @@ const RAW = 'models/_raw';
 // [source, outName, simplifyRatio] — ratio picked per model to land near ~45k
 // tris. ev9 stays OUT of the scene fleet (43 material slots floor the simplifier).
 const JOBS = [
-  [`${RAW}/1965_ford_mustang_coupe_289.glb`,                'mustang',   0.50],
-  [`${RAW}/2017_kia_picanto_gt-line.glb`,                   'picanto',   0.16],
-  [`${RAW}/2020_seat_tarraco_e-hybrid.glb`,                 'tarraco',   0.08],
-  [`${RAW}/simca_1000_1966.glb`,                            'simca',     0.06],
-  [`${RAW}/ford_escort_xr3_i_cabriolet_convertible.glb`,    'escort',    0.07],
-  [`${RAW}/orion_skylark_gt.glb`,                           'skylark',   0.09],
-  [`${RAW}/2023_faraday_future_ff_91_2.0_futurist_alliance.glb`, 'faraday', 0.90],
-  [`${RAW}/2025-pagani-huayra-codalunga-speedster/source/2025 Pagani Huayra Codalunga Speedster.glb`, 'pagani', 0.15],
+  [`${RAW}/1965_ford_mustang_coupe_289.glb`,                'mustang',   0.16],
+  [`${RAW}/2017_kia_picanto_gt-line.glb`,                   'picanto',   0.05],
+  [`${RAW}/2020_seat_tarraco_e-hybrid.glb`,                 'tarraco',   0.025],
+  [`${RAW}/simca_1000_1966.glb`,                            'simca',     0.02],
+  [`${RAW}/ford_escort_xr3_i_cabriolet_convertible.glb`,    'escort',    0.024],
+  [`${RAW}/orion_skylark_gt.glb`,                           'skylark',   0.03],
+  [`${RAW}/2023_faraday_future_ff_91_2.0_futurist_alliance.glb`, 'faraday', 0.5],
+  [`${RAW}/2025-pagani-huayra-codalunga-speedster/source/2025 Pagani Huayra Codalunga Speedster.glb`, 'pagani', 0.05],
   [`${RAW}/private-jet/source/самолет.glb`,                 'jet',       0.60],
   [`${RAW}/limo.glb`,                                       'limo',      0.90],
   [`${RAW}/landing_gear.glb`,                               'gear',      0.30],
@@ -66,9 +66,9 @@ for (const [src, name, ratio] of JOBS) {
     weld(),
     // keep UVs, normals and tangents — normal maps need them, and smooth
     // normals are what make the low-poly body still read as curved
-    simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.004 }),
+    simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.02 }),
     // the actual weight: every texture down to 512² WebP
-    textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [512, 512], quality: 80 }),
+    textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [256, 256], quality: 80 }),
     prune(),
   );
 
