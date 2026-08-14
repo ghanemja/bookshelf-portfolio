@@ -2904,7 +2904,7 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
   // rail tangent, shifted aside so the Express pulls up alongside). It is
   // deliberately NOT in the collision BVH — you walk THROUGH it to board.
   gltfV.loadAsync('./models/opt/station.glb').then(g => {
-    const tpl = toTemplate(g.scene, 9.0, 0.02, true, 0);
+    const tpl = toTemplate(g.scene, 13.5, 0.02, true, 0);   // civic scale: reads right against the 3-storey blocks
     // Sketchfab bakes a big translucent ground "Plane" under the scene — on
     // the planet it lies across the road as a weird clear oval. Delete it.
     const junk = [];
@@ -2915,12 +2915,12 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
     const d = STOP_DIRS.central;
     const nb = trackPts[1];
     const tang = nb.clone().sub(d.clone().multiplyScalar(d.dot(nb))).normalize();
-    const sd = d.clone().applyAxisAngle(tang, -2.4 / R).normalize();
+    const sd = d.clone().applyAxisAngle(tang, -3.0 / R).normalize();  // pushed out so the bigger footprint clears the rails
     // the plateau's roll swells undulate ±0.2 under the station's 9-unit
     // footprint and settleOn seats it on the LOWEST sample — half the model
     // ended up under the lawn. Lift it clear; the platform skirt hides the
     // sliver of air over the dips.
-    tpl.position.copy(settleOn(sd, 2.6, 0.32));
+    tpl.position.copy(settleOn(sd, 3.8, 0.32));
     const xAxis = new THREE.Vector3().crossVectors(sd, tang).normalize();
     tpl.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, sd, tang));
     tpl.traverse(o => { if (o.isMesh) o.userData._gpThin = true; });
