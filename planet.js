@@ -1878,9 +1878,11 @@ mark('downtown:start');
       ctx.stroke();
       ctx.setLineDash([]);
     };
-    stroke(ROAD_W * 2 + 0.6, hex(P.roadLine));               // pale kerb underlay
-    stroke(ROAD_W * 2, hex(P.road));                         // asphalt, all roads
-    stroke(ROAD_W * 1.35, hex(P.road), null, true);          // majors read wider
+    // hierarchy you can read at a glance: majors are wide boulevards with a
+    // dashed centreline, minors are narrow lanes — same trick real maps use
+    stroke(ROAD_W * 2 + 0.6, hex(P.roadLine));               // pale kerb underlay, all
+    stroke(ROAD_W * 1.4, hex(P.road));                       // minors: narrow lanes
+    stroke(ROAD_W * 2.2, hex(P.road), null, true);           // majors: boulevards
     stroke(0.14, hex(P.roadMark), [0.9 * u, 0.9 * u], true); // dashes on majors
   }
 
