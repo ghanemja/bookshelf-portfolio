@@ -638,6 +638,7 @@ const bobbers = [];           // moored boats that rock on the swell
 let airportPlane = null, resortHotel = null;   // handles for the arrival intro
 let RING_LOOP = null;                          // the smoothed landmark loop
 let GAS_DIR = null;                            // gas station, off the airport spur
+let GAS_SLAB_R = 0;                            // world radius of the forecourt slab top
 let cityMapCtx = null, cityMapTex = null, cityMapDraw = null;   // the painted city floor
 const SKIN = [0xffd9b8, 0xe8b98f, 0xc68a5e, 0x8a5a3a];
 const HAIR = [0x2d2138, 0x5a3a22, 0x8a6a3a, 0x1c1620, 0x704020];
@@ -3274,6 +3275,10 @@ function buildFarm(anchor, label) {
   g.scale.setScalar(1.7);                                // limo-scale, not toy-scale
   g.position.copy(settleOn(GAS_DIR, 3.3, 0.1));
   alignToSurface(g, GAS_DIR, yawToFace(GAS_DIR, mid));   // pumps face the road
+  // world radius of the forecourt slab's TOP surface (slab y 0.1, half 0.05,
+  // ×1.7 scale) — anything parking "at the pumps" must stand on THIS, not on
+  // the analytic terrain the slab covers
+  GAS_SLAB_R = g.position.length() + 0.255;
   g.traverse(m => { if (m.isMesh && !IS_TOUCH) m.castShadow = true; });
   scene.add(g);
   addSolid(GAS_DIR, 3.2, g);
@@ -5212,13 +5217,18 @@ function updateArrival(dt) {
     // and kept stopping the limo at the kerb).
     const parkDir = driving ? _apDir.clone()
       : slerpDir(_apDir, GAS_DIR, 0.85);
-    limo.position.copy(dbl(parkDir));
+    // driving: ride the road surface. parked: stand ON the forecourt slab —
+    // it's a mesh proud of the terrain, and seating the limo on the analytic
+    // ground left it hovering/clipping at the slab lip
+    if (driving || !GAS_SLAB_R) limo.position.copy(dbl(parkDir));
+    else limo.position.copy(parkDir).multiplyScalar(GAS_SLAB_R + 0.005);
     alignToSurface(limo, parkDir, yawToFace(parkDir, parkDir.clone().multiplyScalar(R).addScaledVector(_apTan, 2).normalize()));
     if (driving) for (const w of limo.userData.wheels || []) w.rotation.x += dt * 5;
     // the chauffeur hops out on the pump side
     if (!driving) {
       gasDriver.visible = true;
       gasDriver.position.copy(limo.position).addScaledVector(gasSide, 1.0);
+      if (GAS_SLAB_R) gasDriver.position.setLength(GAS_SLAB_R + 0.005);
       alignToSurface(gasDriver, parkDir, yawToFace(parkDir, GAS_DIR));
       walkPerson(gasDriver, performance.now() / 1000, 0.25);   // fidgets with the pump
     } else {
