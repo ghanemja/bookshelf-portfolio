@@ -2996,13 +2996,14 @@ function buildJetRig(jet) {
   // wheel station sits at a different jet-local height. Physics = each leg
   // reaches ITS OWN ground contact, probed from the terrain field.
   const _gyP = new THREE.Vector3();
+  const RUNWAY_LIFT = 0.05;   // the asphalt ribbon floats this far above terrain
   function groundYAt(x, z) {
     _gyP.set(x, 0, z); jet.localToWorld(_gyP);
     const d = _gyP.clone().normalize();
-    _gyP.copy(d).multiplyScalar(Math.max(radiusAt(d), SEA_R));
+    _gyP.copy(d).multiplyScalar(Math.max(radiusAt(d), SEA_R) + RUNWAY_LIFT);
     return jet.worldToLocal(_gyP.clone()).y;
   }
-  const LEG = Math.min(0.45, len * 0.09);     // visible strut, proportional
+  const LEG = Math.min(0.30, len * 0.06);     // stubby bizjet struts
   {
     const mainG = groundYAt(0.2, -len * 0.03);
     const underMain = undersideAt(0, -len * 0.03);
