@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import CITY_PLAN from './city_plan.js';
+import CITY_PLAN from './city_plan.js?v=2';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -182,7 +182,7 @@ function makePaperTexture() {
 }
 function ensureInk() {
   if (inkReady) return;
-  const w = window.innerWidth, h = window.innerHeight;
+  const w = Math.max(1, window.innerWidth), h = Math.max(1, window.innerHeight);
   const dpr = renderer.getPixelRatio();
   rtColor = new THREE.WebGLRenderTarget(w * dpr, h * dpr, {
     depthTexture: new THREE.DepthTexture(w * dpr, h * dpr),
@@ -2028,7 +2028,15 @@ mark('downtown:start');
     if (dd0.angleTo(museumDir) < 0.075) continue;    // museum plaza stays open
     if (!isLand(dd0, 0.05)) continue;                // don't build into the strait
     const rr2 = Math.hypot(cx, cy);
-    const half = Math.min(1.7, Math.max(0.55, Math.sqrt(lot.a) * 0.34));
+    // footprint may never reach past 42% of the gap to the nearest neighbour —
+    // two adjacent parcels can then never overlap, whatever the plan says
+    let nearGap = 1e9;
+    for (const o of CITY_PLAN.lots) {
+      if (o === lot) continue;
+      const g2 = Math.hypot(o.c[0] - cx, o.c[1] - cy);
+      if (g2 < nearGap) nearGap = g2;
+    }
+    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42);
     if (rr2 <= CORE_R) {                             // ── core: towers
       if (rand() < 0.10) { plaza(cx, cy); continue; }
       const h = (7.5 + rand() * 6.5) * (1.15 - (rr2 / MID_R) * 0.35);
