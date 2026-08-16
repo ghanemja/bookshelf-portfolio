@@ -47,14 +47,28 @@ export default {
     artgarden:    [26, -66],   // the Downtown Museum — tonight's main event
   },
 
-  // ── hero assets: the imported GLB set-pieces ──
+  // ── hero assets: the imported GLB set-pieces. `dims: [width, length]` is the
+  //    real world-unit footprint (length along the asset's facing axis) — the
+  //    planning map draws these to scale so fit problems are visible on paper ──
   heroes: {
-    jetParked:    { frame: 'airport', at: [-3.2, 3],  note: 'NetJets on the apron, nose up-runway' },
-    limoApron:    { frame: 'airport', at: [5.2, 12],  note: 'limo waits clear of the runway end' },
-    gasStation:   { frame: 'spur:downtown→airport', t: 0.5, side: 2.3, scale: 1.7,
+    jetParked:    { frame: 'airport', at: [-3.2, 3],  dims: [4.6, 5.0], facing: 'up-runway',
+                    note: 'NetJets on the apron, nose up-runway' },
+    limoApron:    { frame: 'airport', at: [5.2, 12],  dims: [1.15, 4.6],
+                    note: 'limo waits clear of the runway end' },
+    gasStation:   { frame: 'spur:downtown→airport', t: 0.5, side: 2.3, scale: 1.7, dims: [6.1, 4.8],
                     note: 'Gas-N-Go halfway down the airport spur; limo pulls onto the slab' },
     trainStation: { frame: 'stop:central', offTrack: -3.0, len: 13.5, lift: 0.32, settleHalf: 3.8,
-                    note: 'walk-through station; long axis along the rails' },
-    rocketPad:    { frame: 'stop:farside', side: 0.12, note: 'shuttle pad, off the far side stop' },
+                    dims: [5.4, 13.5], note: 'walk-through station; long axis along the rails' },
+    rocketPad:    { frame: 'stop:farside', side: 0.12, dims: [3.4, 3.4], note: 'shuttle pad' },
+    airportTerminal: { frame: 'airport', at: [4.5, 0], dims: [3.0, 7.0], note: 'terminal hall (procedural)' },
+  },
+
+  // ── shared references the map draws for scale + fit checks ──
+  reference: {
+    runway:   { frame: 'airport', from: [0, -18], to: [0, 18], width: 4.8 },
+    roadHalf: 1.3,     // half-width of asphalt everywhere (car is ~1.5 wide)
+    car:      [1.0, 2.1],
+    person:   [0.6, 0.6],
+    boardRadius: 1.6,  // walk-through boarding trigger at Central Station
   },
 };
