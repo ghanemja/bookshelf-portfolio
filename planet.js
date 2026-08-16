@@ -11,6 +11,8 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import CITY_PLAN from './city_plan.js?v=2';
+import LAYOUT from './city_layout.js?v=1';
+const llv = (a) => ll(a[0], a[1]);   // manifest [lat,lon] → unit direction
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -511,31 +513,27 @@ const LANDMARKS = [
     desc: 'Opening night! A sculpture garden of my real acrylics — 45 paintings hang in the gallery inside.',
     enter: './room.html', dir: ll(26, -66) },
 ];
-const LAKE = ll(-40, 62);
-const MTN = ll(55, -50);
+// positions come from the planning manifest — the table above keeps identity
+for (const lm of LANDMARKS) if (LAYOUT.landmarks[lm.key]) lm.dir = llv(LAYOUT.landmarks[lm.key]);
+const LAKE = llv(LAYOUT.anchors.lake);
+const MTN = llv(LAYOUT.anchors.mountain);
 // the city sits between the Library and the Downtown Museum
-const DOWNTOWN = ll(20, -36);
+const DOWNTOWN = llv(LAYOUT.anchors.downtown);
 
 // extra route stops (train stations, the overlook, the boardwalk) — these are
 // part of the world whether or not your route uses them
-const STOP_DIRS = {
-  central: ll(12, 4),        // Central Station, just east of the Library
-  lakeside: ll(-26, 58),     // Lakeside Station, on the bay
-  farside: ll(6, -168),      // Far Side Station, out past Sinescape
-  museumst: ll(18, -74),     // Museum Station, walking distance to the event
-  overlook: ll(44, -46),     // Summit Overlook, on the mountain's shoulder
-  boardwalk: ll(-9, -38),    // Seaside Boardwalk, on the west coast
-};
+const STOP_DIRS = Object.fromEntries(
+  Object.entries(LAYOUT.stops).map(([k, v]) => [k, llv(v)]));
 // stops that get flat land pedestals like landmarks do (not the overlook — it clings to the mountain)
 const STOP_PEDESTALS = [STOP_DIRS.central, STOP_DIRS.lakeside, STOP_DIRS.farside, STOP_DIRS.museumst, STOP_DIRS.boardwalk];
 // a wide sandy bay on the south coast, for the beach, the dock and the fishing
-const BEACH = ll(-16, -60);
+const BEACH = llv(LAYOUT.anchors.beach);
 // district anchors (lat, lon), each on open ground linked to downtown by a radial
-const MALL = ll(9, -48);       // shopping district SE of downtown
-const AIRPORT = ll(55, 80);    // clear airspace, well outside the city footprint
-const FARM_A = ll(46, -12);    // north-east fields
-const FARM_B = ll(-34, -46);   // south-west fields
-const RESORT = ll(-14, -66);   // hotel, just inland of the beach
+const MALL = llv(LAYOUT.anchors.mall);
+const AIRPORT = llv(LAYOUT.anchors.airport);
+const FARM_A = llv(LAYOUT.anchors.farmA);
+const FARM_B = llv(LAYOUT.anchors.farmB);
+const RESORT = llv(LAYOUT.anchors.resort);
 const FLATS = [MALL, AIRPORT, FARM_A, FARM_B, RESORT];
 const HILL_A = ll(30, 40), HILL_B = ll(-46, -110);
 // a channel of open water south-west of downtown, spanned by the big bridge
@@ -1355,7 +1353,7 @@ mooredBoat.traverse(m => { if (m.isMesh) { m.userData.vehicle = 'boat'; vehicleM
 
 // Cape Far Side: launchpad, gantry, and a very eager rocket
 const padDir = STOP_DIRS.farside.clone().applyAxisAngle(
-  new THREE.Vector3(0, 1, 0).cross(STOP_DIRS.farside).normalize(), 0.12).normalize();
+  new THREE.Vector3(0, 1, 0).cross(STOP_DIRS.farside).normalize(), LAYOUT.heroes.rocketPad.side).normalize();
 const padPos = settleOn(padDir, 1.7, 0.12);
 // a surface tangent at the pad — the liftoff camera stands here to watch
 const padSide = new THREE.Vector3(0, 1, 0).cross(padDir).normalize();
@@ -2620,7 +2618,7 @@ function boxHouse(w, h, dd_, bodyHex, roofHex, roofType = 'gable') {
   // with dihedral, rear-mounted engines, swept tail with a T-stabiliser, and
   // real landing gear — nose along +Z
   {
-    const d = at(-3.2, 3);
+    const d = at(...LAYOUT.heroes.jetParked.at);
     const g = new THREE.Group();
     const WHITE = M(0xf4f6f8, { roughness: 0.35 });
     const NAVY = M(0x14243a);
@@ -2905,7 +2903,7 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
   // rail tangent, shifted aside so the Express pulls up alongside). It is
   // deliberately NOT in the collision BVH — you walk THROUGH it to board.
   gltfV.loadAsync('./models/opt/station.glb').then(g => {
-    const tpl = toTemplate(g.scene, 13.5, 0.02, true, 0);   // civic scale: reads right against the 3-storey blocks
+    const tpl = toTemplate(g.scene, LAYOUT.heroes.trainStation.len, 0.02, true, 0);   // manifest: heroes.trainStation
     // Sketchfab bakes a big translucent ground "Plane" under the scene — on
     // the planet it lies across the road as a weird clear oval. Delete it.
     const junk = [];
@@ -2916,12 +2914,12 @@ let subwayInt = null;      // subway car interior, wrapped around the camera mid
     const d = STOP_DIRS.central;
     const nb = trackPts[1];
     const tang = nb.clone().sub(d.clone().multiplyScalar(d.dot(nb))).normalize();
-    const sd = d.clone().applyAxisAngle(tang, -3.0 / R).normalize();  // pushed out so the bigger footprint clears the rails
+    const sd = d.clone().applyAxisAngle(tang, LAYOUT.heroes.trainStation.offTrack / R).normalize();
     // the plateau's roll swells undulate ±0.2 under the station's 9-unit
     // footprint and settleOn seats it on the LOWEST sample — half the model
     // ended up under the lawn. Lift it clear; the platform skirt hides the
     // sliver of air over the dips.
-    tpl.position.copy(settleOn(sd, 3.8, 0.32));
+    tpl.position.copy(settleOn(sd, LAYOUT.heroes.trainStation.settleHalf, LAYOUT.heroes.trainStation.lift));
     const xAxis = new THREE.Vector3().crossVectors(sd, tang).normalize();
     tpl.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, sd, tang));
     tpl.traverse(o => { if (o.isMesh) o.userData._gpThin = true; });
@@ -3251,12 +3249,12 @@ function buildFarm(anchor, label) {
 }
 // ── THE GAS STATION: halfway down the airport spur, just off the road ──
 {
-  const mid = slerpDir(DOWNTOWN, AIRPORT, 0.5);
+  const mid = slerpDir(DOWNTOWN, AIRPORT, LAYOUT.heroes.gasStation.t);
   const toAir = AIRPORT.clone().sub(mid.clone().multiplyScalar(mid.dot(AIRPORT))).normalize();
   const lat = new THREE.Vector3().crossVectors(mid, toAir).normalize();
   GAS_DIR = mid.clone().applyAxisAngle(toAir, 0).applyAxisAngle(lat.clone().cross(mid).normalize(), 0);
   // shift ~2.3 units to the roadside
-  GAS_DIR = mid.clone().multiplyScalar(R).addScaledVector(lat, 2.3).normalize();
+  GAS_DIR = mid.clone().multiplyScalar(R).addScaledVector(lat, LAYOUT.heroes.gasStation.side).normalize();
   const g = new THREE.Group();
   // forecourt slab
   const slab = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.1, 2.8), M(0xb9b4a8));
@@ -3283,7 +3281,7 @@ function buildFarm(anchor, label) {
   const shopRoof = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.12, 1.35), M(0xc7572a));
   shopRoof.position.set(0, 1.28, -1.4); g.add(shopRoof);
   g.add(foundation(2.0, 2.2, 6));
-  g.scale.setScalar(1.7);                                // limo-scale, not toy-scale
+  g.scale.setScalar(LAYOUT.heroes.gasStation.scale);     // limo-scale, not toy-scale
   g.position.copy(settleOn(GAS_DIR, 3.3, 0.1));
   alignToSurface(g, GAS_DIR, yawToFace(GAS_DIR, mid));   // pumps face the road
   // world radius of the forecourt slab's TOP surface (slab y 0.1, half 0.05,
@@ -4683,7 +4681,7 @@ function buildArrPath() {
   // on painted road: airport → spur → downtown centre → spur → resort
   const tA = Math.min(0.9, 0.94 / DOWNTOWN.angleTo(AIRPORT));
   const tR = Math.min(0.9, 0.94 / DOWNTOWN.angleTo(RESORT));
-  const apron = frameAt(AIRPORT)(5.2, 12);       // where the limo waits (matches limoWait)
+  const apron = frameAt(AIRPORT)(...LAYOUT.heroes.limoApron.at);   // manifest: heroes.limoApron
   const eA = slerpDir(DOWNTOWN, AIRPORT, tA);    // airport gate on the boulevard
   const eR = slerpDir(DOWNTOWN, RESORT, tR);     // resort gate
   let pts = [];
@@ -5093,7 +5091,7 @@ function updateArrival(dt) {
   arrivalT += dt / 36;   // an unhurried scene, not a chase
   const T = arrivalT;
   const airAt = frameAt(AIRPORT);
-  const limoWait = airAt(5.2, 12).normalize();   // clear of the rolled-out jet
+  const limoWait = airAt(...LAYOUT.heroes.limoApron.at).normalize();   // manifest: heroes.limoApron
   const rig = airportPlane && airportPlane.userData.rig;
   const ease = (x) => x * x * (3 - 2 * x);
 
