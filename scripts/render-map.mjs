@@ -94,18 +94,51 @@ const dim = (px, [x, y], t, dy) => label(px, [x, y], t, dy, 'dim');
       const g = Math.hypot(o.c[0] - lot.c[0], o.c[1] - lot.c[1]);
       if (g < nearGap) nearGap = g;
     }
-    let roadDist = 1e9;
-    for (const [ai, bi] of CITY_PLAN.edges) {
+    let roadClear = 1e9;
+    for (const [ai, bi, minor] of CITY_PLAN.edges) {
       const A = CITY_PLAN.nodes[ai], B = CITY_PLAN.nodes[bi];
       const dx = B[0] - A[0], dy = B[1] - A[1];
       const tq = Math.max(0, Math.min(1, ((lot.c[0] - A[0]) * dx + (lot.c[1] - A[1]) * dy) / (dx * dx + dy * dy || 1)));
       const d2 = Math.hypot(lot.c[0] - (A[0] + dx * tq), lot.c[1] - (A[1] + dy * tq));
-      if (d2 < roadDist) roadDist = d2;
+      const edge = d2 - (minor ? MIN : MAJ) / 2 - 0.12;
+      if (edge < roadClear) roadClear = edge;
     }
-    const KERB = MAJ / 2 + 0.15;
-    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42, roadDist - KERB);
+    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42, roadClear);
     if (half < 0.3) continue;                      // same rule as planet.js: no building
     rect(px, lot.c, [half * 2, half * 2], 'bld');
+  }
+  // landmark + station exclusion zones, projected into the downtown frame —
+  // if a beige square ever sits inside a violet circle, the plan is wrong
+  const D2R = Math.PI / 180, RR = 40;
+  const dt = LAYOUT.anchors.downtown.map(v => v * D2R);
+  const v3 = ([lat, lon]) => {
+    const la = lat * D2R, lo = lon * D2R;
+    return [Math.cos(la) * Math.cos(lo), Math.sin(la), Math.cos(la) * Math.sin(lo)];
+  };
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const sub = (a, b, k) => [a[0] - b[0] * k, a[1] - b[1] * k, a[2] - b[2] * k];
+  const nrm = (a) => { const l = Math.hypot(...a); return [a[0] / l, a[1] / l, a[2] / l]; };
+  const dtV = v3(LAYOUT.anchors.downtown);
+  const up = [0, 1, 0];
+  const east = nrm([up[1] * dtV[2] - up[2] * dtV[1], up[2] * dtV[0] - up[0] * dtV[2], up[0] * dtV[1] - up[1] * dtV[0]]);
+  const north = [dtV[1] * east[2] - dtV[2] * east[1], dtV[2] * east[0] - dtV[0] * east[2], dtV[0] * east[1] - dtV[1] * east[0]];
+  const toPlan = (ll2) => {
+    const v = v3(ll2);
+    const t = sub(v, dtV, dot(v, dtV));
+    return [dot(t, east) * RR, dot(t, north) * RR];
+  };
+  // only zones actually NEAR downtown — tangent projection of far-side points
+  // (brainu, sinescape…) folds them into the panel as ghosts otherwise
+  const near = (ll2) => dot(v3(ll2), dtV) > Math.cos(0.6);
+  const zones = Object.entries(LAYOUT.landmarks).filter(([, ll2]) => near(ll2))
+    .map(([k, ll2]) => [k, toPlan(ll2), LAYOUT.reference.landmarkClear]);
+  if (near(LAYOUT.stops.central)) zones.push(['central stn', toPlan(LAYOUT.stops.central), LAYOUT.reference.stationClear]);
+  for (const [k, [zx, zy], rad] of zones) {
+    if (Math.abs(zx) > 26 || Math.abs(zy) > 25) continue;   // outside the panel
+    const [ZX, ZY] = px([zx, zy]);
+    svg.push(`<circle cx="${ZX.toFixed(1)}" cy="${ZY.toFixed(1)}" r="${rad * S}" fill="#8f7ae8" fill-opacity="0.14" stroke="#8f7ae8" stroke-width="1.4" stroke-dasharray="6 4"/>`);
+    label(px, [zx, zy], k, 4, 'lbl');
+    dim(px, [zx, zy], `clear r=${rad}`, 16);
   }
   label(px, [0, 0], '◉ city centre', -8, 'lbl2');
   // scale reference: one car parked on a boulevard

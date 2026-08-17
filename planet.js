@@ -11,7 +11,7 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import CITY_PLAN from './city_plan.js?v=3';
-import LAYOUT from './city_layout.js?v=1';
+import LAYOUT from './city_layout.js?v=2';
 const llv = (a) => ll(a[0], a[1]);   // manifest [lat,lon] → unit direction
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
@@ -2027,7 +2027,11 @@ mark('downtown:start');
   for (const lot of CITY_PLAN.lots) {
     const [cx, cy] = lot.c;
     const dd0 = at(cx, cy);
-    if (dd0.angleTo(museumDir) < 0.075) continue;    // museum plaza stays open
+    // EVERY landmark keeps clear ground around it (manifest landmarkClear),
+    // and Central Station a full block (stationClear) — not just the museum
+    const lmClearArc = LAYOUT.reference.landmarkClear / R;
+    if (LANDMARKS.some(lm => dd0.angleTo(lm.dir) < lmClearArc)) continue;
+    if (dd0.angleTo(STOP_DIRS.central) < LAYOUT.reference.stationClear / R) continue;
     if (!isLand(dd0, 0.05)) continue;                // don't build into the strait
     const rr2 = Math.hypot(cx, cy);
     // footprint may never reach past 42% of the gap to the nearest neighbour —
@@ -2041,16 +2045,19 @@ mark('downtown:start');
     // ...and never onto the carriageway: distance from the centroid to the
     // nearest road EDGE (segment, not sample point) caps the footprint so the
     // facade stops at the kerb. Too tight a squeeze → no building on this lot.
-    let roadDist = 1e9;
-    for (const [ai, bi] of CITY_PLAN.edges) {
+    // clearance to the nearest road EDGE, using that road's own width — the
+    // old blanket boulevard-width kerb deleted nearly every core building,
+    // because dense-lane lot centroids sit ~1.2 from a lane's centreline
+    let roadClear = 1e9;
+    for (const [ai, bi, minor] of CITY_PLAN.edges) {
       const A = CITY_PLAN.nodes[ai], B = CITY_PLAN.nodes[bi];
       const dx = B[0] - A[0], dy = B[1] - A[1];
       const tq = Math.max(0, Math.min(1, ((cx - A[0]) * dx + (cy - A[1]) * dy) / (dx * dx + dy * dy || 1)));
       const d2 = Math.hypot(cx - (A[0] + dx * tq), cy - (A[1] + dy * tq));
-      if (d2 < roadDist) roadDist = d2;
+      const edge = d2 - (minor ? LAYOUT.reference.minorW : LAYOUT.reference.majorW) / 2 - 0.12;
+      if (edge < roadClear) roadClear = edge;
     }
-    const KERB = LAYOUT.reference.majorW / 2 + 0.15;   // boulevard half + shoulder
-    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42, roadDist - KERB);
+    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42, roadClear);
     if (half < 0.3) { if (rand() < 0.5) plaza(cx, cy); continue; }   // lot swallowed by the road
     if (rr2 <= CORE_R) {                             // ── core: towers
       if (rand() < 0.10) { plaza(cx, cy); continue; }

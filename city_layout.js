@@ -72,5 +72,7 @@ export default {
     car:      [1.0, 2.1],
     person:   [0.6, 0.6],
     boardRadius: 1.6,  // walk-through boarding trigger at Central Station
+    landmarkClear: 4.5, // no generated building/parcel within this of a landmark
+    stationClear: 8.0,  // Central Station needs a full block of open ground
   },
 };
