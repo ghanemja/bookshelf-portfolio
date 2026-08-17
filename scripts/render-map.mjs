@@ -28,8 +28,8 @@ svg.push(`<style>
   .grid { stroke: #e7dff0; stroke-width: 1; }
   .grid5{ stroke: #d5c9e4; stroke-width: 1.2; }
   .gnum { font: 500 9px ui-monospace, monospace; fill: #b3a8c4; text-anchor: middle; }
-  .maj  { stroke: #6e5a6a; stroke-linecap: butt; fill: none; }
-  .min  { stroke: #a394a0; stroke-linecap: butt; fill: none; }
+  .maj  { stroke: #6e5a6a; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+  .min  { stroke: #a394a0; stroke-linecap: round; stroke-linejoin: round; fill: none; }
   .lot  { fill: none; stroke: #cfc2ae; stroke-width: 1; stroke-dasharray: 3 2; }
   .bld  { fill: #d9cdbd; stroke: #8d8477; stroke-width: 1; }
   .hero { fill: #ffb3ad; stroke: #b03a30; stroke-width: 1.6; }
@@ -74,10 +74,15 @@ const dim = (px, [x, y], t, dy) => label(px, [x, y], t, dy, 'dim');
 // ═══ PANEL 1: DOWNTOWN — streets at true width + real building footprints ═══
 {
   const px = panel(30, 110, 700, 700, 'DOWNTOWN — grown streets + true building footprints', [50, 48]);
-  const RW = LAYOUT.reference.roadHalf;
-  for (const [ai, bi, minor] of CITY_PLAN.edges) {
-    const A = px(CITY_PLAN.nodes[ai]), B = px(CITY_PLAN.nodes[bi]);
-    svg.push(`<line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}" class="${minor ? 'min' : 'maj'}" stroke-width="${(minor ? RW * 1.4 : RW * 2.2) * S}" stroke-opacity="0.8"/>`);
+  const MAJ = LAYOUT.reference.majorW, MIN = LAYOUT.reference.minorW;
+  // round caps + full opacity: segments fuse into continuous streets instead
+  // of butt-capped planks with wedge gaps at every bend. Minors under majors.
+  for (const wantMinor of [1, 0]) {
+    for (const [ai, bi, minor] of CITY_PLAN.edges) {
+      if (minor !== wantMinor) continue;
+      const A = px(CITY_PLAN.nodes[ai]), B = px(CITY_PLAN.nodes[bi]);
+      svg.push(`<line x1="${A[0]}" y1="${A[1]}" x2="${B[0]}" y2="${B[1]}" class="${minor ? 'min' : 'maj'}" stroke-width="${(minor ? MIN : MAJ) * S}"/>`);
+    }
   }
   // parcels (dashed) + the building actually placed on each (same formula as planet.js)
   for (const lot of CITY_PLAN.lots) {
@@ -89,7 +94,17 @@ const dim = (px, [x, y], t, dy) => label(px, [x, y], t, dy, 'dim');
       const g = Math.hypot(o.c[0] - lot.c[0], o.c[1] - lot.c[1]);
       if (g < nearGap) nearGap = g;
     }
-    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42);
+    let roadDist = 1e9;
+    for (const [ai, bi] of CITY_PLAN.edges) {
+      const A = CITY_PLAN.nodes[ai], B = CITY_PLAN.nodes[bi];
+      const dx = B[0] - A[0], dy = B[1] - A[1];
+      const tq = Math.max(0, Math.min(1, ((lot.c[0] - A[0]) * dx + (lot.c[1] - A[1]) * dy) / (dx * dx + dy * dy || 1)));
+      const d2 = Math.hypot(lot.c[0] - (A[0] + dx * tq), lot.c[1] - (A[1] + dy * tq));
+      if (d2 < roadDist) roadDist = d2;
+    }
+    const KERB = MAJ / 2 + 0.15;
+    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42, roadDist - KERB);
+    if (half < 0.3) continue;                      // same rule as planet.js: no building
     rect(px, lot.c, [half * 2, half * 2], 'bld');
   }
   label(px, [0, 0], '◉ city centre', -8, 'lbl2');

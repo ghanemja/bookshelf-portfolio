@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import CITY_PLAN from './city_plan.js?v=2';
+import CITY_PLAN from './city_plan.js?v=3';
 import LAYOUT from './city_layout.js?v=1';
 const llv = (a) => ll(a[0], a[1]);   // manifest [lat,lon] → unit direction
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
@@ -1878,9 +1878,13 @@ mark('downtown:start');
     };
     // hierarchy you can read at a glance: majors are wide boulevards with a
     // dashed centreline, minors are narrow lanes — same trick real maps use
-    stroke(ROAD_W * 2 + 0.6, hex(P.roadLine));               // pale kerb underlay, all
-    stroke(ROAD_W * 1.4, hex(P.road));                       // minors: narrow lanes
-    stroke(ROAD_W * 2.2, hex(P.road), null, true);           // majors: boulevards
+    // widths come from the manifest (LAYOUT.reference) — the blueprint map
+    // showed the old widths swallowing the blocks: streets nearly as wide as
+    // the parcels they served
+    const MAJ = LAYOUT.reference.majorW, MIN = LAYOUT.reference.minorW;
+    stroke(MAJ + 0.5, hex(P.roadLine));                      // pale kerb underlay, all
+    stroke(MIN, hex(P.road));                                // minors: narrow lanes
+    stroke(MAJ, hex(P.road), null, true);                    // majors: boulevards
     stroke(0.14, hex(P.roadMark), [0.9 * u, 0.9 * u], true); // dashes on majors
   }
 
@@ -2034,7 +2038,20 @@ mark('downtown:start');
       const g2 = Math.hypot(o.c[0] - cx, o.c[1] - cy);
       if (g2 < nearGap) nearGap = g2;
     }
-    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42);
+    // ...and never onto the carriageway: distance from the centroid to the
+    // nearest road EDGE (segment, not sample point) caps the footprint so the
+    // facade stops at the kerb. Too tight a squeeze → no building on this lot.
+    let roadDist = 1e9;
+    for (const [ai, bi] of CITY_PLAN.edges) {
+      const A = CITY_PLAN.nodes[ai], B = CITY_PLAN.nodes[bi];
+      const dx = B[0] - A[0], dy = B[1] - A[1];
+      const tq = Math.max(0, Math.min(1, ((cx - A[0]) * dx + (cy - A[1]) * dy) / (dx * dx + dy * dy || 1)));
+      const d2 = Math.hypot(cx - (A[0] + dx * tq), cy - (A[1] + dy * tq));
+      if (d2 < roadDist) roadDist = d2;
+    }
+    const KERB = LAYOUT.reference.majorW / 2 + 0.15;   // boulevard half + shoulder
+    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42, roadDist - KERB);
+    if (half < 0.3) { if (rand() < 0.5) plaza(cx, cy); continue; }   // lot swallowed by the road
     if (rr2 <= CORE_R) {                             // ── core: towers
       if (rand() < 0.10) { plaza(cx, cy); continue; }
       const h = (7.5 + rand() * 6.5) * (1.15 - (rr2 / MID_R) * 0.35);

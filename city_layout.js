@@ -66,7 +66,9 @@ export default {
   // ── shared references the map draws for scale + fit checks ──
   reference: {
     runway:   { frame: 'airport', from: [0, -18], to: [0, 18], width: 4.8 },
-    roadHalf: 1.3,     // half-width of asphalt everywhere (car is ~1.5 wide)
+    roadHalf: 1.3,     // spur/highway half-width (car is ~1.5 wide)
+    majorW: 2.2,       // painted width of downtown boulevards (blocks are 3-6)
+    minorW: 1.1,       // painted width of downtown lanes
     car:      [1.0, 2.1],
     person:   [0.6, 0.6],
     boardRadius: 1.6,  // walk-through boarding trigger at Central Station
