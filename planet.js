@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import CITY_PLAN from './city_plan.js?v=3';
+import CITY_PLAN from './city_plan.js?v=4';
 import LAYOUT from './city_layout.js?v=2';
 const llv = (a) => ll(a[0], a[1]);   // manifest [lat,lon] → unit direction
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
@@ -2045,19 +2045,19 @@ mark('downtown:start');
     // ...and never onto the carriageway: distance from the centroid to the
     // nearest road EDGE (segment, not sample point) caps the footprint so the
     // facade stops at the kerb. Too tight a squeeze → no building on this lot.
-    // clearance to the nearest road EDGE, using that road's own width — the
-    // old blanket boulevard-width kerb deleted nearly every core building,
-    // because dense-lane lot centroids sit ~1.2 from a lane's centreline
-    let roadClear = 1e9;
-    for (const [ai, bi, minor] of CITY_PLAN.edges) {
-      const A = CITY_PLAN.nodes[ai], B = CITY_PLAN.nodes[bi];
-      const dx = B[0] - A[0], dy = B[1] - A[1];
-      const tq = Math.max(0, Math.min(1, ((cx - A[0]) * dx + (cy - A[1]) * dy) / (dx * dx + dy * dy || 1)));
-      const d2 = Math.hypot(cx - (A[0] + dx * tq), cy - (A[1] + dy * tq));
-      const edge = d2 - (minor ? LAYOUT.reference.minorW : LAYOUT.reference.majorW) / 2 - 0.12;
-      if (edge < roadClear) roadClear = edge;
+    // the parcel IS the buildable area (carved between roads by the
+    // generator) — size the building from the parcel's own extents with a
+    // ~28% setback, not from centroid-to-road distance (which starved dense
+    // blocks: parcels FRONT roads by design, so their centroids sit close)
+    const yawL = lotYaw(lot);
+    const cosY = Math.cos(-yawL), sinY = Math.sin(-yawL);
+    let exMax = 0, eyMax = 0;
+    for (const [vx, vy] of lot.v) {
+      const rx = (vx - cx) * cosY - (vy - cy) * sinY;
+      const ry = (vx - cx) * sinY + (vy - cy) * cosY;
+      exMax = Math.max(exMax, Math.abs(rx)); eyMax = Math.max(eyMax, Math.abs(ry));
     }
-    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42, roadClear);
+    const half = Math.min(1.7, Math.min(exMax, eyMax) * 0.72, nearGap * 0.42);
     if (half < 0.3) { if (rand() < 0.5) plaza(cx, cy); continue; }   // lot swallowed by the road
     if (rr2 <= CORE_R) {                             // ── core: towers
       if (rand() < 0.10) { plaza(cx, cy); continue; }

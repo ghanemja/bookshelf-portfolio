@@ -94,18 +94,13 @@ const dim = (px, [x, y], t, dy) => label(px, [x, y], t, dy, 'dim');
       const g = Math.hypot(o.c[0] - lot.c[0], o.c[1] - lot.c[1]);
       if (g < nearGap) nearGap = g;
     }
-    let roadClear = 1e9;
-    for (const [ai, bi, minor] of CITY_PLAN.edges) {
-      const A = CITY_PLAN.nodes[ai], B = CITY_PLAN.nodes[bi];
-      const dx = B[0] - A[0], dy = B[1] - A[1];
-      const tq = Math.max(0, Math.min(1, ((lot.c[0] - A[0]) * dx + (lot.c[1] - A[1]) * dy) / (dx * dx + dy * dy || 1)));
-      const d2 = Math.hypot(lot.c[0] - (A[0] + dx * tq), lot.c[1] - (A[1] + dy * tq));
-      const edge = d2 - (minor ? MIN : MAJ) / 2 - 0.12;
-      if (edge < roadClear) roadClear = edge;
-    }
-    const half = Math.min(1.7, Math.max(0.4, Math.sqrt(lot.a) * 0.34), nearGap * 0.42, roadClear);
-    if (half < 0.3) continue;                      // same rule as planet.js: no building
-    rect(px, lot.c, [half * 2, half * 2], 'bld');
+    // the parcel polygon IS the buildable area (the generator carved it out
+    // between the roads) — fill it with the building shrunk inward by a 28%
+    // setback, instead of centroid-distance caps that starved dense blocks
+    const SETBACK = 0.72;
+    const shrunk = lot.v.map(([vx, vy]) => [lot.c[0] + (vx - lot.c[0]) * SETBACK, lot.c[1] + (vy - lot.c[1]) * SETBACK]);
+    const spts = shrunk.map(px).map(q => q.map(c => c.toFixed(1)).join(',')).join(' ');
+    svg.push(`<polygon points="${spts}" class="bld"/>`);
   }
   // landmark + station exclusion zones, projected into the downtown frame —
   // if a beige square ever sits inside a violet circle, the plan is wrong
