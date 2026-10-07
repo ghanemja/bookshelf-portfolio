@@ -12,6 +12,7 @@ import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometr
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import CITY_PLAN from './city_plan.js?v=2';
 import LAYOUT from './city_layout.js?v=1';
+import { buildMuseum } from './museum.js?v=1';
 const llv = (a) => ll(a[0], a[1]);   // manifest [lat,lon] → unit direction
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
@@ -509,8 +510,8 @@ const LANDMARKS = [
   { key: 'ros2', name: 'Robot Lab', tag: 'robotics', style: 'dome', color: 0xff4d6e,
     desc: 'ROS2 + depth cameras + QNX — my robotics tutorials and demos.',
     url: 'https://ghanemja.github.io/ros2_depth_camera_tutorial/', dir: ll(14, -120) },
-  { key: 'artgarden', name: 'The Downtown Museum', tag: 'tonight’s main event', style: 'garden', color: 0xffd23d,
-    desc: 'Opening night! A sculpture garden of my real acrylics — 45 paintings hang in the gallery inside.',
+  { key: 'artgarden', name: 'The Downtown Museum', tag: 'scene of the crime', style: 'garden', color: 0xffd23d,
+    desc: 'Opening night — until all 45 of my real acrylics vanished off the walls. Police tape on the steps, a pane missing from the dome. Step inside: the gallery has them back.',
     enter: './room.html', dir: ll(26, -66) },
 ];
 // positions come from the planning manifest — the table above keeps identity
@@ -803,6 +804,7 @@ const clickables = [];
 const texLoader = new THREE.TextureLoader();
 
 function makeBuilding(lm) {
+  if (lm.style === 'garden') return makeMuseum(lm);
   const g = new THREE.Group();
   const body = MW(lm.color);
   const trim = M(0xfff4e0);
@@ -826,32 +828,6 @@ function makeBuilding(lm) {
     }
     const door = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.0, 0.1), M(0x6b4a2b));
     door.position.set(0, 0.75, 1.16); g.add(door);
-  } else if (lm.style === 'garden') {
-    // sculpture garden with three of the real paintings on display stands
-    const arts = ['art_IMG_5262.jpg', 'art_cows_in_storm.jpg', 'art_IMG_0471.jpg'];
-    arts.forEach((fn, i) => {
-      const ang = (i - 1) * 0.85;
-      const px = Math.sin(ang) * 1.5, pz = Math.cos(ang) * 1.15;
-      const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.6, 6), WOOD);
-      stand.position.set(px, 0.8, pz); g.add(stand);
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(1.75, 1.35, 0.1), M(0x8a6a3a));
-      frame.position.set(px, 1.95, pz);
-      frame.rotation.y = ang;
-      g.add(frame);
-      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      texLoader.load(`./artworks/${fn}`, (t) => { t.colorSpace = THREE.SRGBColorSpace; mat.map = t; mat.needsUpdate = true; });
-      const canvasM = new THREE.Mesh(new THREE.PlaneGeometry(1.55, 1.15), mat);
-      canvasM.position.set(px, 1.95, pz);
-      canvasM.rotation.y = ang;
-      canvasM.translateZ(0.07);
-      g.add(canvasM);
-    });
-    // floating sculpture
-    const knot = new THREE.Mesh(new THREE.TorusKnotGeometry(0.42, 0.13, 48, 8),
-      new THREE.MeshStandardMaterial({ color: 0xffd23d, emissive: 0x664c00, emissiveIntensity: 0.4, flatShading: true, roughness: 0.4 }));
-    knot.position.set(0, 3.6, 0);
-    g.add(knot);
-    lm.sculpture = knot;
   } else if (lm.style === 'tower') {
     const t = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 1.05, 2.6, 8), body);
     t.position.y = 1.55; g.add(t);
@@ -881,7 +857,7 @@ function makeBuilding(lm) {
   }
 
   // lived-in clutter around each stop: crates, barrel, signpost, potted plants
-  if (lm.style !== 'garden') {
+  {
     const crateM = M(0xc9a06a);
     const ca = rand() * Math.PI * 2;
     const cx = Math.sin(ca) * 1.65, cz = Math.cos(ca) * 1.65;
@@ -929,24 +905,49 @@ function makeBuilding(lm) {
   return g;
 }
 
+// the Downtown Museum is a modelled set-piece (museum.js), not a kit building
+function makeMuseum(lm) {
+  const mus = buildMuseum({ lite: IS_TOUCH, glowMats: cityWindowMats });
+  const g = mus.group;
+  lm.sculpture = mus.sculpture;
+  lm.tick = mus.tick;
+  lm.museum = mus;
+  const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.42),
+    new THREE.MeshStandardMaterial({ color: lm.color, emissive: lm.color, emissiveIntensity: 0.9, flatShading: true }));
+  gem.position.set(0, mus.gemY, mus.gemZ);
+  gem.userData.baseY = mus.gemY;
+  g.add(gem);
+  lm.gem = gem;
+  g.traverse(m => {
+    if (!m.isMesh) return;
+    m.userData.landmark = lm;
+    if (!m.userData.noClick) clickables.push(m);
+    if (!IS_TOUCH && !m.material.transparent) { m.castShadow = true; m.receiveShadow = true; }
+  });
+  return g;
+}
+
 function makeLabel(lm) {
   const cv = document.createElement('canvas');
-  cv.width = 512; cv.height = 128;
-  const ctx = cv.getContext('2d');
-  ctx.font = '700 58px "Fredoka", system-ui, sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const FONT = '700 58px "Fredoka", system-ui, sans-serif';
+  let ctx = cv.getContext('2d');
+  ctx.font = FONT;
   const w = ctx.measureText(lm.name).width + 70;
+  cv.width = Math.max(512, Math.ceil(w + 24)); cv.height = 128;   // long names never clip
+  ctx = cv.getContext('2d');
+  ctx.font = FONT;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(255, 250, 242, 0.92)';
   ctx.beginPath();
-  ctx.roundRect((512 - w) / 2, 22, w, 84, 42);
+  ctx.roundRect((cv.width - w) / 2, 22, w, 84, 42);
   ctx.fill();
   ctx.fillStyle = '#2d2138';
-  ctx.fillText(lm.name, 256, 66);
+  ctx.fillText(lm.name, cv.width / 2, 66);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
-  sp.scale.set(6.4, 1.6, 1);
-  sp.position.copy(posOn(lm.dir, 6.6));
+  sp.scale.set(6.4 * cv.width / 512, 1.6, 1);
+  sp.position.copy(lm.museum ? lm.root.localToWorld(new THREE.Vector3(0, lm.museum.gemY + 1.4, lm.museum.gemZ)) : posOn(lm.dir, 6.6));
   scene.add(sp);
   lm.label = sp;
 }
@@ -996,6 +997,23 @@ function nearRoad(d, units = 2.0) {
 
 for (const lm of LANDMARKS) {
   const b = makeBuilding(lm);
+  if (lm.museum) {
+    // the museum faces the ring road that skirts its forecourt and stands
+    // back from it; its footprint is big, so it settles over its whole plinth
+    let near = RING_LOOP[0];
+    for (const p of RING_LOOP) if (p.angleTo(lm.dir) < near.angleTo(lm.dir)) near = p;
+    const yaw = yawToFace(lm.dir, near);
+    addSolid(lm.dir, 3.4, b);
+    b.position.copy(settleOn(lm.dir, 3.2, 0.1));
+    alignToSurface(b, lm.dir, yaw);
+    b.updateMatrixWorld(true);
+    lm.footDir = b.localToWorld(new THREE.Vector3(0, 0, lm.museum.footCenterZ)).normalize();
+    lm.footArc = lm.museum.footRadius / R;
+    lm.npcDir = b.localToWorld(lm.museum.npcLocal.clone()).normalize();
+    landmarkGroup.add(b);
+    lm.root = b;
+    continue;
+  }
   addSolid(lm.dir, 1.9, b);
   b.position.copy(settleOn(lm.dir, 2.2, 0.14));
   alignToSurface(b, lm.dir, rand() * Math.PI * 2);
@@ -2007,7 +2025,8 @@ mark('downtown:start');
   const TILE = [0xb5654a, 0xc76a3a, 0xa85a3f];
   // Density falls off with distance: glass core -> midrise -> houses with
   // gardens. Cities read as cities because of the gradient, not the towers.
-  const museumDir = LANDMARKS.find(l => l.key === 'artgarden').dir;
+  const museumLm = LANDMARKS.find(l => l.key === 'artgarden');
+  const museumDir = museumLm.dir;
   // the PCG roads must repel trees/terraces the same way painted roads do
   for (const [ai, bi] of CITY_PLAN.edges) {
     const A = CITY_PLAN.nodes[ai], B = CITY_PLAN.nodes[bi];
@@ -2024,6 +2043,7 @@ mark('downtown:start');
     const [cx, cy] = lot.c;
     const dd0 = at(cx, cy);
     if (dd0.angleTo(museumDir) < 0.075) continue;    // museum plaza stays open
+    if (museumLm.footDir && dd0.angleTo(museumLm.footDir) < museumLm.footArc + 0.03) continue;   // …and its building
     if (!isLand(dd0, 0.05)) continue;                // don't build into the strait
     const rr2 = Math.hypot(cx, cy);
     // footprint may never reach past 42% of the gap to the nearest neighbour —
@@ -3313,22 +3333,43 @@ const CLUES = [
   { at: ll(20, 10),  icon: '🚲', text: '“Someone stole my bike!” a courier shouts — but his hands are covered in paint.', points: 'cyclist' },
   { at: ll(6, 34),   icon: '🚐', text: 'A white van idles in a loading zone, engine running, no plates.', points: 'driver' },
   { at: ll(24, -52), icon: '🧤', text: 'A dropped work glove near the museum service door.', points: 'driver' },
-  { at: ll(-4, 60),  icon: '🪜', text: 'A ladder leans against a wall below an open skylight.', points: 'driver' },
+  { at: lmByKey0('artgarden').root.localToWorld(new THREE.Vector3(7.9, 0, -7.5)).normalize(), icon: '🪜',
+    text: 'An aluminium ladder against the museum’s east wing — and up on the dome, one glass pane cut clean out.', points: 'driver' },
   { at: ll(14, -96), icon: '🎨', text: 'A smear of fresh varnish on the kerb — still tacky.', points: 'cyclist' },
 ];
+function lmByKey0(k) { return LANDMARKS.find(l => l.key === k); }
 const foundClues = new Set(JSON.parse(localStorage.getItem('heist-clues') || '[]'));
 let heistSolved = localStorage.getItem('heist-solved') === '1';
 
-// a little marker at each clue: an evidence cone that bobs and glints
+// each clue is marked like a real crime scene: a numbered yellow evidence
+// tent on a soft glowing ring, so you can spot it from the road
+const _tentGeo = (() => {
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.3, 0); shape.lineTo(0.3, 0); shape.lineTo(0.3, 0.5); shape.lineTo(-0.3, 0.5); shape.closePath();
+  return new THREE.ExtrudeGeometry(shape, { depth: 0.03, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.02, bevelSegments: 2 });
+})();
+const _clueRingMat = new THREE.MeshBasicMaterial({ color: 0xffd23d, transparent: true, opacity: 0.55, depthWrite: false });
 CLUES.forEach((c, i) => {
   const g = new THREE.Group();
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.7, 4),
-    new THREE.MeshStandardMaterial({ color: 0xffd23d, emissive: 0xffb800, emissiveIntensity: 0.7, flatShading: true }));
-  cone.position.y = 0.55; g.add(cone);
-  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.12, 4), M(0x2d2138));
-  band.position.y = 0.4; g.add(band);
-  g.position.copy(posOn(c.at, 0.2));
-  alignToSurface(g, c.at);
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 112;
+  const cx = cv.getContext('2d');
+  cx.fillStyle = '#ffd23d'; cx.fillRect(0, 0, 128, 112);
+  cx.fillStyle = '#141414'; cx.font = '900 76px Inter, Arial, sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+  cx.fillText(String(i + 1), 64, 60);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const face = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.45 });
+  const side = new THREE.MeshStandardMaterial({ color: 0xffc400, roughness: 0.45 });
+  for (const s of [-1, 1]) {             // two leaves leaning together: an A-frame
+    const leaf = new THREE.Mesh(_tentGeo, [face, side]);
+    leaf.position.z = s * 0.21;
+    leaf.rotation.set(s * -0.42, s < 0 ? Math.PI : 0, 0);
+    g.add(leaf);
+  }
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.7, 40), _clueRingMat);
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.userData.gpSkip = true;
+  g.add(ring);
+  g.position.copy(posOn(c.at, 0.12));
+  alignToSurface(g, c.at, i * 1.3);
   g.visible = !foundClues.has(i);
   scene.add(g);
   c.marker = g;
@@ -3948,40 +3989,41 @@ function sampleTrack(u, outDir, outTan) {
 const STOPS = {};
 function defStop(key, o) {
   const lm = o.dirOf ? lmByKey[o.dirOf] : null;
-  STOPS[key] = { key, name: o.name ?? lm.name, dir: o.dir ?? lm.dir, lm, npc: o.npc, line: o.line, item: o.item, switchTo: o.switchTo };
+  STOPS[key] = { key, name: o.name ?? lm.name, dir: o.dir ?? lm.dir, lm, npc: o.npc, line: o.line, item: o.item, switchTo: o.switchTo, launches: !!o.launches };
 }
 defStop('library', { dirOf: 'library', npc: { face: '📚', name: 'Bea the librarian' }, item: '📖',
   line: {
-    jeep: 'The critic! Your rental’s gassed up. Take this rare exhibition catalog with you — the museum wants it on the front desk tonight!',
-    walk: 'Walking over the summit? Brave choice. Would you carry this exhibition catalog? The view up there is worth every step.',
-    bike: 'Taking the coastal path? Lovely. Here — the museum needs this exhibition catalog for opening night!',
+    jeep: 'Critic! You heard? All forty-five canvases, gone in one evening. Take the exhibition catalog — every stolen painting, photographed. You can’t find what you can’t recognise.',
+    walk: 'Going over the summit on foot? Smart — you’ll see the whole city from up there. Take the exhibition catalog: every stolen painting, photographed.',
+    bike: 'The coast path is quickest on two wheels. Here — the exhibition catalog. Every stolen painting is in it. Learn their faces.',
+    boat: 'You came in by water? Good, nobody watches the sea. Take the exhibition catalog — every stolen painting, photographed.',
   } });
-defStop('inbox', { dirOf: 'inbox', npc: { face: '✉️', name: 'Piet the postmaster' }, item: '💌',
-  line: { all: 'Disaster! The opening-night invitations never went out. You’re driving there anyway — deliver them for me and I’ll owe you forever!' } });
-defStop('deckgpt', { dirOf: 'deckgpt', npc: { face: '🎤', name: 'Nova the curator' }, item: '📊',
-  line: { all: 'My artist talk is TONIGHT and my slides are here. Take the deck — I’ll catch the next ride. Don’t let them argue with anyone on the way!' } });
-defStop('sinescape', { dirOf: 'sinescape', npc: { face: '📐', name: 'Yeganeh the mathematician' }, item: '🌀',
-  line: { all: 'One formula print, fresh off the plotter — pure math, pure art. Hang it well, critic. The curves must face the light.' } });
-defStop('ros2', { dirOf: 'ros2', npc: { face: '🤖', name: 'Turing the robot' }, item: '🖼️',
-  line: { all: 'BEEP. MY FIRST PAINTING. ACRYLIC ON CANVAS. PLEASE DELIVER TO MUSEUM. DO NOT FOLD. I AM… NERVOUS.' } });
+defStop('inbox', { dirOf: 'inbox', npc: { face: '✉️', name: 'Piet the postmaster' }, item: '🧾',
+  line: { all: 'A rush parcel came through at six — flat, canvas-sized, paid in cash, addressed “Cape Far Side · HOLD FOR LAUNCH”. Who ships paintings to a rocket pad? Keep the receipt.' } });
+defStop('deckgpt', { dirOf: 'deckgpt', npc: { face: '🎤', name: 'Nova the curator' }, item: '📋',
+  line: { all: 'I was hanging the show until five. The guard rotation changed at 5:40 — someone had a copy of the schedule. Here’s mine. Find out whose copy is missing.' } });
+defStop('sinescape', { dirOf: 'sinescape', npc: { face: '📐', name: 'Yeganeh the mathematician' }, item: '📐',
+  line: { all: 'I measured every frame for the hanging plan. Forty-five canvases, sixty-one square metres. You do not carry that on a bicycle, critic. You need a van.' } });
+defStop('ros2', { dirOf: 'ros2', npc: { face: '🤖', name: 'Turing the robot' }, item: '📼',
+  line: { all: 'BEEP. SECURITY CAMERA 7 FOOTAGE RECOVERED. ONE USABLE FRAME: A WHITE VAN. NO PLATES. 17:52. I AM… SHAKEN.' } });
 defStop('overlook', { dir: STOP_DIRS.overlook, name: 'Summit Overlook', npc: { face: '🥾', name: 'Hana the hiker' }, item: '🎨',
-  line: { all: 'You hiked up too?! Best view on the planet. Take my plein-air sketch down to the museum — careful, the paint’s still wet!' } });
-defStop('boardwalk', { dir: STOP_DIRS.boardwalk, name: 'Seaside Boardwalk', npc: { face: '🍧', name: 'Coco the vendor' }, item: '🍧',
-  line: { all: 'Museum opening? Take the director her strawberry shaved ice — pedal FAST, it’s already melting!' } });
+  line: { all: 'I was painting the sunset from up here and caught a torch on the museum roof, right by the glass dome. Here’s my sketch — that’s a ladder, isn’t it?' } });
+defStop('boardwalk', { dir: STOP_DIRS.boardwalk, name: 'Seaside Boardwalk', npc: { face: '🍧', name: 'Coco the vendor' }, item: '🪙',
+  line: { all: 'Fella in a courier vest bought a shaved ice and paid with a museum gift-shop token. Then he climbed into a white van, not onto a bike. Keep the token.' } });
 defStop('central', { dir: STOP_DIRS.central, name: 'Central Station', npc: { face: '🚂', name: 'Casey the conductor' }, item: '🎫',
-  line: { all: 'All aboard the Museum Express! Three stops, almost no delays. Keep your ticket — the museum stamps them into little artworks.' } });
-defStop('lakeside', { dir: STOP_DIRS.lakeside, name: 'Lakeside Station', npc: { face: '🎣', name: 'Finn the angler' }, item: '🐟',
-  line: { all: 'Quick stop! The fish are jumping today. Take this lake-glass sculpture to the museum for me, will you? Caught the light myself.' } });
-defStop('farside', { dir: STOP_DIRS.farside, name: 'Far Side Station', npc: { face: '🔭', name: 'Stella the stargazer' }, item: '🌌',
-  line: { all: 'From this platform you can watch the space station pass over twice a night. Bring my astro-photograph for the night wing!' } });
+  line: { all: 'The Museum Express is the fastest way across town tonight. Here’s your ticket. And between us — a white van’s been circling this station since six.' } });
+defStop('lakeside', { dir: STOP_DIRS.lakeside, name: 'Lakeside Station', npc: { face: '🎣', name: 'Finn the angler' }, item: '📦',
+  line: { all: 'Someone dumped a crate of packing foam in my lake. Museum-grade, archival. Stamped with the Downtown Museum crest. Take it — it doesn’t belong to the fish.' } });
+defStop('farside', { dir: STOP_DIRS.farside, name: 'Far Side Station', npc: { face: '🔭', name: 'Stella the stargazer' }, item: '🛰️',
+  line: { all: 'There’s an unscheduled launch on the board — midnight, Cape Far Side, cargo listed as “catering”. Nobody launches catering at midnight. Here’s the flight plan.' } });
 defStop('museumst', { dir: STOP_DIRS.museumst, name: 'Museum Station', switchTo: 'walk',
   npc: { face: '🚂', name: 'Casey the conductor' },
-  line: { all: 'End of the line! The museum’s just up the path — you’ll walk from here. Enjoy the opening, critic. Make it a kind review!' } });
-defStop('artgarden', { dirOf: 'artgarden', npc: { face: '🖼️', name: 'Director Vivi' }, item: '📝',
-  line: { all: 'You MADE it! And you brought treasures from all over the planet! Critique filed, darling. Now — the Space Museum is expecting you too. The pad at Cape Far Side is holding a seat.' } });
-// second deadline: the Space Museum is the station, and you fly to it
+  line: { all: 'End of the line. The museum’s just up the path — the police tape’s still across the steps. Go gently with Director Vivi, she’s shattered.' } });
+defStop('artgarden', { dirOf: 'artgarden', npc: { face: '🖼️', name: 'Director Vivi' }, item: '🗝️',
+  line: { all: '' } });   // written live — depends on what you’ve found (see museumLine)
+// the getaway: the canvases are crated on a midnight shuttle to an orbital auction
 defStop('cape', { dir: padDir, name: 'Cape Far Side', npc: { face: '👩‍🚀', name: 'Ground crew' },
-  line: { all: 'Shuttle’s fuelled and the Space Museum has your press pass waiting. Strap in, critic — T-minus now.' },
+  line: { all: 'That shuttle’s manifest says forty-five flat crates of “catering”, bound for the orbital free-port auction. We’ve got a chaser fuelled. Strap in, critic — T-minus now.' },
   launches: true });
 
 // the NPCs stand at their stops whether or not your route goes there
@@ -3993,11 +4035,16 @@ defStop('cape', { dir: padDir, name: 'Cape Far Side', npc: { face: '👩‍🚀'
     const axis = new THREE.Vector3(0, 1, 0).cross(s.dir).normalize();
     let nd = s.dir.clone().applyAxisAngle(axis, 0.055).normalize();
     if (nearRoad(nd, 1.8)) nd = s.dir.clone().applyAxisAngle(axis, -0.055).normalize();
+    if (s.lm?.npcDir) nd = s.lm.npcDir.clone();      // the director waits at the museum steps
     const p = makePerson(palette[pi % palette.length], pi % 3 === 0 ? 0x2d2138 : null);
     pi++;
     p.scale.setScalar(0.78);
     p.position.copy(settleOn(nd, 0.3, 0.05));
     alignToSurface(p, nd, yawToFace(nd, s.dir));
+    if (s.lm?.museum) {                 // stands ON the forecourt paving, facing the road
+      p.position.copy(s.lm.root.localToWorld(s.lm.museum.npcLocal.clone()));
+      p.quaternion.copy(s.lm.root.quaternion);
+    }
     p.userData.phase = pi * 1.7;
     scene.add(p);
     npcs.push(p);
@@ -4005,8 +4052,8 @@ defStop('cape', { dir: padDir, name: 'Cape Far Side', npc: { face: '👩‍🚀'
   }
 }
 
-// every route files the downtown critique, then heads for the pad and the
-// Space Museum in orbit — two deadlines, one night
+// every route gathers leads on the way to the museum (the scene of the crime),
+// then chases the getaway shuttle from Cape Far Side
 const ROUTES = {
   jeep: ['library', 'inbox', 'deckgpt', 'sinescape', 'ros2', 'artgarden', 'cape'],
   walk: ['library', 'overlook', 'artgarden', 'cape'],
@@ -4026,7 +4073,7 @@ function currentStop() { return routeIdx < route.length ? route[routeIdx] : null
 
 function updateQuestHUD() {
   const s = currentStop();
-  questText.textContent = s ? `🎨 to the museum · next: ${s.name}` : 'you made the opening! 🎉';
+  questText.textContent = s ? `🕵️ the vanishing gallery · next: ${s.name}` : 'case closed — canvases recovered 🎉';
   questCount.textContent = `stop ${Math.min(routeIdx + 1, route.length)}/${route.length}`;
   starCount.textContent = `⭐ ${collectedStars.size}/${STAR_COUNT}`;
 }
@@ -4040,13 +4087,13 @@ const navBag = document.getElementById('nav-bag');
 function updateNav() {
   navMode.textContent = TRANSPORT[transport].emoji;
   const s = currentStop();
-  navNext.textContent = s ? `→ ${s.name}` : '🏛️ you have arrived';
+  navNext.textContent = s ? `→ ${s.name}` : '🏛️ case closed';
   navRoute.innerHTML = route.map((st, i) => {
     const cls = i < routeIdx ? 'done' : i === routeIdx ? 'now' : '';
     const last = i === route.length - 1 ? ' last' : '';
     return `<li class="${cls}${last}">${st.name}</li>`;
   }).join('');
-  navBag.textContent = bag.length ? `carrying: ${bag.join(' ')}` : 'carrying: (nothing yet)';
+  navBag.textContent = bag.length ? `evidence: ${bag.join(' ')}` : 'evidence: (none yet)';
 }
 
 // dialogue — an NPC talks, the world waits
@@ -4060,11 +4107,8 @@ function openDlg(stop) {
   dlgEl.classList.add('show');
   dlgFace.textContent = stop.npc.face;
   dlgName.textContent = stop.npc.name;
-  let text = stop.line[transport] ?? stop.line.all ?? Object.values(stop.line)[0];
-  // the twist: at every gallery the art is gone
-  if (stop.lm && (stop.lm.style === 'library' || stop.lm.style === 'garden' || stop.lm.tag?.includes('art'))) {
-    text = '…the frames are EMPTY. Every canvas — gone. ' + text;
-  }
+  let text = stop.key === 'artgarden' ? museumLine()
+    : stop.line[transport] ?? stop.line.all ?? Object.values(stop.line)[0];
   clearInterval(dlgTimer);
   let i = 0;
   dlgText.textContent = '';
@@ -4083,7 +4127,7 @@ document.getElementById('dlg-ok').addEventListener('click', () => {
   if (stop.item) { bag.push(stop.item); ping(980, 0.12); }
   routeIdx++;
   if (stop.switchTo) setTransport(stop.switchTo);
-  if (stop.launches) {                    // fly up to the Space Museum
+  if (stop.launches) {                    // chase the getaway shuttle into orbit
     finaleAfterLaunch = routeIdx >= route.length;   // only the finale if it's last
     setTimeout(startLaunch, 350);
   } else if (routeIdx >= route.length) {
@@ -4092,13 +4136,24 @@ document.getElementById('dlg-ok').addEventListener('click', () => {
   updateQuestHUD(); updateNav();
 });
 
+// Director Vivi reacts to how far the case has got when you reach the museum
+function museumLine() {
+  const capeDone = route.findIndex(st => st.key === 'cape') < routeIdx && route.some(st => st.key === 'cape');
+  if (capeDone) return 'You caught the shuttle?! Forty-five crates, every canvas intact. I could kiss you, critic. The doors reopen tomorrow — and you’ll write the review.';
+  const ev = bag.length ? `You brought ${bag.length === 1 ? 'a lead' : bag.length + ' leads'}. ` : '';
+  const who = heistSolved ? 'And you’ve already named the thief — then the canvases are still on the move. '
+    : foundClues.size >= 4 ? 'Open your notebook 🔎 — you’ve seen enough to name the thief. '
+    : `The police found nothing, but you’ve noted ${foundClues.size} of ${CLUES.length} clues 🔎 — keep your eyes on the streets. `;
+  return `Critic, thank heavens. They came in through the dome — one pane cut clean out — and left us forty-five empty frames. ${ev}${who}Word is the canvases leave the planet tonight from Cape Far Side.`;
+}
+
 let finaleAfterLaunch = false;
 function showFinale(atDir) {
   burstConfetti(posOn(atDir, 5), atDir.clone());
   ping(680, 0.16); setTimeout(() => ping(920, 0.2), 130); setTimeout(() => ping(1240, 0.24), 280);
   setTimeout(() => openCard({
-    name: 'Both critiques filed 🎉', tag: 'downtown + orbit',
-    desc: `You made the opening ${runTransport === 'walk' ? 'on foot' : `by ${TRANSPORT[runTransport].label}`}, then flew up to the Space Museum — carrying ${bag.length ? bag.join(' ') : 'nothing but opinions'} and ${collectedStars.size}/${STAR_COUNT} stars. Step inside the gallery: the paintings are real.`,
+    name: 'Case closed 🎉', tag: 'the vanishing gallery',
+    desc: `You worked the case ${runTransport === 'walk' ? 'on foot' : `by ${TRANSPORT[runTransport].label}`}, ${heistSolved ? 'named the Van Driver' : 'left the thief’s name unsaid (your notebook still has room)'}, and caught the midnight shuttle before the orbital auction — with ${bag.length ? bag.join(' ') : 'nothing but instinct'} as evidence and ${collectedStars.size}/${STAR_COUNT} stars. All 45 canvases are home. Step inside the gallery: the paintings are real.`,
     enter: './room.html',
   }), 700);
 }
@@ -4114,6 +4169,8 @@ function arriveAtStop(stop) {
 document.getElementById('reset-progress').addEventListener('click', () => {
   localStorage.removeItem('planet-delivered');
   localStorage.removeItem('planet-stars');
+  localStorage.removeItem('heist-clues');
+  localStorage.removeItem('heist-solved');
   location.reload();
 });
 
@@ -4313,7 +4370,7 @@ function showHint(t) {
     ? 'sit back — the Museum Express drives itself &nbsp;·&nbsp; click a building for details'
     : `<kbd>WASD</kbd> / <kbd>←↑↓→</kbd> ${HINT_VERB[t]} &nbsp;·&nbsp; ${
         t === 'boat' ? 'run ashore to hop out' : 'click ground to travel'
-      } &nbsp;·&nbsp; click a building`;
+      } &nbsp;·&nbsp; 🟡 evidence tents = clues`;
   hintHidden = false;
   hintEl.classList.remove('hide');
 }
@@ -4340,6 +4397,7 @@ function startLaunch() {
   _lPrev.copy(rocketG.position);
   hideHint();
   closeCard();
+  showToast('🚀 After that shuttle — the orbital auction opens at midnight');
   ping(520, 0.2); setTimeout(() => ping(700, 0.2), 220); setTimeout(() => ping(940, 0.25), 440);
 }
 function updateLaunch(dt) {
@@ -4360,7 +4418,10 @@ function updateLaunch(dt) {
     const ang = k * Math.PI * 2 + Math.PI * 0.2;
     p = _stW.clone().addScaledVector(side, Math.cos(ang) * 9.5)
       .addScaledVector(fwd2, Math.sin(ang) * 9.5).addScaledVector(up2, 2.2);
-    if (!launchConfettied && k > 0.5) { launchConfettied = true; burstConfetti(p.clone(), up2.clone()); ping(1240, 0.22); }
+    if (!launchConfettied && k > 0.5) {
+      launchConfettied = true; burstConfetti(p.clone(), up2.clone()); ping(1240, 0.22);
+      showToast('📦 Docked and boarded — 45 crates of “catering”. Every canvas is here.');
+    }
   } else {                                         // glide home
     if (!exitStored) { exitStored = true; _launchExit.copy(_lPrev); }
     const k = (T - 0.78) / 0.22;
@@ -4395,6 +4456,7 @@ function updateLaunch(dt) {
     rocketG.quaternion.copy(rocketHomeQ);
     introT = 0.3;
     ping(880, 0.18);
+    showToast('🖼️ The canvases are coming home');
     if (finaleAfterLaunch) { finaleAfterLaunch = false; showFinale(padDir); }
   }
 }
@@ -5084,6 +5146,7 @@ function startArrival() {
   arrDir.cityEnd = RESORT.clone();                // limo takes you to the hotel
   limo.visible = false;
   if (arrCaption) { arrCaption.style.opacity = 1; arrCaption.textContent = '✈ First class — welcome aboard'; }
+  document.getElementById('arrival-ui')?.classList.add('on');   // skip button only during the cinematic
 }
 
 const _paxA = new THREE.Vector3(), _paxB = new THREE.Vector3(), _paxP = new THREE.Vector3();
@@ -5275,6 +5338,7 @@ function updateArrival(dt) {
     camera.lookAt(look);
   } else {                                         // 5. done → the phone
     if (arrCaption) arrCaption.style.opacity = 0;
+    document.getElementById('arrival-ui')?.classList.remove('on');
     limo.visible = false;
     gasDriver.visible = false;
     enterPhone();
@@ -5337,7 +5401,7 @@ const GM_INFO = {
   bike:  { eta: '21 min', dist: '2.8 km', via: 'mostly flat · via the boardwalk' },
   walk:  { eta: '46 min', dist: '2.1 km', via: 'steep · over the summit' },
   boat:  { eta: '28 min', dist: '3.6 km', via: 'coastal waters · moor at the boardwalk' },
-  rocket:{ eta: '6 min',  dist: '410 km', via: 'Space Museum first · pad at Cape Far Side' },
+  rocket:{ eta: '6 min',  dist: '410 km', via: 'chase the shuttle first · pad at Cape Far Side' },
 };
 const gmTime = document.getElementById('gm-time');
 const gmDist = document.getElementById('gm-dist');
@@ -5548,7 +5612,7 @@ const gpSkip = new Set([planet, ocean, sky, skyStars]);
 function addBoilTo(o) {
   if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh) return;
   if (o.userData._gpDone) return;
-  if (gpSkip.has(o) || gpBoilMats.includes(o.material)) return;
+  if (gpSkip.has(o) || o.userData.gpSkip || gpBoilMats.includes(o.material)) return;
   if (!o.geometry?.attributes?.normal) return;
   // hero objects (the parked jet) opt IN to a contour no matter their size or
   // shape — it's a single instance, so the extra draws are cheap, and without
@@ -5715,7 +5779,7 @@ function setGreasePencil(on) {
   gpOn = on;
   for (const l of gpOutlines) l.visible = on;
   scene.traverse(o => {
-    if (!o.isMesh || gpBoilMats.includes(o.material)) return;
+    if (!o.isMesh || o.userData.gpSkip || gpBoilMats.includes(o.material)) return;
     if (on) {
       if (!o.userData._origMat) {
         o.userData._origMat = o.material;
@@ -5821,6 +5885,21 @@ const _headPrev = new THREE.Vector3(1, 0, 0);
     titleEl.classList.add('hide'); title3D.visible = false;
     const tp = _qs.get('transport');
     beginRun(tp && TRANSPORT[tp] ? tp : 'jeep');
+    // ?at=<landmark key> drops you on its forecourt, facing it (dev / screenshots)
+    const atLm = lmByKey[_qs.get('at')];
+    if (atLm) {
+      const fwd = atLm.root ? new THREE.Vector3(0, 0, 1).applyQuaternion(atLm.root.quaternion) : new THREE.Vector3(0, 0, 1);
+      const off = parseFloat(_qs.get('atd')) || 0.32;
+      const axis = new THREE.Vector3().crossVectors(atLm.dir, fwd).normalize();
+      dir = atLm.dir.clone().applyAxisAngle(axis, off).normalize();
+      heading = atLm.dir.clone().sub(dir.clone().multiplyScalar(atLm.dir.dot(dir))).normalize();
+      // ?atx=&atz= place you at a point in the landmark's local frame instead
+      if (_qs.get('atx') !== null && atLm.root) {
+        dir = atLm.root.localToWorld(new THREE.Vector3(+_qs.get('atx'), 0, +_qs.get('atz'))).normalize();
+      }
+    }
+    // ?dlg=<stop key> opens that stop's conversation (dev: review dialogue)
+    if (STOPS[_qs.get('dlg')]) setTimeout(() => openDlg(STOPS[_qs.get('dlg')]), 1500);
     // ?launch=1 rides from the pad; ?launch=0.5 seeks into the flight (dev)
     const lp = _qs.get('launch');
     if (lp !== null) { startLaunch(); launchT = Math.min(0.99, parseFloat(lp) || 0); }
@@ -5963,10 +6042,24 @@ function updateWorldAmbient(dt, t) {
     for (const lm of LANDMARKS) {
       if (lm.gem) lm.gem.rotation.y += dt * 1.5;
       if (lm.sculpture) lm.sculpture.rotation.y += dt * 0.6;
+      if (lm.tick) lm.tick(t, dayK);
     }
   }
 }
 
+// ?shotcam=<landmark>,x,y,z,lookY,lookZ pins the camera in that landmark's
+// local frame — for screenshots and model reviews (dev only)
+const DEV_CAM = (() => {
+  const q = new URLSearchParams(location.search).get('shotcam');
+  if (!q) return null;
+  const [k, ...n] = q.split(','); const [x, y, z, ly, lz] = n.map(Number);
+  return () => {
+    const lm = lmByKey[k]; if (!lm?.root) return;
+    camera.position.copy(lm.root.localToWorld(new THREE.Vector3(x, y, z)));
+    camera.up.copy(lm.dir);
+    camera.lookAt(lm.root.localToWorld(new THREE.Vector3(0, ly || 0, lz || 0)));
+  };
+})();
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -6253,12 +6346,13 @@ function animate() {
     if (a < nearestArc) { nearestArc = a; nearest = lm; }
     if (lm.gem) {
       lm.gem.rotation.y += dt * 1.5;
-      lm.gem.position.y = 4.7 + Math.sin(t * 2 + lm.dir.x * 10) * 0.18;
+      lm.gem.position.y = (lm.gem.userData.baseY ?? 4.7) + Math.sin(t * 2 + lm.dir.x * 10) * 0.18;
       const target = (lm === nearLm) ? 1.35 : 1.0;
       lm.gem.scale.setScalar(THREE.MathUtils.lerp(lm.gem.scale.x, target, 0.1));
       lm.gem.material.emissiveIntensity = 0.9 + (1 - dayK) * 0.8;
     }
     if (lm.sculpture) lm.sculpture.rotation.y += dt * 0.6;
+    if (lm.tick) lm.tick(t, dayK);
   }
   if (nearLm && dir.angleTo(nearLm.dir) > FAR_ARC) {
     if (openLm === nearLm) closeCard();
@@ -6288,6 +6382,14 @@ function animate() {
     compass.position.addScaledVector(dir, Math.sin(t * 3) * 0.08);
   } else {
     compass.visible = false;
+  }
+
+  // walk/drive up to an evidence tent to note the clue
+  for (let i = 0; i < CLUES.length; i++) {
+    if (foundClues.has(i)) continue;
+    const c = CLUES[i];
+    if (c.marker) c.marker.children[c.marker.children.length - 1].scale.setScalar(1 + Math.sin(t * 3 + i) * 0.12);
+    if (dir.angleTo(c.at) < 0.075) collectClue(i);
   }
 
   // collect stars
@@ -6331,6 +6433,7 @@ function animate() {
   }
 
   targetRing.material.opacity = Math.max(0, targetRing.material.opacity - dt * 0.25);
+  if (DEV_CAM) DEV_CAM();
   sky.position.copy(camera.position);
 
   if (gfxInked) {
@@ -6379,7 +6482,7 @@ function buildCollisionBVH() {
   for (const grp of collidables) {
     grp.updateWorldMatrix(true, true);
     grp.traverse(m => {
-      if (!m.isMesh || !m.geometry?.attributes?.position) return;
+      if (!m.isMesh || m.userData.noCollide || !m.geometry?.attributes?.position) return;
       let bg = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
       const pos = bg.getAttribute('position').clone();
       const ng = new THREE.BufferGeometry();
@@ -6443,6 +6546,20 @@ if (new URLSearchParams(location.search).get('debug') === '1') {
     tris += n * (o.isInstancedMesh ? o.count : 1);
   });
   console.log(`[perf] meshes=${meshes} tris=${Math.round(tris)} buildMs=${Math.round(performance.now())}`);
+}
+// the museum is a big set-piece placed before the scatter passes ran: clear any
+// tree, cottage or bush that landed on its plinth or forecourt
+{
+  const mus = lmByKey.artgarden;
+  if (mus?.root) {
+    const loc = new THREE.Vector3();
+    for (const c of [...deco.children]) {
+      loc.copy(c.position); mus.root.worldToLocal(loc);
+      const onPlinth = Math.abs(loc.x) < 8.0 && loc.z < 1.2 && loc.z > -12.4;
+      const onPlaza = Math.hypot(loc.x, loc.z + 0.3) < 4.4;
+      if ((onPlinth || onPlaza) && Math.abs(loc.y) < 6) deco.remove(c);
+    }
+  }
 }
 try { buildCollisionBVH(); } catch (e) { console.warn('BVH build skipped:', e.message); }
 progress(1, 'ready!');

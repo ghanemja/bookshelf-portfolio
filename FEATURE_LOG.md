@@ -5,6 +5,15 @@ Append each new request here as it comes in (see the rule in CLAUDE.md). Format:
 `- [status] request — short note`. Status: ✅ done+verified · 🟡 done, needs live
 check · ⏳ in progress · 📦 asset staged, not wired · ❌ deferred.
 
+## Session 2026-10-07 (art heist: museum + narrative)
+
+- 🟡 **Art heist overhaul — top-notch museum, less sloppy, fix the narrative.** Done in code, verified by headless screenshots in Classic / Sketchbook / Wasteland; **not yet deployed** (no Netlify CLI/token in the cloud session — run `./deploy.sh` locally).
+  - New modelled Downtown Museum (`museum.js`): fluted Greek-revival portico on a 3-tier stylobate, carved inscription, pediment with gilded medallion, balustraded wings with arched windows, ribbed glass rotunda with ONE pane cut out + the thief's rope, ladder on the east wing, police tape, blinking beacons, night searchlights, empty gilded frame on an easel, compass-rose forecourt. Smooth/bevelled throughout; merged per material (~54k tris, few draw calls).
+  - Narrative unified into one story ("the vanishing gallery"): phone texts, every NPC is a witness handing over evidence, Director Vivi's line reacts to your progress, Cape Far Side is the getaway shuttle chase, finale = case closed.
+  - Fixed dead features: clues could never be collected (`collectClue` was never called) and Cape Far Side never launched (`defStop` dropped `launches`). Clues are now numbered evidence tents; restart clears the case.
+  - UI: "skip intro" no longer lingers during play; controls hint no longer hidden under the zoom bar; long landmark labels no longer clip.
+  - Dev params: `?at=<landmark>[&atx=&atz=]`, `?shotcam=<landmark>,x,y,z,lookY,lookZ`, `?dlg=<stop>`.
+
 ## Session 2026-08-11 (cars, jet, limo, arrival cinematic)
 
 - ✅ Import new car + jet GLBs; cartoon style; physics; cars drive only on road; diverse; light for browser.
