@@ -2043,7 +2043,19 @@ mark('downtown:start');
   // agree everywhere. Landmarks/monuments are separate systems and untouched.
   let mi = 0;
   const CORE_R = BLOCK * N * 0.55, MID_R = BLOCK * N;
-  for (const lot of CITY_PLAN.lots) {
+  // ── WALKABLE STREETS, guaranteed. The grown plan packs ~185 slivers of
+  // parcel ~1.3 units apart; building every one left ~0.2 units between
+  // facades — a wall, not a city, and the 0.84-wide walk collision sphere
+  // could not pass. So: greedy packing. Lots are taken biggest-first, each
+  // sized from its own extents, and a lot is REJECTED when its footprint
+  // (foundation included — that's 1.2× the facade half) would come within
+  // STREET of any building already placed. Fewer, bigger towers, and every
+  // gap between them is a street a person (and the camera) fits through.
+  const STREET = 1.4;                                   // clear ground between footprints
+  const placed = [];                                    // {x, y, r} effective radii
+  const lotsBig = CITY_PLAN.lots.slice().sort((a, b) => b.a - a.a);
+  const fits = (x, y, r) => placed.every(p => Math.hypot(p.x - x, p.y - y) >= p.r + r + STREET);
+  for (const lot of lotsBig) {
     const [cx, cy] = lot.c;
     const dd0 = at(cx, cy);
     // EVERY landmark keeps clear ground around it (manifest landmarkClear),
@@ -2054,14 +2066,6 @@ mark('downtown:start');
     if (museumLm.footDir && dd0.angleTo(museumLm.footDir) < museumLm.footArc + 0.03) continue;   // museum building footprint stays clear
     if (!isLand(dd0, 0.05)) continue;                // don't build into the strait
     const rr2 = Math.hypot(cx, cy);
-    // footprint may never reach past 42% of the gap to the nearest neighbour —
-    // two adjacent parcels can then never overlap, whatever the plan says
-    let nearGap = 1e9;
-    for (const o of CITY_PLAN.lots) {
-      if (o === lot) continue;
-      const g2 = Math.hypot(o.c[0] - cx, o.c[1] - cy);
-      if (g2 < nearGap) nearGap = g2;
-    }
     // ...and never onto the carriageway: distance from the centroid to the
     // nearest road EDGE (segment, not sample point) caps the footprint so the
     // facade stops at the kerb. Too tight a squeeze → no building on this lot.
@@ -2077,18 +2081,26 @@ mark('downtown:start');
       const ry = (vx - cx) * sinY + (vy - cy) * cosY;
       exMax = Math.max(exMax, Math.abs(rx)); eyMax = Math.max(eyMax, Math.abs(ry));
     }
-    const half = Math.min(1.7, Math.min(exMax, eyMax) * 0.72, nearGap * 0.42);
-    if (half < 0.3) { if (rand() < 0.5) plaza(cx, cy); continue; }   // lot swallowed by the road
+    // size from the parcel's own extents (28% setback); the neighbour gap is
+    // no longer a size cap — the packing test below handles spacing
+    const half = Math.min(1.7, Math.max(0.55, Math.min(exMax, eyMax) * 0.72));
+    if (Math.min(exMax, eyMax) * 0.72 < 0.3) continue;   // lot swallowed by the road
     if (rr2 <= CORE_R) {                             // ── core: towers
+      if (!fits(cx, cy, half * 1.2)) continue;       // would choke a street → open ground
+      placed.push({ x: cx, y: cy, r: half * 1.2 });
       if (rand() < 0.10) { plaza(cx, cy); continue; }
       const h = (7.5 + rand() * 6.5) * (1.15 - (rr2 / MID_R) * 0.35);
       tower(cx, cy, Math.max(6.0, h), half * 2, half * 2,
         towerMats[mi++ % towerMats.length], lotYaw(lot));
     } else if (rr2 <= MID_R) {                       // ── midrise: shops + flats
+      if (!fits(cx, cy, half * 1.2)) continue;
+      placed.push({ x: cx, y: cy, r: half * 1.2 });
       if (rand() < 0.18) { plaza(cx, cy); continue; }
       tower(cx, cy, 2.7 + rand() * 2.2, half * 2, half * 2,
         towerMats[mi++ % towerMats.length], lotYaw(lot));
     } else {                                         // ── outskirts: terraces
+      if (!fits(cx, cy, 1.7)) continue;              // a terrace is ~3.4 long
+      placed.push({ x: cx, y: cy, r: 1.7 });
       if (rand() < 0.20) { park(cx, cy, 3); continue; }
       const terrace = buildTerrace(cx, cy, lotYaw(lot));
       if (terrace && rand() > 0.55) {

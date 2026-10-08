@@ -35,3 +35,5 @@ check · ⏳ in progress · 📦 asset staged, not wired · ❌ deferred.
 - 🟡 Car shading too dark ("angry scratches") — the per-mesh boil hulls scratch on decimated car geometry; cars/limo now skip the hull (keep flat fills + inked edges).
 - 🟡 Tyres flying off the cars — removed the tyre-spin (wheels share the car origin, so spinning flung them); wheels stay put now.
 - ⏳ **City layout redesign** (foundational): current block layout is a mess. Make it TWO city halves split by a water channel; the boat sails the channel between them; the train runs through both; roads grade smoothly downtown→rural with no random dead-ending spurs. Ref: dense two-sided city split by a river (tutorial: youtube n0i9RHMypfo). We'll fill in specific buildings over time — this is just the layout.
+- ✅ Downtown "all blocks to each other, hard to move through" — parcels now greedy-packed biggest-first with a guaranteed 1.4-unit clear street between every footprint (foundation included); fewer, bigger towers, real walkable gaps.
+- ⏳ **Intro cinematic needs a total change** — currently plays under the full game HUD, cabin opener renders as a flat blob, ~25s jet circling. Direction pending.
