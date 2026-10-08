@@ -5162,8 +5162,13 @@ function startArrival() {
   applyGfx();
   startAudio();
   if (!limo) { limo = buildLimo(); scene.add(limo); }
-  if (!cabin) cabin = buildCabin();
   if (!arrPath) buildArrPath();
+  arrBeat = -1;
+  document.body.classList.add('cine-mode');          // HUD off, letterbox on
+  // the floating name signs / landmark labels are game UI, not set dressing —
+  // off for the film, back when the phone comes up
+  cineHidden.length = 0;
+  scene.traverse(o => { if (o.isSprite && o.visible) { o.visible = false; cineHidden.push(o); } });
   if (!gasDriver) {
     gasDriver = makePerson(0x1c1620, 0x2d2138);   // black suit, chauffeur cap
     gasDriver.scale.setScalar(0.78);
@@ -5181,202 +5186,91 @@ function startArrival() {
   arrDir.runwayB = airAt(0, 12).normalize();
   arrDir.cityEnd = RESORT.clone();                // limo takes you to the hotel
   limo.visible = false;
-  if (arrCaption) { arrCaption.style.opacity = 1; arrCaption.textContent = '✈ First class — welcome aboard'; }
+  if (arrCaption) { arrCaption.style.opacity = 1; arrCaption.textContent = '✈ Touching down'; }
   document.getElementById('arrival-ui')?.classList.add('on');   // skip button only during the cinematic
 }
 
 const _paxA = new THREE.Vector3(), _paxB = new THREE.Vector3(), _paxP = new THREE.Vector3();
+// ── THE SHORT CUT. Eleven seconds, three beats, letterboxed, no HUD:
+//   A  the jet touches down          (trackside, low, the wheels hit the strip)
+//   B  the limo rolls up to the hotel (from the hotel steps, car sweeps in)
+//   C  …and your phone buzzes         (hold, then the texts)
+// The old 36s version (first-class cabin, airstair, gas stop, the whole
+// drive) played under the live game HUD and read as broken, not as a film.
+let arrBeat = -1;
+const cineHidden = [];                               // sprites switched off for the film
+const ARR_LEN = 11;                                  // seconds, whole cinematic
 function updateArrival(dt) {
-  arrivalT += dt / 36;   // an unhurried scene, not a chase
+  arrivalT += dt / ARR_LEN;
   const T = arrivalT;
   const airAt = frameAt(AIRPORT);
-  const limoWait = airAt(...LAYOUT.heroes.limoApron.at).normalize();   // manifest: heroes.limoApron
   const rig = airportPlane && airportPlane.userData.rig;
   const ease = (x) => x * x * (3 - 2 * x);
-
-  // keep the jet parked at the gate whenever we're not actively flying it
-  const parkJet = () => {
-    const d = airAt(0, 12).normalize();
-    airportPlane.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.02));
-    alignToSurface(airportPlane, d, yawToFace(d, airAt(0, 24)));
-    airportPlane.visible = true;
+  const easeOut = (x) => 1 - (1 - x) * (1 - x) * (1 - x);
+  if (cabin) cabin.visible = false;
+  if (arrivalPax) arrivalPax.visible = false;
+  if (gasDriver) gasDriver.visible = false;
+  const beat = T < 0.42 ? 0 : T < 0.78 ? 1 : T < 1 ? 2 : 3;
+  const cut = beat !== arrBeat;                      // first frame of a beat: snap, don't lerp
+  arrBeat = beat;
+  const camTo = (pos, up, look) => {
+    if (cut) camera.position.copy(pos); else camera.position.lerp(pos, 0.08);
+    camera.up.lerp(up, cut ? 1 : 0.12).normalize();
+    camera.lookAt(look);
   };
-  // gear/stairs/passenger default to the resting state; each phase overrides
-  if (rig) { rig.setGearDeploy(1); rig.setStairDeploy(0); }
-  if (arrivalPax && T >= 0.54) arrivalPax.visible = false;
+  // the hotel shot: a fixed three-quarter view from the kerb opposite the
+  // hotel — the road end in the foreground (where the limo pulls up), the
+  // hotel doors behind it. Never inside the hotel block.
+  const hotelCam = (snap, limoPos) => {
+    sampleArrPath(uEnd, _aTmp2, _aTmp3);             // road end + its tangent
+    const end = dbl(_aTmp2);
+    const hotel = resortHotel ? resortHotel.position : posOn(_aTmp2, 3);
+    const side = _aTmp2.clone().cross(_aTmp3).normalize();
+    if (side.dot(hotel.clone().sub(end)) > 0) side.negate();   // away from the hotel
+    _aTmp.copy(end).addScaledVector(side, 5.5).addScaledVector(_aTmp2, 2.4).addScaledVector(_aTmp3, -3.0);
+    const look = end.clone().lerp(hotel, 0.3).lerp(limoPos, 0.25);
+    camTo(_aTmp, _aTmp2, look);
+  };
 
-  if (T < 0.16) {                                 // 0. first class, then the view
-    const up = AIRPORT.clone();
-    cabin.visible = true;
-    cabin.position.copy(up.clone().multiplyScalar(R + 34));
-    alignToSurface(cabin, up);
-    airportPlane.visible = false;
-    if (rig) rig.setGearDeploy(0);                 // gear stowed at cruise
-    // turbulence: the whole frame trembles like cruise altitude
-    const tt = performance.now() / 1000;
-    const brd = cabin.userData.board;
-    if (brd?.userData.boil) {                      // the line boil: alternate drawings
-      const which = Math.floor(tt * 6) % 2;
-      if (brd.material.map !== brd.userData.boil[which]) {
-        brd.material.map = brd.userData.boil[which];
-        brd.material.needsUpdate = true;
-      }
-    }
-    const jx = Math.sin(tt * 23.1) * 0.014 + Math.sin(tt * 13.7) * 0.02;
-    const jy = Math.cos(tt * 19.3) * 0.012 + Math.sin(tt * 7.9) * 0.016;
-    _aTmp.copy(cabin.localToWorld(new THREE.Vector3(jx, 1.1 + jy, 0)));
-    camera.position.copy(_aTmp);
-    camera.up.lerp(up, 0.25).normalize();
-    const win = cabin.userData.window;
-    // the porthole is FIXED to the tube's left wall now — always visible, the
-    // skyline behind it always sliding right→left like the plane is cruising
-    win.visible = true;
-    if (T < 0.065) {                               // gazing down the cabin
-      if (arrCaption) arrCaption.textContent = '✈ First class — welcome aboard';
-      camera.lookAt(cabin.localToWorld(_aTmp2.set(jx * 2, 0.8, 4.0)));
-    } else {                                       // TURN YOUR HEAD to the window
-      if (arrCaption) arrCaption.textContent = '🌍 There it is — the tiny planet';
-      const k = Math.min(1, (T - 0.065) / 0.035);
-      const e = k * k * (3 - 2 * k);
-      // head-turn inside the tube: gaze slides from the painting at the back of
-      // the cabin to the porthole on the left wall — one smooth level yaw whose
-      // panning sweeps across the curved wall between them
-      const paintingAt = cabin.localToWorld(_aTmp2.set(0, 0.8, 4.0)).clone();
-      const windowAt = cabin.userData.window.getWorldPosition(_aTmp3);
-      camera.lookAt(_aTmp2.copy(paintingAt).lerp(windowAt, e));
-      // ...and during the hold, drift very slowly so it feels alive
-      if (k >= 1) camera.position.addScaledVector(camera.up, Math.sin(tt * 0.7) * 0.02);
-    }
-  } else if (T < 0.44) {                           // 1. the jet lands, nose-forward
-    cabin.visible = false;
-    airportPlane.visible = true;
-    if (arrCaption) arrCaption.textContent = '✈ NetJets — cleared to land';
-    const k = (T - 0.16) / 0.28;
-    const along = -16 + k * 28;
-    const alt = Math.max(0, (0.5 - k) * 24);
-    if (rig) rig.setGearDeploy(THREE.MathUtils.clamp((k - 0.05) / 0.35, 0, 1));  // gear down before touchdown
+  if (beat === 0) {                                  // A. touchdown
+    if (arrCaption) arrCaption.textContent = '✈ Touching down';
+    const k = ease(T / 0.42);
+    const along = -17 + k * 29;                      // short final → rollout
+    const alt = Math.max(0, (0.52 - k)) * 14;        // flare onto the strip
+    if (rig) { rig.setGearDeploy(1); rig.setStairDeploy(0); }
     const d = airAt(0, along).normalize();
     airportPlane.position.copy(d.clone().multiplyScalar(Math.max(radiusAt(d), SEA_R) + 0.02 + alt));
     alignToSurface(airportPlane, d, yawToFace(d, airAt(0, along + 6)));
     airportPlane.visible = true;
-    const back = airAt(-6, along - 9).normalize();
-    _aTmp.copy(airportPlane.position).addScaledVector(_aTmp2.subVectors(back, d).normalize(), 7).addScaledVector(d, 3.5);
-    camera.position.lerp(_aTmp, 0.06);
-    camera.up.lerp(d, 0.1).normalize();
-    camera.lookAt(airportPlane.position);
-  } else if (T < 0.54) {                           // 2. step off to the waiting limo
-    if (arrCaption) arrCaption.textContent = '🛬 Your car is waiting.';
-    parkJet();
+    // trackside camera: parked beside the touchdown zone, low, panning with the jet
+    const cd = airAt(9, 3).normalize();
+    _aTmp.copy(cd).multiplyScalar(Math.max(radiusAt(cd), SEA_R) + 3.2);
+    camTo(_aTmp, cd, airportPlane.position);
+  } else if (beat === 1) {                           // B. the limo rolls up to the hotel
+    if (arrCaption) arrCaption.textContent = '🏨 The hotel';
+    // park the jet at the gate, out of the way
+    const gd = airAt(0, 12).normalize();
+    airportPlane.position.copy(gd.clone().multiplyScalar(Math.max(radiusAt(gd), SEA_R) + 0.02));
+    alignToSurface(airportPlane, gd, yawToFace(gd, airAt(0, 24)));
+    const k = easeOut((T - 0.42) / 0.36);
+    const u0 = Math.max(uGas, uEnd - 0.06);          // the last stretch of road only
+    sampleArrPath(u0 + (uEnd - u0) * k, _apDir, _apTan);
     limo.visible = true;
-    limo.position.copy(settleOn(limoWait, 0.6, 0.02));
-    alignToSurface(limo, limoWait, yawToFace(limoWait, arrDir.cityEnd));
-    // the airstair folds down, then the critic walks down it and into the limo
-    const kk = THREE.MathUtils.clamp((T - 0.44) / 0.10, 0, 1);
-    if (rig) {
-      rig.setGearDeploy(1);
-      rig.setStairDeploy(ease(THREE.MathUtils.clamp(kk / 0.35, 0, 1)));
-      if (arrivalPax) {
-        rig.footWorld(_paxA);
-        _paxB.copy(limo.position).addScaledVector(
-          _paxP.subVectors(airportPlane.position, limo.position).normalize(), 1.0);
-        const a = THREE.MathUtils.clamp((kk - 0.30) / 0.62, 0, 1);
-        _paxP.copy(_paxA).lerp(_paxB, ease(a));
-        const nrm = _paxP.clone().normalize();
-        arrivalPax.position.copy(nrm.clone().multiplyScalar(Math.max(radiusAt(nrm), SEA_R) + 0.02));
-        alignToSurface(arrivalPax, nrm, yawToFace(nrm, _paxB.clone().normalize()));
-        walkPerson(arrivalPax, performance.now() / 1000 * 1.3, a < 0.99 ? 0.95 : 0);
-        arrivalPax.visible = kk > 0.28 && a < 0.985;
-      }
-    }
-    const d = airAt(0, 12).normalize();
-    _aTmp.copy(airportPlane.position).addScaledVector(d, 3.5)
-      .addScaledVector(_aTmp2.copy(d).cross(UP_Y).normalize(), 8);
-    camera.position.lerp(_aTmp, 0.06);
-    camera.up.lerp(d, 0.1).normalize();
-    camera.lookAt(limo.position);
-  } else if (T < 0.94) {                           // 3. the drive: spur road,
-    // gas stop halfway, then through downtown to the resort — ON the roads
-    const K = (T - 0.54) / 0.40;                   // 0..1 across the whole drive
-    const LEG1 = 0.42, STOP = 0.60;                // fractions of K
-    let u, driving = true;
-    if (K < LEG1) {                                // airport → gas station
-      const k = K / LEG1;
-      // constant road speed with a soft start and stop, not a whole-leg ease
-      const e = k < 0.12 ? (k / 0.12) * (k / 0.12) * 0.12 : k > 0.88 ? 1 - ((1 - k) / 0.12) * ((1 - k) / 0.12) * 0.12 : k;
-      u = uGas * e;
-      if (arrCaption) arrCaption.textContent = '🚘 Heading into town…';
-    } else if (K < STOP) {                         // filling up
-      u = uGas; driving = false;
-      if (arrCaption) arrCaption.textContent = '⛽ Quick stop — topping up the tank';
-    } else {                                       // gas → downtown → hotel
-      const k = (K - STOP) / (1 - STOP);
-      const e = k < 0.1 ? (k / 0.1) * (k / 0.1) * 0.1 : k > 0.9 ? 1 - ((1 - k) / 0.1) * ((1 - k) / 0.1) * 0.1 : k;
-      u = uGas + (uEnd - uGas) * e;
-      if (arrCaption) arrCaption.textContent = '🚘 Into the city…';
-    }
-    sampleArrPath(u, _apDir, _apTan);
-    limo.visible = true;
-    // lateral surface direction from the road toward the station
-    const gasSide = GAS_DIR.clone().sub(_apDir.clone().multiplyScalar(_apDir.dot(GAS_DIR))).normalize();
-    // driving: stay on the painted road. stopped: pull OFF the road toward the
-    // station itself — 85% of the arc from the road point to the station centre
-    // lands at the pump line UNDER the canopy, regardless of which way the
-    // road bends here (the old fixed lateral offset inherited along-road error
-    // and kept stopping the limo at the kerb).
-    const parkDir = driving ? _apDir.clone()
-      : slerpDir(_apDir, GAS_DIR, 0.85);
-    // driving: ride the road surface. parked: stand ON the forecourt slab —
-    // it's a mesh proud of the terrain, and seating the limo on the analytic
-    // ground left it hovering/clipping at the slab lip
-    if (driving || !GAS_SLAB_R) limo.position.copy(dbl(parkDir));
-    else limo.position.copy(parkDir).multiplyScalar(GAS_SLAB_R + 0.005);
-    alignToSurface(limo, parkDir, yawToFace(parkDir, parkDir.clone().multiplyScalar(R).addScaledVector(_apTan, 2).normalize()));
-    if (driving) for (const w of limo.userData.wheels || []) w.rotation.x += dt * 5;
-    // the chauffeur hops out on the pump side
-    if (!driving) {
-      gasDriver.visible = true;
-      gasDriver.position.copy(limo.position).addScaledVector(gasSide, 1.0);
-      if (GAS_SLAB_R) gasDriver.position.setLength(GAS_SLAB_R + 0.005);
-      alignToSurface(gasDriver, parkDir, yawToFace(parkDir, GAS_DIR));
-      walkPerson(gasDriver, performance.now() / 1000, 0.25);   // fidgets with the pump
-    } else {
-      gasDriver.visible = false;
-    }
-    // camera: while driving it trails behind; at the stop it stands off on the
-    // OPEN-ROAD side and looks back at the forecourt, so the limo and the
-    // station share the frame and read at their true relative scale.
-    let arrLook;
-    if (driving) {
-      _aTmp.copy(limo.position).addScaledVector(_apDir, 3.2)
-        .addScaledVector(_aTmp2.copy(_apTan).negate(), 6.5);
-      arrLook = limo.position.clone().addScaledVector(_apDir, 0.6);
-    } else {
-      const lat = _aTmp2.crossVectors(_apDir, _apTan).normalize();
-      if (lat.dot(GAS_DIR) > 0) lat.negate();     // keep the station BEHIND the limo
-      _aTmp.copy(limo.position).addScaledVector(_apDir, 2.8)
-        .addScaledVector(lat, 6.5).addScaledVector(_apTan, -2.5);
-      arrLook = limo.position.clone().addScaledVector(gasSide, 1.4).addScaledVector(_apDir, 0.4);
-    }
-    camera.position.lerp(_aTmp, 0.055);
-    camera.up.lerp(_apDir, 0.08).normalize();
-    camera.lookAt(arrLook);
-  } else if (T < 1.0) {                            // 4. check in at the hotel
-    gasDriver.visible = false;
-    if (arrCaption) arrCaption.textContent = '🏨 Checking in…';
+    limo.position.copy(dbl(_apDir));
+    alignToSurface(limo, _apDir, yawToFace(_apDir, _apDir.clone().multiplyScalar(R).addScaledVector(_apTan, 2).normalize()));
+    if (k < 0.995) for (const w of limo.userData.wheels || []) w.rotation.x += dt * 5 * (1 - k);
+    hotelCam(cut, limo.position);
+  } else if (beat === 2) {                           // C. …and your phone buzzes
+    if (arrCaption) arrCaption.textContent = '📱 bzzt — new message';
     sampleArrPath(uEnd, _apDir, _apTan);
-    const d = _apDir.clone();
-    limo.position.copy(dbl(d));
-    alignToSurface(limo, d, yawToFace(d, arrDir.cityEnd));   // nose toward the doors
-    const look = resortHotel ? resortHotel.position : posOn(d, 3);
-    _aTmp.copy(look).addScaledVector(d, 3.5).addScaledVector(_aTmp2.copy(d).cross(UP_Y).normalize(), 7);
-    camera.position.lerp(_aTmp, 0.06);
-    camera.up.lerp(d, 0.08).normalize();
-    camera.lookAt(look);
-  } else {                                         // 5. done → the phone
+    limo.visible = true;
+    limo.position.copy(dbl(_apDir));
+    alignToSurface(limo, _apDir, yawToFace(_apDir, _apDir.clone().multiplyScalar(R).addScaledVector(_apTan, 2).normalize()));
+    hotelCam(cut, limo.position);
+  } else {                                           // done → the phone
     if (arrCaption) arrCaption.style.opacity = 0;
     document.getElementById('arrival-ui')?.classList.remove('on');
     limo.visible = false;
-    gasDriver.visible = false;
     enterPhone();
   }
 }
@@ -5405,6 +5299,9 @@ function enterGame() {
 // after the arrival cinematic (or straight away in ?title=0), raise the phone
 function enterPhone() {
   gameState = 'msg';
+  document.body.classList.remove('cine-mode');
+  for (const o of cineHidden) o.visible = true;
+  cineHidden.length = 0;
   phoneEl.classList.add('show');
   scrMsg.classList.add('on');
   scrMap.classList.remove('on');

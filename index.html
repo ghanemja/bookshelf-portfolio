@@ -175,6 +175,22 @@
     padding: 8px 16px; border-radius: 999px;
   }
   #arrival-ui:not(.on) #arr-skip { display: none; }
+  /* cinematic: the whole game HUD goes dark, black letterbox bars frame the shot */
+  body.cine-mode #hud, body.cine-mode #quest, body.cine-mode #toggles,
+  body.cine-mode #controls-hint, body.cine-mode #stick, body.cine-mode #card,
+  body.cine-mode #nav, body.cine-mode #cam-controls, body.cine-mode #note-btn,
+  body.cine-mode #toast, body.cine-mode #notebook, body.cine-mode #comfort-frame,
+  body.cine-mode #comfort-fx {
+    display: none !important;
+  }
+  #arrival-ui::before, #arrival-ui::after {
+    content: ""; position: absolute; left: 0; right: 0; height: 0; background: #0f0b14;
+    transition: height 0.6s ease;
+  }
+  #arrival-ui::before { top: 0; }
+  #arrival-ui::after { bottom: 0; }
+  #arrival-ui.on::before, #arrival-ui.on::after { height: 11vh; }
+  #arrival-ui.on #arr-caption { top: 13vh; }
 
   /* ── the phone: texts, then maps. shown at ground level ── */
   #phone {
@@ -606,6 +622,6 @@
     }
   }
   </script>
-  <script type="module" src="./planet.js?cb=p91"></script>
+  <script type="module" src="./planet.js?cb=p92"></script>
 </body>
 </html>
