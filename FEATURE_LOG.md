@@ -316,3 +316,4 @@ check · ⏳ in progress · 📦 asset staged, not wired · ❌ deferred.
 - ⏳ **Portfolio shops: press E at the door to go inside (YarnFlow, QR Compass, etc.) — right now it's hard to see in when you get there** (2026-10-31). In progress on `wip-doors`.
 - ⏳ **Lantern Park: see-through fountain water with coins on the bottom, the newspaper reader seated on the bench (not floating), cobblestone paths, better flowers** (2026-10-31). In progress on `wip-park`.
 - ⏳ **The cobblestone at Makers' Row looks ugly: patches overlap and fight, the stones look weirdly placed, the edging logs look odd** (2026-10-31). In progress on `wip-cobble`.
+- ⏳ **A flower meadow by the park to run through: flowers squash under her feet and spring back, with a little "stomp!" word; flowers everywhere in the plants.js style (tulips, daisies, grasses), with variety** (2026-10-31). In progress on `wip-meadow`.
