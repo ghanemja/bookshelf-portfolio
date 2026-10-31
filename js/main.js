@@ -12,6 +12,7 @@ import { createPark } from './park.js';
 import { createShopInteriors } from './shopinterior.js';
 import { createRooms, ROOM_STYLES } from './rooms.js';
 import { createCarParks } from './carparks.js';
+import { createTelescope } from './overlook.js';
 import { createNorthLife } from './north.js';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -83,6 +84,7 @@ game.doors.push({ dir: mf(0, -1.75), r: 1.3, label: 'go inside the museum', act:
   const dir = mf(0, -1.0);
   return { dir, heading: mf(0, 2).sub(dir).projectOnPlane(dir).normalize() };
 } }) });
+const telescope = createTelescope({ town, game, player, camera });   // the Summit Overlook's telescope: E for a look at the town
 // compile every shader up front, so nothing hitches the first time it comes into view
 try { renderer.compile(scene, camera); } catch { /* compiled lazily instead */ }
 gpuOnly(scene, renderer, camera); // the world is built: what only the GPU reads leaves the JS heap once uploaded
@@ -102,6 +104,7 @@ function loop() {
     if (atm.t >= 1) atm.dur = 0;
   }
   town.museum.tick(t, 1 - atm.k);
+  telescope?.update(dt);
   if (!game.update(dt, t)) { rooms.watch(roomDoors); if (!rooms.update(dt, t)) player.update(dt, t); }
   town.tickShops(player.st.dir);                 // inside a project shop: its upper walls lift away
   // inside a carriage of the parked train: its roof lifts off and the camera rises to look in

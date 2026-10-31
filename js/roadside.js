@@ -36,7 +36,7 @@ function viewBoard(text) {
   c.font = '400 38px "Patrick Hand", cursive'; c.fillText('the whole town, from up here', 256, 175);
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
   const g = new THREE.Group(), wood = paint(PAL.bark);
-  for (const x of [-0.5, 0.5]) { const l = new THREE.Mesh(rbox(0.07, 1.1, 0.07, 0.02), wood); l.position.set(x, 0.55, 0); g.add(l); }
+  for (const x of [-0.5, 0.5]) { const l = new THREE.Mesh(rbox(0.07, 1.1, 0.07, 0.02), wood); l.position.set(x, 0.55, -0.065); g.add(l); }   // (the legs behind the board, not across its face)
   const b = new THREE.Mesh(rbox(1.2, 0.62, 0.05, 0.02), wood); b.position.set(0, 1.05, 0); g.add(b);
   const f = new THREE.Mesh(new THREE.PlaneGeometry(1.12, 0.54), paint(0xffffff, { map: t, hatch: 0 })); f.position.set(0, 1.05, 0.03); g.add(f);
   return ink(g, 'fine');
@@ -124,9 +124,13 @@ export function dressRoads(scene, { add, solid, spurs, boulevard, townC, ringR, 
     // the viewpoint beyond it, looking out the way the road was heading
     const look = f(0, 8);
     const put = (o, x, y, face = look, r = 0.3) => { const d = f(x, y); add(settle(o, d, 0.4, 0.03, yawToFace(d, face))); if (r) solid(d, r); return d; };
-    put(bench(), -1.1, 3.1, look, 0.45);
-    put(bench(), 1.1, 3.1, look, 0.45);
-    put(telescope(), 0, 3.6, look, 0.2);
+    // the benches and the telescope face back over the hill to the town; the telescope stands
+    // in front of the benches, and you step up behind it to look (E: main.js)
+    const town = townC.clone().normalize();
+    put(bench(), -1.2, 3.6, town, 0.45);
+    put(bench(), 1.2, 3.6, town, 0.45);
+    const td = put(telescope(), 0, 2.4, town, 0.2);
+    out.telescope = { dir: td, stand: slerpDir(td, town, -0.55 / arc(td, town)), town };   // (half a step behind it, away from the town)
     put(viewBoard('Summit Overlook'), 2.6, 2.2, f(0, -4), 0.3);
     put(lamp(), -2.5, 2.0, look, 0.15);
     for (const [x, y] of [[-3.2, 3.6], [3.2, 3.9], [-2.2, 4.6], [2.4, 4.8]]) put(bush(0.55), x, y, look, 0.3);

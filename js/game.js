@@ -230,6 +230,7 @@ export function createGame({ scene, camera, town, player, atmosphere, renderer }
     if (G.state !== 'play' || phone.busy) return;
     if (G.ui === 'card') { closeUI(); return; }
     if (G.ui === 'talk') { nextLine(); return; }
+    if (G.ui === 'scope') { closeUI(); return; }      // (the overlook's telescope: E steps back)
     if (G.ui) return;
     if (G.room) return G.room.act();
     if (!nearest) return;
@@ -267,7 +268,8 @@ export function createGame({ scene, camera, town, player, atmosphere, renderer }
   function closeUI() {
     if (!G.ui || G.ui === 'police') return;                 // the police shot plays out on its own
     if (player.st.camHook === convoCam) { player.st.camHook = null; player.st.camInit = false; }
-    show($({ card: 'card', talk: 'talk', nb: 'nb', proj: 'card' }[G.ui]), false);
+    if (G.uiClose) { const f = G.uiClose; G.uiClose = null; f(); }   // an activity's own way out (the telescope)
+    show($({ card: 'card', talk: 'talk', nb: 'nb', proj: 'card', scope: 'scopeView' }[G.ui]), false);
     const was = G.ui;
     G.ui = null; player.st.enabled = true;
     if (was === 'nb' && G.solved && G.act === 1) startGetaway();
@@ -1028,5 +1030,5 @@ export function createGame({ scene, camera, town, player, atmosphere, renderer }
     return false;
   }
   const afterRender = () => phone.afterRender(renderer, placeName());
-  return { G, update, items, doors, FACE, SKETCH, bumps, walkers, phone, afterRender, startGetaway, startCountdown, abortLaunch, jeepSpot: () => jeepDir.clone() };
+  return { G, update, closeUI, items, doors, FACE, SKETCH, bumps, walkers, phone, afterRender, startGetaway, startCountdown, abortLaunch, jeepSpot: () => jeepDir.clone() };
 }
