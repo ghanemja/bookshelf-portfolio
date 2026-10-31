@@ -50,8 +50,10 @@ function swayInk() {
   _ink = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     uniforms: { ...inkUniforms, uWeight: { value: 0.62 }, uColor: { value: new THREE.Color(0x2a2230) } },
-    vertexShader: BREEZE.replace('uniform float uTime;', '') + /* glsl */`
-      uniform float uTime, uWidth, uWeight; uniform vec2 uRes;
+    // BREEZE declares (and its breeze() uses) uTime, so it comes first and the ink's own
+    // line no longer repeats it: GLSL needs a uniform declared before the function that reads it
+    vertexShader: BREEZE + /* glsl */`
+      uniform float uWidth, uWeight; uniform vec2 uRes;
       float h(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }
       void main() {
         vec3 pos = position + breeze(position);
