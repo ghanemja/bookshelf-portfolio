@@ -213,6 +213,22 @@ export function smooth(pts, passes = 3, closed = false) {
 
 // ── roads: every carriageway's centre-line samples, so nothing builds on one ──
 export const ROADS = [];          // {pts, half}
+// every lamp in the world, once the town is built (collectLamps): { dir, kind } — kind 'street'
+// (props lamp()), 'post' (a building's lampPost) or 'low' (the grounds' bollard lamps). Lamps
+// leave a marker (userData.lampMark) that bake() keeps as userData.lamps [x, z, kind]; the dev
+// check (?lamps=1) reads this to keep every lamp off the carriageways and clear of doors
+export const LAMPS = [];
+export function collectLamps(roots) {
+  const v = new THREE.Vector3();
+  for (const r of roots) {
+    r.updateMatrixWorld(true);
+    r.traverse(o => {
+      if (o.userData.lampMark) LAMPS.push({ dir: o.getWorldPosition(v).clone().normalize(), kind: o.userData.lampMark });
+      for (const [x, z, kind] of o.userData.lamps || []) LAMPS.push({ dir: o.localToWorld(v.set(x, 0, z)).clone().normalize(), kind });
+    });
+  }
+  return LAMPS;
+}
 // paved ground a car may drive off the road onto (car parks and their drives): (dir) => bool.
 // Inside one, the car's keep-to-the-road assist lets go (player.js keepOnRoad)
 export const LOTS = [];

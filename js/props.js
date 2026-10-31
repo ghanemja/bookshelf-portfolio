@@ -274,12 +274,21 @@ export function bush(s = 0.5) {
 }
 
 // ── street furniture ──
-export function lamp() {
+export function lamp(mark = 'street') {   // (mark: 'feature' for a lamp that's part of a structure's design — the bridge's newels)
   const g = new THREE.Group();
-  g.add(mesh(lathe([[0.001, 0], [0.12, 0], [0.12, 0.06], [0.05, 0.14], [0.04, 2.0], [0.07, 2.06], [0.001, 2.08]], 10), paint(PAL.ink, { hatch: 0 })));
-  const bulb = mesh(new THREE.SphereGeometry(0.17, 12, 10), paint(0xfff1c8, { emissive: 0xffd98a, hatch: 0 }), 0, 2.25, 0);
+  // the post rises into a cup (a collar and a flared gallery) that the globe sits down in, and a
+  // little cap and finial crown it: the globe used to balance on the post's flat top, touching it
+  // at a point, so from below it looked loose. (The cup's lip meets the globe's surface; its top
+  // face is inside the globe, never seen)
+  // (post and cap are one mesh: a lamp is still two draws — post, globe)
+  const post = lathe([[0.001, 0], [0.12, 0], [0.12, 0.06], [0.05, 0.14], [0.04, 1.9], [0.06, 1.93], [0.06, 1.98], [0.045, 2.01],
+    [0.07, 2.06], [0.105, 2.11], [0.128, 2.15], [0.12, 2.165], [0.001, 2.165]], 14);
+  const cap = lathe([[0.001, 0], [0.05, 0], [0.075, 0.02], [0.06, 0.04], [0.022, 0.055], [0.018, 0.095], [0.032, 0.115], [0.001, 0.145]], 14).translate(0, 2.41, 0);
+  g.add(mesh(mergeGeometries([post, cap]), paint(PAL.ink, { hatch: 0 })));
+  const bulb = mesh(new THREE.SphereGeometry(0.17, 16, 12), paint(0xfff1c8, { emissive: 0xffd98a, hatch: 0 }), 0, 2.27, 0);
   bulb.userData.lamp = true;
   g.add(bulb);
+  const tag = new THREE.Object3D(); tag.userData.lampMark = mark; g.add(tag);   // (world.js collectLamps)
   return ink(g, 'fine');
 }
 export function bench() {

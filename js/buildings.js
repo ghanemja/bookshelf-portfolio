@@ -398,9 +398,10 @@ function bench(K, x, z, ry = 0, col = PAL.bark, y = 0.07) {
   s.box(0.9, 0.22, 0.05, paint(col), 0, 0.55, -0.13, 0.02, [-0.15, 0, 0]);
   for (const sx of [-0.38, 0.38]) s.box(0.05, 0.36, 0.28, DARK(), sx, 0.18, 0, 0.015);
 }
-function lampPost(K, x, z, h = 2.1) {
-  K.foot(x, z, 0.1);
-  K.put(lathe([[0.001, 0], [0.1, 0], [0.1, 0.08], [0.05, 0.18], [0.035, h - 0.1], [0.06, h - 0.04], [0.001, h]], 12), DARK(), x, 0.05, z);
+function lampPost(K, x, z, h = 2.1, mark = 'post') {
+  K.foot(x, z, 0.1).userData.lampMark = mark;                // (world.js collectLamps)
+  // (the post's top flares into a collar the lantern's base sits in: it met the lantern at a point)
+  K.put(lathe([[0.001, 0], [0.1, 0], [0.1, 0.08], [0.05, 0.18], [0.035, h - 0.12], [0.05, h - 0.1], [0.075, h - 0.05], [0.097, h - 0.012], [0.097, h], [0.001, h]], 14), DARK(), x, 0.05, z);
   K.put(lathe([[0.001, 0], [0.08, 0.02], [0.13, 0.14], [0.1, 0.3], [0.03, 0.36], [0.001, 0.38]], 14), GLOW(), x, h + 0.02, z);
   K.put(lathe([[0.001, 0], [0.15, 0], [0.04, 0.1], [0.001, 0.16]], 14), DARK(), x, h + 0.36, z);
 }
@@ -717,7 +718,7 @@ export function library(o) {
   K.put(lathe([[0.001, 0], [0.42, 0], [0.4, 0.14], [0.32, 0.3], [0.18, 0.42], [0.001, 0.46]], 24), paint(0x5fae9a), 0, cy + 0.6, rz);
   K.put(lathe([[0.001, 0], [0.04, 0], [0.02, 0.2], [0.06, 0.24], [0.001, 0.32]], 10), paint(PAL.gold), 0, cy + 1.04, rz);
   // lamp standards at the steps, a book-return box
-  for (const s of [-1, 1]) lampPost(K, s * 1.25, 0.4, 1.5);
+  for (const s of [-1, 1]) lampPost(K, s * 1.25, 0.4, 1.5, 'feature');   // (the library's own: they stay, street lamps keep 1.5 off them)
   K.box(0.32, 0.5, 0.26, paint(0x3f5872), 1.55, 0.32, 0.7, 0.05); K.foot(1.55, 0.7, 0.18);
   K.flat(0.2, 0.08, signMat('BOOK RETURN', { bg: '#3f5872', w: 256, h: 96, border: false, font: '400 $px ' + HAND }), 1.55, 0.45, 0.832);
   const pv = uvFrom(rb(w + (o.pave?.[0] ?? 0) + (o.pave?.[1] ?? 0) + 0.02, 0.07, PAVE + 0.02, 0.02), 'x', 'z', 0.75);
@@ -1152,8 +1153,9 @@ export function shopLot(s, roadX) {
   K.box(0.16, 0.1, L.z1 - L.z0, kerb, s * (L.x1 + 0.02), TOP + 0.02, (L.z0 + L.z1) / 2, 0.03);
   K.box(L.x1 - L.x0 + 0.18, 0.1, 0.16, kerb, s * (L.x0 + L.x1) / 2, TOP + 0.02, L.z0 - 0.02, 0.03);
   K.box(L.x1 - L.aisle, 0.1, 0.16, kerb, s * (L.aisle + L.x1) / 2, TOP + 0.02, L.z1 + 0.02, 0.03);
-  // a lamp at the far corner, and a P sign at the apron
-  lampPost(K, s * (L.x1 - 0.35), L.z0 + 0.35, 2.3);
+  // a lamp just outside the far corner's kerb (it stood inside the end bay, in front of a parked
+  // car's nose), and a P sign at the apron
+  lampPost(K, s * (L.x1 + 0.34), L.z0 + 0.3, 2.3);
   const sg = K.sub(s * (L.x0 - 0.35), 0, L.z1 + 0.25, 0);
   sg.foot(0, 0, 0.1);
   sg.box(0.06, 1.5, 0.06, DARK(), 0, 0.75, 0, 0.02);
@@ -1448,8 +1450,9 @@ function bake(g, roots = [g]) {
   const inv = g.matrixWorld.clone().invert(), buckets = new Map(), m4 = new THREE.Matrix4();
   const keepMats = new Set([g, ...roots].flatMap(r => r.userData?.roofMats || []));
   for (const r of roots) r.updateMatrixWorld(true);
-  const foots = [], fp = new THREE.Vector3();
+  const foots = [], lamps = [], fp = new THREE.Vector3();
   for (const r of roots) r.traverse(o => {
+    if (o.userData.lampMark) { fp.setFromMatrixPosition(o.matrixWorld).applyMatrix4(inv); lamps.push([fp.x, fp.z, o.userData.lampMark]); }
     if (o.userData.foot) { fp.setFromMatrixPosition(o.matrixWorld).applyMatrix4(inv); foots.push([fp.x, fp.z, o.userData.foot]); return; }
     if (!o.isMesh || o.userData.isInk) return;
     const geo = o.geometry.clone().applyMatrix4(m4.multiplyMatrices(inv, o.matrixWorld));
@@ -1465,6 +1468,7 @@ function bake(g, roots = [g]) {
   });
   const ud = g.userData;
   if (foots.length) ud.foots = foots;
+  if (lamps.length) ud.lamps = lamps;
   const out = new THREE.Group();
   out.userData = ud;
   for (const { mat, noInk, geos } of buckets.values()) {

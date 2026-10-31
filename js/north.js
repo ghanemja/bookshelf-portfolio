@@ -605,7 +605,7 @@ export function buildNorth(scene, { add, solid, boulevard }) {
       const z = sz * (Lh - 0.15), y = deckY(z) + 0.05;
       K.box(0.24, 0.55, 0.24, stone, sx * (Wd / 2 - 0.085), y + 0.27, z, 0.03);
       K.box(0.3, 0.06, 0.3, paint(0xfaf6ec), sx * (Wd / 2 - 0.085), y + 0.57, z, 0.02);
-      if (sx * sz > 0) { const l = lamp(); l.scale.setScalar(0.8); l.position.set(sx * (Wd / 2 - 0.085), y + 0.6, z); G.add(l); }
+      if (sx * sz > 0) { const l = lamp('feature'); l.scale.setScalar(0.8); l.position.set(sx * (Wd / 2 - 0.085), y + 0.6, z); G.add(l); }
     }
     K.flat(0.7, 0.16, signMat('Riverbend Bridge', { bg: '#cdbfa6', fg: '#2a2230', w: 256, h: 56, border: false }), -Wd / 2 - 0.035, deckY(0) - 0.15, 0, [0, -Math.PI / 2, 0]);
   }

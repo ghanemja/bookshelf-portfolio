@@ -184,7 +184,7 @@ export function gpuOnly(root, renderer, camera) {
 // highlight and their hulls is a fill and a hull. Only plain scenery is touched: a group whose
 // parts carry no data beyond build records (anything the game keeps a handle on, moves, hides
 // or animates is marked some other way, or isn't in `only` — the town as first built).
-const INERT_PROP = new Set(['foots', 'conform', 'noInk', 'isInk', 'lamp']);   // (lamp: a bulb's tag, read by nothing)
+const INERT_PROP = new Set(['foots', 'conform', 'noInk', 'isInk', 'lamp', 'lampMark', 'lamps']);   // (lamp: a bulb's tag, read by nothing; lampMark/lamps: where a lamp stands, read once by collectLamps before the bake)
 function plainProp(o) {
   for (const k of Object.keys(o.userData)) if (!INERT_PROP.has(k)) return false;
   if (!o.visible) return false;

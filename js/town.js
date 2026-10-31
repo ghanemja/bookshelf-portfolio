@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import PLAN from './manifest.js';
 import { R, llv, arc, frame, slerpDir, reserve, zoneHit, deflect, smooth, buildRoad, ROADS, onRoad,
   settle, yawToFace, radiusAt, flatten, addFloor, isWater, alignToSurface, posOn, nearestRoad, surfH, decoBlocked } from './world.js';
-import { PAL, paint, ink, blobShadow } from './style.js';
+import { PAL, paint, ink, blobShadow, mergeStatic } from './style.js';
 import { house, tree, pine, bush, lamp, bench, rnd, pick, rbox, lathe } from './props.js';
 import { buildMuseum } from '../museum.js?v=12';
 import { planHarbour, buildHarbour } from './harbour.js';
@@ -334,15 +334,32 @@ export function buildTown(scene) {
   out.vanSpot = [2 * P - 0.2, -(0.5) * P];
   out.vanYaw = yawToFace(fC(...out.vanSpot), fC(out.vanSpot[0], out.vanSpot[1] + 5));
   add(batchPlaced(out.shops.map(sp => sp.root)));      // the shops stay as frames for their floors
-  // Main Street's lamps stand at the kerb; bunting is strung across the street
+  // ── downtown's street lamps stand where real ones do: on the kerb side of the pavement, LAMP_IN
+  // in from the carriageway's edge (past the kerb strip, half + 0.28), at the corners and between
+  // shopfronts — never mid-pavement, never in front of a door, a window, steps or the pavement's
+  // furniture, never two within 1.5 (a building's own lanterns count: the library's at its steps).
+  // They're gathered into one group and baked to one draw per material (lampsDone, below) ──
+  const LAMP_IN = 0.45, lampsG = new THREE.Group(), lampAt = [];
+  const kerbGap = (d) => { let m = 1e9; for (const rd of ROADS) for (const q of rd.pts) { const e = arc(d, q) - rd.half; if (e < m) m = e; } return m; };
+  for (const sp of out.shops) for (const [x, z] of sp.root.userData.lamps || []) lampAt.push(sp.root.localToWorld(new THREE.Vector3(x, 0, z)).normalize());
+  const lampOK = (d, minGap = 1.5) => {
+    const g = kerbGap(d);
+    if (g < LAMP_IN - 0.1 || g > LAMP_IN + 0.2 || zoneHit(d, 0.3)) return false;           // at the kerb, off the road
+    if (out.colliders.some(c => !c.soft && arc(d, c.dir) < c.r + 0.4)) return false;        // clear of furniture and walls
+    if (out.cafeSpot && arc(d, fC(...out.cafeSpot)) < 1.25) return false;                   // the café's tables (story.js)
+    return !lampAt.some(q => arc(d, q) < minGap);
+  };
+  const putLamp = (d) => { lampsG.add(settle(lamp(), d, 0.2, 0.02)); solid(d, 0.15); lampAt.push(d); };
+  // Main Street: each terrace's kerb gets a lamp at its corners and on its party walls (between two
+  // shopfronts), as many as it had before (one per ~2.8 of frontage), corners first
   for (const t of [...MAIN_STREET.north, ...MAIN_STREET.south]) {
-    const n = Math.max(1, Math.round((t.x[1] - t.x[0]) / 2.8)), s = MAIN_STREET.north.includes(t) ? 1 : -1;
-    for (let k = 0; k < n; k++) {
-      const x = t.x[0] + (t.x[1] - t.x[0]) * (k + 0.5) / n, y = s * (SHOP_Y - 1.2);
-      if (out.cafeSpot && Math.abs(x - out.cafeSpot[0]) < 1.2 && Math.sign(out.cafeSpot[1]) === s) continue;
-      add(settle(lamp(), fC(x, y), 0.2, 0.02));
-      solid(fC(x, y), 0.15);
-    }
+    const s = MAIN_STREET.north.includes(t) ? 1 : -1, y = s * (ROAD_MAJOR + LAMP_IN);
+    const n = Math.max(1, Math.round((t.x[1] - t.x[0]) / 2.8)), mid = (t.x[0] + t.x[1]) / 2;
+    const walls = [], tot = t.shops.reduce((a, sp) => a + sp.w, 0);
+    let acc = 0; for (const sp of t.shops.slice(0, -1)) { acc += sp.w; walls.push(t.x[0] + (t.x[1] - t.x[0]) * acc / tot); }
+    const cands = [t.x[0] - 0.08, t.x[1] + 0.08, ...walls.sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid))];
+    let k = 0;
+    for (const x of cands) { if (k >= n) break; const d = fC(x, y); if (lampOK(d, 2.0)) { putLamp(d); k++; } }
   }
   for (const x of [-4.4, 4.4, -7.2, 7.2, 1.6, -1.6]) add(bunting(fC, x, SHOP_Y));
   // the story's shopfronts: the café (tables out front) and Frame & Co. (the van)
@@ -393,16 +410,25 @@ export function buildTown(scene) {
     }
     (out.infills ??= []).push({ dir: md, front: fC(mx, my + 3 * A.faceY), kind: A.kind === 'block' && Bn.kind === 'block' ? 'block' : 'pocket' });
   }
-  // street lamps at junctions, trees along the boulevard verge
+  // the grid's junctions: a lamp on one of its four kerb corners, the first that's at the kerb and
+  // clear — beside a building's side, never in front of its face (blocks face ±y: 0.8 clear of a
+  // front or back, 0.3 of a side), off a little park's lawn, and 3 from the next. (They stood
+  // 1.6 off every other junction's middle: there, two main roads meet and the block's building
+  // reaches to 0.34 off each kerb, so the lamp stood in the building's corner)
+  const inCell = (x, y) => [...cells.values()].some(c => c.kind === 'park' ? Math.hypot(x - c.x, y - c.y) < P / 2 - ROAD_MAJOR + 0.15
+    : Math.abs(x - c.x) < c.w / 2 + 0.3 && Math.abs(y - c.y) < c.d / 2 + 0.8);
   for (let i = -K; i <= K; i++) for (let j = -K; j <= K; j++) {
-    if ((i + j) % 2) continue;
-    const x = i * P + 1.6, y = j * P + 1.6;
-    if (!inTown(x, y) || inShops(x, y, 0.5)) continue;
-    const d = fC(x, y);
-    if (zoneHit(d, 0.4) || onRoad(d, 0.35)) continue;
-    add(settle(lamp(), d, 0.2, 0.02));
-    solid(d, 0.15);
+    const hx = i % 2 === 0 ? ROAD_MAJOR : ROAD_MINOR, hy = j % 2 === 0 ? ROAD_MAJOR : ROAD_MINOR;
+    for (const [sx, sy] of [[1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+      // (+0.07: the frame's grid runs a touch wide of the true arc out here)
+      const x = i * P + sx * (hx + LAMP_IN + 0.07), y = j * P + sy * (hy + LAMP_IN + 0.07);
+      if (!inTown(x, y) || inShops(x, y, 0.4) || inCell(x, y)) continue;
+      const d = fC(x, y);
+      if (!lampOK(d, 3.0)) continue;
+      putLamp(d); break;
+    }
   }
+  add(mergeStatic(lampsG, [], { vc: true }));                 // downtown's lamps: one draw per material
   // Maple Plaza: the strip mall out past the boulevard, its lot opening onto it
   {
     const d = fC(...MALL.at), yaw = yawToFace(d, fC(MALL.at[0] - 10, MALL.at[1]));

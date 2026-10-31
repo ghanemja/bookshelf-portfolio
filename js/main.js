@@ -1,6 +1,6 @@
 // ─── THE VANISHING GALLERY (v2) — bootstrap + loop ──────────────────────────
 import * as THREE from 'three';
-import { buildPlanet, buildSky, buildLights, buildClouds, ROADS, ZONES, registerGround, standAt, paintRoadMarkings } from './world.js';
+import { buildPlanet, buildSky, buildLights, buildClouds, ROADS, ZONES, registerGround, standAt, paintRoadMarkings, LAMPS, collectLamps } from './world.js';
 import { styleTick, gpuOnly, bakeScenery } from './style.js';
 import { planTown, buildTown } from './town.js';
 import { createPlayer } from './player.js';
@@ -29,6 +29,7 @@ const sky = buildSky(scene);
 const lights = buildLights(scene);
 const clouds = buildClouds(scene);
 const town = buildTown(scene);
+collectLamps([scene, ...town.shops.map(sp => sp.root)]);   // every lamp's spot, before the props are baked (the shops' own are in their frames)
 // the town's loose props (trees, lamps, benches, planters…), each baked down in place to a fill
 // and a hull — before anything reads the ground, so the walk rays index the baked meshes
 bakeScenery(scene, new Set(scene.children));
@@ -88,7 +89,7 @@ try { renderer.compile(scene, camera); } catch { /* compiled lazily instead */ }
 gpuOnly(scene, renderer, camera); // the world is built: what only the GPU reads leaves the JS heap once uploaded
 for (const it of game.items) if (it.kind === 'person') it.obj.position.setLength(standAt(it.obj.position.clone().normalize()));
 const culler = createCuller(scene, camera);
-window.__v2 = { culler, rooms, scene, camera, renderer, town, player, game, citizens, plaza, park, ROADS, ZONES };
+window.__v2 = { culler, rooms, scene, camera, renderer, town, player, game, citizens, plaza, park, ROADS, ZONES, LAMPS };
 
 const clock = new THREE.Clock();
 function loop() {
