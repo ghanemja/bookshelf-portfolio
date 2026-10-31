@@ -1186,21 +1186,42 @@ export function station() {
   const vane = K.sub(0, TH + 1.8, tz, 0.6);
   vane.box(0.5, 0.03, 0.02, dk, 0, 0, 0, 0.008);
   vane.put(extrude(shape([[0.25, -0.08], [0.38, 0], [0.25, 0.08]]), 0.01, 0.004), dk, 0, 0, -0.005);
-  // the entrance: an arched doorway with a fanlight, the name above
+  // an arched doorway (they were flat green slabs stuck on the lower half of arched windows):
+  // a dark reveal filling the opening, a stone surround (jambs, arch, keystone), a fanlight
+  // with glazing bars over a transom, and double panelled doors in station green, set back
+  // in it with brass knobs and a kick plate. (x, base) on the wall face of F, DW wide, h tall
+  const doorGreen = paint(0x3e6b52), doorPanel = paint(0x4f7f63), brass = paint(PAL.gold, { hatch: 0 });
+  const archDoor = (F, x, DW, h, t) => {
+    const R = DW / 2, SP = h - R;
+    const arch = new THREE.Shape(); arch.moveTo(-R, 0); arch.lineTo(R, 0); arch.lineTo(R, SP); arch.absarc(0, SP, R, 0, Math.PI, false); arch.lineTo(-R, 0);
+    F.put(extrude(arch, 0.03, 0.005), dk, x, 0, 0);                                                 // the dark reveal
+    for (const sx of [-1, 1]) F.box(t, SP, 0.08, stone, x + sx * (R + t / 2), SP / 2, 0.045, 0.015);  // jambs
+    F.put(new THREE.TorusGeometry(R + t / 2, t / 2, 8, 28, Math.PI), stone, x, SP, 0.045);          // the arch
+    F.box(t + 0.04, 0.17, 0.1, stone, x, SP + R + t * 0.6, 0.05, 0.02);                              // keystone
+    const fan = new THREE.Shape(); fan.moveTo(R - 0.02, 0); fan.absarc(0, 0, R - 0.02, 0, Math.PI, false); fan.lineTo(R - 0.02, 0);
+    F.put(extrude(fan, 0.02, 0.005), upperGlass(3), x, SP, 0.03);                                   // fanlight
+    for (let k = 1; k < 4; k++) { const a = k / 4 * Math.PI; F.box(0.022, R - 0.04, 0.015, stone, x + Math.cos(a) * (R / 2 - 0.01), SP + Math.sin(a) * (R / 2 - 0.01), 0.055, 0.005, [0, 0, a - Math.PI / 2]); }
+    F.box(DW, 0.05, 0.05, stone, x, SP, 0.05, 0.01);                                                // transom
+    for (const sx of [-1, 1]) {
+      const cx = x + sx * DW / 4;
+      F.box(DW / 2 - 0.015, SP - 0.03, 0.04, doorGreen, cx, (SP - 0.03) / 2, 0.035, 0.01);          // a leaf
+      for (const y of [0.27, 0.7]) F.box(DW / 2 - 0.1, SP * 0.3, 0.02, doorPanel, cx, SP * y, 0.06, 0.008);  // raised panels
+      F.put(new THREE.SphereGeometry(0.024, 10, 7), brass, x + sx * 0.05, SP * 0.49, 0.072);        // knob
+    }
+    F.box(DW, 0.08, 0.012, brass, x, 0.04, 0.058, 0.004);                                           // kick plate
+  };
+  // the entrance, the name above; it stands on two stone steps up from the forecourt
   const E = K.sub(0, 0.28, front + 0.22);
-  windowAt(E, { y: 0, w: 0.8, h: 1.75, arch: true, frame: stone, glass: upperGlass(3), cols: 2, rows: 3, hood: 'key', t: 0.09 });
-  E.box(0.74, 1.15, 0.05, paint(0x3e6b52), 0, 0.58, 0.04, 0.012);
-  E.box(0.02, 1.1, 0.06, dk, 0, 0.58, 0.07, 0.006);
+  archDoor(E, 0, 0.8, 1.75, 0.09);
+  E.box(1.1, 0.12, 0.3, stone, 0, -0.06, 0.13, 0.02);
+  E.box(1.32, 0.13, 0.52, stone, 0, -0.175, 0.24, 0.02);
   K.flat(TW - 0.12, 0.22, signMat('CENTRAL STATION', { bg: '#f1e4c8', fg: '#2a2230', border: false, font: '400 $px ' + HAND }), 0, 2.38, front + 0.225);
   // tall arched windows across the hall, smaller ones on the wings
   for (const sx of [-1.45, 1.45]) windowAt(K.sub(sx, 0, front), { y: 0.55, w: 0.62, h: 1.65, arch: true, frame: stone, glass: upperGlass(sx > 0 ? 1 : 2), cols: 3, rows: 3, hood: 'key', t: 0.07 });
   for (const s of [-1, 1]) for (const dx of [-0.4, 0.4]) windowAt(K.sub(s * (MW / 2 + WW / 2) + dx, 0, front - 0.3), { y: 0.55, w: 0.38, h: 1.05, arch: true, frame: stone, glass: upperGlass(2), cols: 2, rows: 2, hood: 'key' });
   // the platform side: doors through the hall, windows on the wings
   const BK = K.sub(0, 0.5, bz - D / 2, Math.PI);
-  for (const sx of [-0.9, 0.9]) {
-    windowAt(BK, { x: sx, y: 0, w: 0.62, h: 1.55, arch: true, frame: stone, glass: upperGlass(3), cols: 2, rows: 3, hood: 'key', t: 0.07 });
-    BK.box(0.56, 1.05, 0.05, paint(0x3e6b52), sx, 0.53, 0.04, 0.012);
-  }
+  for (const sx of [-0.9, 0.9]) archDoor(BK, sx, 0.62, 1.55, 0.07);
   for (const s of [-1, 1]) for (const dx of [-0.4, 0.4]) windowAt(K.sub(s * (MW / 2 + WW / 2) + dx, 0.75, bz - D / 2, Math.PI), { y: 0, w: 0.38, h: 1.05, arch: true, frame: stone, glass: upperGlass(1), cols: 2, rows: 2, hood: 'key' });
   // the platform behind, under a canopy with a fretted valance
   const pz0 = bz - D / 2, PD = 2.4, PL = 12.4, PH = 0.5;
@@ -1250,6 +1271,8 @@ export function station() {
   tx.box(0.5, 0.2, 0.04, paint(PAL.gold), 0, 1.35, 0, 0.02);
   tx.flat(0.44, 0.15, signMat('TAXI', { bg: '#e4b84f', fg: '#2a2230', w: 192, h: 64, border: false }), 0, 1.35, 0.022);
   K.g.userData.floor = (x, z) => {
+    if (Math.abs(x) < 0.55 && z > front + 0.22 && z < front + 0.5) return 0.28;   // the entrance steps
+    if (Math.abs(x) < 0.66 && z > front + 0.22 && z < front + 0.72) return 0.17;
     if (z > front && z < front + 2.9 && Math.abs(x) < 4.7) return 0.06;
     if (z < pz0 && z > pz0 - PD) {
       if (Math.abs(x) <= PL / 2) return PH;
