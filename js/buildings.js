@@ -40,6 +40,66 @@ function prism(prof, len, bevel = 0.01) {
   g.translate(len / 2, 0, 0);
   return g;
 }
+// the same profile run ROUND a w × d rectangle of walls (centred on the origin) in one mitred
+// piece: a cornice or band that goes round every side, so no corner is left open and no two
+// runs overlap there (coplanar tops z-fight, and the overlap read as separate blocks). The
+// corners turn on a small radius, so the shading and the ink hull run on round them. `flush`:
+// sides that butt a neighbour ('+x', '-x', '+z', '-z'); the profile doesn't stand out there.
+// The straight runs carry a vertex every ≤0.4 (STEP), as the roof on it does: placeOnPlanet lays
+// every vertex on the curve and only splits edges longer than 1.6, so a long run would sag
+// ~1cm between its ends — and differently from the roof resting on it
+const STEP = 0.4;
+function ringPrism(prof, w, d, { flush = [], rc = 0.03, seg = 3 } = {}) {
+  let area = 0;
+  for (let j = 0; j < prof.length; j++) { const [a, b] = prof[j], [c, e] = prof[(j + 1) % prof.length]; area += a * e - c * b; }
+  const P = area > 0 ? prof : prof.slice().reverse();          // counter-clockwise in (out, up)
+  const fx = [flush.includes('+x'), flush.includes('-x')], fz = [flush.includes('+z'), flush.includes('-z')];
+  const nw = Math.max(1, Math.ceil(w / STEP)), nd = Math.max(1, Math.ceil(d / STEP));
+  const N = 4 * (seg + 1) + 2 * (nw - 1) + 2 * (nd - 1), pos = [], idx = [];
+  for (const [o, u] of P) {
+    const loop = [];
+    for (let c = 0; c < 4; c++) {                                // the corners in turn: (+x,+z) (-x,+z) (-x,-z) (+x,-z)
+      const sx = c === 0 || c === 3 ? 1 : -1, sz = c < 2 ? 1 : -1;
+      const ox = fx[sx > 0 ? 0 : 1] ? Math.min(o, 0) : o, oz = fz[sz > 0 ? 0 : 1] ? Math.min(o, 0) : o;
+      const cx = sx * (w / 2 + ox - rc), cz = sz * (d / 2 + oz - rc);
+      const arc = [];
+      for (let k = 0; k <= seg; k++) { const a = (c + k / seg) * Math.PI / 2; arc.push([cx + Math.cos(a) * rc, cz + Math.sin(a) * rc]); }
+      loop.push(arc);
+    }
+    for (let c = 0; c < 4; c++) {                                // each corner, then the straight run to the next
+      for (const [x, z] of loop[c]) pos.push(x, u, z);
+      const [x0, z0] = loop[c][seg], [x1, z1] = loop[(c + 1) % 4][0], n = c % 2 ? nd : nw;
+      for (let k = 1; k < n; k++) pos.push(x0 + (x1 - x0) * k / n, u, z0 + (z1 - z0) * k / n);
+    }
+  }
+  // (the loop runs toward +z along the +x side; with the profile anticlockwise, this winding
+  // turns every face outward)
+  for (let j = 0; j < P.length; j++) {
+    const j2 = (j + 1) % P.length;
+    for (let i = 0; i < N; i++) {
+      const i2 = (i + 1) % N, a = j * N + i, b = j * N + i2, c = j2 * N + i, e = j2 * N + i2;
+      idx.push(a, c, b, b, c, e);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+// a cornice run round the walls, set at y (its foot at the wall top)
+function corniceRing(K, mat, prof, x, y, z, w, d, opts) { return K.put(ringPrism(prof, w, d, opts), mat, x, y, z); }
+const profOut = (prof) => Math.max(...prof.map(p => p[0])), profTop = (prof) => Math.max(...prof.map(p => p[1]));
+// a hipped roof that sits ON a cornice ring: its eaves rest on the cornice's top and stand
+// `ov` past its outer edge on every side, so no roof plane cuts through the trim
+const _roofTess = new TessellateModifier(STEP, 10);
+export const hipRoofFine = (w, d, h, k = 1) => _roofTess.modify(hipRoof(w, d, h, k));   // (split to STEP, like the ring under it)
+// (`flush`: as the ring's — no eave stands out on those sides, the roof stops at the wall line)
+function roofOnRing(K, mat, prof, x, y, z, w, d, h, k = 1, ov = 0.04, flush = []) {
+  const e = profOut(prof) + ov, E = (sd) => flush.includes(sd) ? 0 : e;
+  const x0 = -w / 2 - E('-x'), x1 = w / 2 + E('+x'), z0 = -d / 2 - E('-z'), z1 = d / 2 + E('+z');
+  return K.put(hipRoofFine(x1 - x0, z1 - z0, h, k), mat, x + (x0 + x1) / 2, y + profTop(prof) + 0.005, z + (z0 + z1) / 2);
+}
 // an opening: a rectangle with an optional semicircular head, in absolute coords
 function opening(w, y0, ySpring, arch, path = new THREE.Shape()) {
   path.moveTo(-w / 2, y0); path.lineTo(w / 2, y0); path.lineTo(w / 2, ySpring);
@@ -582,13 +642,20 @@ function bayWindow(K, x, y, bw, bh, wall, trim, gv) {
 function roofTop(K, o, w, d, H, wall, trim) {
   const roofMat = paint(o.roofCol ?? PAL.roofSlate), deck = paint(0x9a93a0);
   const kind = o.roof ?? 'parapet';
+  // the roofline trim runs round every side (it was on the front only, so the sides and back
+  // had none, and a roof sat over bare wall); against a neighbour (a side that isn't one of
+  // `ends`) it doesn't stand out, so it never pokes into the next shop's roof
+  const flush = [1, -1].filter(s => !(o.ends || []).includes(s)).map(s => s > 0 ? '+x' : '-x');
+  const ringAt = (prof, y) => corniceRing(K, trim, prof, 0, y, -d / 2, w, d, { flush });
+  const descr = (k, prof, y, roof) => { K.g.userData.trimName = kind; K.g.userData.trims = [{ x: 0, z: -d / 2, w, d, y, top: y + profTop(prof), out: profOut(prof), kind: k, trim: trim.color.getHex(), roof, skip: flush }]; };
   if (kind === 'parapet' || kind === 'deco') {
-    K.put(prism(CORNICE, w + 0.08), trim, 0, H, 0);
+    ringAt(CORNICE, H);
     const nb = Math.max(3, Math.round(w / 0.42));
     for (let k = 0; k < nb; k++) K.put(prism(BRACKET, 0.07), trim, -w / 2 + 0.12 + k * (w - 0.24) / (nb - 1), H - 0.17, 0);
-    K.box(w, 0.3, 0.13, wall, 0, H + 0.39, -0.06, 0.03);
+    K.box(w, 0.48, 0.13, wall, 0, H + 0.3, -0.06, 0.03);                       // the raised front, down to the deck
     K.box(w + 0.05, 0.06, 0.18, trim, 0, H + 0.56, -0.06, 0.02);
-    K.box(w - 0.04, 0.06, d - 0.2, deck, 0, H + 0.03, -d / 2 - 0.06, 0.02);
+    K.box(w - 0.06, 0.06, d - 0.06, deck, 0, H + 0.03, -d / 2, 0.02);       // the flat roof, inside the parapet
+    descr('flat', CORNICE, H, 0x9a93a0);
     if (kind === 'deco') {
       for (const [sx, hh] of [[0, 0.62], [-w * 0.3, 0.38], [w * 0.3, 0.38]]) {
         K.box(w * 0.22, hh, 0.14, wall, sx, H + 0.54 + hh / 2, -0.06, 0.03);
@@ -601,10 +668,13 @@ function roofTop(K, o, w, d, H, wall, trim) {
     }
     chimney(K, w * 0.28, H, -d + 0.35);
   } else if (kind === 'mansard') {
-    K.put(prism(CORNICE, w + 0.08), trim, 0, H, 0);
+    // the mansard stands ON the cornice ring (it sat 0.02 down in it), a ledge of trim all round
+    ringAt(CORNICE, H);
+    const MB = H + profTop(CORNICE) + 0.005;
     const mh = 0.78, prof = [[0.02, 0], [-0.3, mh], [-(d - 0.55), mh], [-(d - 0.05), 0]];
-    K.put(prism(prof, w + 0.02), roofMat, 0, H + 0.22, 0);
-    K.box(w + 0.04, 0.06, d - 0.75, paint(shade(o.roofCol ?? PAL.roofSlate, 0.85)), 0, H + 0.22 + mh, -d / 2 + 0.1, 0.02);
+    K.put(prism(prof, w + 0.02), roofMat, 0, MB, 0);
+    K.box(w + 0.04, 0.06, d - 0.75, paint(shade(o.roofCol ?? PAL.roofSlate, 0.85)), 0, MB + mh, -d / 2 + 0.1, 0.02);
+    descr('ledge', CORNICE, H, o.roofCol ?? PAL.roofSlate);
     const nd = w > 1.9 ? 2 : 1;
     for (let k = 0; k < nd; k++) {
       const x = -w / 2 + (k + 0.5) * w / nd, y0 = H + 0.36;
@@ -615,7 +685,9 @@ function roofTop(K, o, w, d, H, wall, trim) {
     }
     chimney(K, -w * 0.3, H + 0.8, -d + 0.45);
   } else if (kind === 'gable' || kind === 'dutch') {
-    K.put(prism(BAND, w + 0.1), trim, 0, H, 0);
+    ringAt(BAND, H);
+    descr('band', BAND, H, o.roofCol ?? PAL.roofSlate);
+    K.g.userData.trims[0].skip = ['+x', '-x'];         // (the eave sides: the roof hangs over the band there)
     const gh = kind === 'gable' ? w * 0.42 : w * 0.34;
     const tri = shape([[-w / 2, 0], [w / 2, 0], [0, gh]]);
     K.put(extrude(tri, d - 0.05, 0.012), wall, 0, H, -d + 0.05);
@@ -709,9 +781,12 @@ export function library(o) {
   for (const x of [-1.0, 0, 1.0]) windowAt(BK, { x, y: 0.45, w: 0.4, h: 1.1, arch: true, frame: trim, glass: upperGlass(x + 2), cols: 2, rows: 3, hood: 'key' });
   // cornice, hipped roof, cupola
   const rY = P + BH, rz = bodyZ - (d - 0.65) / 2;
-  const cor = K.sub(0, rY, bodyZ); cor.put(prism(CORNICE, w - 0.12), trim, 0, 0, 0);
-  K.put(hipRoof(w - 0.06, d - 0.55, 0.7, 1), paint(PAL.roofSlate), 0, rY + 0.2, rz);
-  const cy = rY + 0.75;
+  // (the cornice was on the front only, and the roof sat 0.04 down through it and past the
+  // sides: now it runs round the body and the roof's eaves rest on it)
+  corniceRing(K, trim, CORNICE, 0, rY, rz, w - 0.2, d - 0.65);
+  roofOnRing(K, paint(PAL.roofSlate), CORNICE, 0, rY, rz, w - 0.2, d - 0.65, 0.7);
+  K.g.userData.trimName = 'library'; K.g.userData.trims = [{ x: 0, z: rz, w: w - 0.2, d: d - 0.65, y: rY, top: rY + 0.24, out: 0.2, kind: 'hip', trim: 0xfffaf0, roof: PAL.roofSlate }];
+  const cy = rY + 0.8;
   K.put(lathe([[0.001, 0], [0.42, 0], [0.42, 0.06], [0.36, 0.08], [0.36, 0.5], [0.42, 0.54], [0.42, 0.6], [0.001, 0.6]], 24), trim, 0, cy, rz);
   for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; K.box(0.05, 0.36, 0.05, stone, Math.cos(a) * 0.37, cy + 0.28, rz + Math.sin(a) * 0.37, 0.01); }
   K.put(lathe([[0.001, 0], [0.42, 0], [0.4, 0.14], [0.32, 0.3], [0.18, 0.42], [0.001, 0.46]], 24), paint(0x5fae9a), 0, cy + 0.6, rz);
@@ -908,19 +983,21 @@ export function townBlock(o = {}) {
   K.box(w + 0.1, 0.14, d + 0.1, trim, 0, 1.42, 0, 0.05);
   for (let y = 1.4 + 1.7; y < h - 0.5; y += 1.7) K.box(bw + 0.05, 0.06, bd + 0.05, trim, 0, y, 0, 0.02);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) K.box(0.16, h - 1.5, 0.16, trim, sx * bw / 2, 1.45 + (h - 1.5) / 2, sz * bd / 2, 0.03);
-  // the parapet, then the cornice and brackets on all four faces capping it: the cornice is
-  // the roofline (it used to sit under a band of bare parapet, so the trim read as too low)
+  // the roofline: ONE cornice run round all four faces (it was four straight runs, each 0.4
+  // too long, overlapping as blocks at every corner), on brackets; its top is the parapet's
+  // coping, and the flat roof sits down inside it
+  corniceRing(K, trim, CORNICE, 0, h + 0.04, 0, bw, bd);
   for (let k = 0; k < 4; k++) {
     const along = k % 2 ? bd : bw, F = K.sub(Math.sin(k * Math.PI / 2) * bw / 2, h + 0.04, Math.cos(k * Math.PI / 2) * bd / 2, k * Math.PI / 2);
-    F.put(prism(CORNICE, along + 0.4), trim, 0, 0, 0);
     const nb = Math.max(2, Math.round(along / 0.55));
     for (let b = 0; b < nb; b++) F.put(prism(BRACKET, 0.07), trim, -along / 2 + 0.2 + b * (along - 0.4) / (nb - 1), -0.17, 0);
   }
-  K.box(bw, 0.26, bd, wall, 0, h + 0.13, 0, 0.03);
-  K.box(bw - 0.02, 0.04, bd - 0.02, paint(shade(col, 0.82)), 0, h + 0.27, 0, 0.01);   // the flat roof, inside the cornice
+  K.box(bw, 0.1, bd, wall, 0, h + 0.05, 0, 0.02);                                         // the wall up into the cornice
+  K.box(bw - 0.06, 0.04, bd - 0.06, paint(shade(col, 0.82)), 0, h + 0.12, 0, 0.01);   // the flat roof, down inside the parapet
+  K.g.userData.trimName = 'townBlock'; K.g.userData.trims = [{ x: 0, z: 0, w: bw, d: bd, y: h + 0.04, top: h + 0.28, out: 0.2, kind: 'flat', trim: PAL.kerb, roof: shade(col, 0.82) }];
   if (h > 4.5) {
     const cw = w * 0.56, cd = d * 0.56;
-    K.box(cw, 0.85, cd, wall, 0, h + 0.68, 0, 0.06);
+    K.box(cw, 0.985, cd, wall, 0, h + 0.6125, 0, 0.06);           // (standing on the roof deck)
     K.put(prism(BAND, cw + 0.12), trim, 0, h + 1.08, cd / 2);
     K.box(cw + 0.14, 0.1, cd + 0.14, trim, 0, h + 1.16, 0, 0.03);
     if (rnd() > 0.45) {                                   // a timber water tank on iron legs
@@ -931,7 +1008,7 @@ export function townBlock(o = {}) {
       K.put(lathe([[0.001, 0], [0.37, 0], [0.001, 0.32]], 16), paint(PAL.roofSlate), tx, ty + 1.05, tz);
     } else K.put(lathe([[0.001, 0], [0.24, 0], [0.24, 0.12], [0.2, 0.16], [0.2, 0.55], [0.04, 1.0], [0.001, 1.05]], 14), paint(PAL.roofSlate), 0, h + 1.2, 0);
   } else {
-    K.box(0.4, 0.25, 0.3, paint(0xb8b2bd), w * 0.18, h + 0.38, -d * 0.12, 0.03);   // a rooftop vent
+    K.box(0.4, 0.25, 0.3, paint(0xb8b2bd), w * 0.18, h + 0.265, -d * 0.12, 0.03);   // a rooftop vent, on the deck
   }
   // street level: a proper doorway (it was a flat slab stuck on the shop window), a step and
   // a striped awning. A trim surround stands just proud of the wall; inside it a dark reveal
@@ -1193,17 +1270,23 @@ export function station() {
   for (const [qx, qh] of [[-MW / 2, H], [MW / 2, H], [-(MW / 2 + WW), WH], [MW / 2 + WW, WH]]) {
     for (let y = 0.35, k = 0; y < qh - 0.15; y += 0.22, k++) K.box(k % 2 ? 0.16 : 0.24, 0.16, 0.05, stone, qx - Math.sign(qx) * (k % 2 ? 0.08 : 0.12), y, front + 0.02 - (Math.abs(qx) > MW / 2 + 0.1 ? 0.3 : 0), 0.015);
   }
-  // cornices
-  K.put(prism(CORNICE, MW + 0.1), trim, 0, H, front);
-  for (const s of [-1, 1]) { const S = K.sub(s * (MW / 2 + WW / 2), WH, front - 0.3); S.put(prism(CORNICE.map(([a, b]) => [a * 0.8, b * 0.8]), WW + 0.08), trim, 0, 0, 0); }
-  // roofs: hipped slate on the hall, the wings
-  K.put(hipRoof(MW + 0.2, D + 0.2, 1.0, 1), slate, 0, H + 0.2, bz);
-  for (const s of [-1, 1]) K.put(hipRoof(WW + 0.1, D - 0.1, 0.7, 1), slate, s * (MW / 2 + WW / 2), WH + 0.18, bz - 0.15);
+  // cornices round the hall and both wings (they were on the front only), and the hipped slate
+  // roofs resting on them — they used to sit down through the cornice and hang past it
+  const C8 = CORNICE.map(([a, b]) => [a * 0.8, b * 0.8]);
+  corniceRing(K, trim, CORNICE, 0, H, bz, MW, D);
+  roofOnRing(K, slate, CORNICE, 0, H, bz, MW, D, 1.0);
+  for (const s of [-1, 1]) {
+    corniceRing(K, trim, C8, s * (MW / 2 + WW / 2), WH, bz - 0.15, WW, D - 0.3);
+    roofOnRing(K, slate, C8, s * (MW / 2 + WW / 2), WH, bz - 0.15, WW, D - 0.3, 0.7);
+  }
+  K.g.userData.trimName = 'station'; K.g.userData.trims = [{ x: 0, z: bz, w: MW, d: D, y: H, top: H + 0.24, out: 0.2, kind: 'hip', trim: 0xfffaf0, roof: PAL.roofSlate },
+    ...[-1, 1].map(s => ({ x: s * (MW / 2 + WW / 2), z: bz - 0.15, w: WW, d: D - 0.3, y: WH, top: WH + 0.192, out: 0.16, kind: 'hip', trim: 0xfffaf0, roof: PAL.roofSlate })),
+    { x: 0, z: front + 0.22 - 1.35 / 2, w: 1.35, d: 1.35, y: 5.2, top: 5.2 + 0.192, out: 0.16, kind: 'hip', trim: 0xfffaf0, roof: 0x5fae9a }];
   // the clock tower over the entrance
   const TW = 1.35, TH = 5.2, tz = front + 0.22 - TW / 2;
   K.box(TW, TH, TW, brick, 0, TH / 2, tz, 0.05);
   K.box(TW + 0.06, 0.12, TW + 0.06, stone, 0, H + 0.1, tz, 0.02);
-  const tc = K.sub(0, TH, tz + TW / 2); tc.put(prism(CORNICE.map(([a, b]) => [a * 0.8, b * 0.8]), TW + 0.08), trim, 0, 0, 0);
+  corniceRing(K, trim, C8, 0, TH, tz, TW, TW);
   for (let k = 0; k < 4; k++) {
     const F = K.sub(Math.sin(k * Math.PI / 2) * (TW / 2), 0, tz + Math.cos(k * Math.PI / 2) * (TW / 2), k * Math.PI / 2);
     F.put(new THREE.CylinderGeometry(0.46, 0.46, 0.08, 32), trim, 0, TH - 0.62, 0.02, [Math.PI / 2, 0, 0]);
@@ -1211,8 +1294,10 @@ export function station() {
     windowAt(F, { y: H + 0.5, w: 0.36, h: 0.8, arch: true, frame: trim, glass: upperGlass(k), cols: 2, rows: 2, hood: 'key' });
   }
   K.put(new THREE.SphereGeometry(0.035, 8, 6), dk, 0, TH - 0.62, tz + TW / 2 + 0.1);
-  K.put(lathe([[0.001, 0], [0.98, 0], [0.5, 0.75], [0.12, 1.25], [0.001, 1.3]], 4), paint(0x5fae9a), 0, TH + 0.2, tz, [0, Math.PI / 4, 0]);
-  K.put(lathe([[0.001, 0], [0.05, 0], [0.025, 0.35], [0.06, 0.4], [0.001, 0.55]], 10), paint(PAL.gold), 0, TH + 1.45, tz);
+  // the spire's square foot rests on the tower's cornice, 0.04 past it all round
+  const SB = TH + profTop(C8) + 0.005, SR = (TW / 2 + profOut(C8) + 0.04) * Math.SQRT2;
+  K.put(lathe([[0.001, 0], [SR, 0], [0.62, 0.72], [0.13, 1.25], [0.001, 1.3]], 4), paint(0x5fae9a), 0, SB, tz, [0, Math.PI / 4, 0]);
+  K.put(lathe([[0.001, 0], [0.05, 0], [0.025, 0.35], [0.06, 0.4], [0.001, 0.55]], 10), paint(PAL.gold), 0, SB + 1.25, tz);
   const vane = K.sub(0, TH + 1.8, tz, 0.6);
   vane.box(0.5, 0.03, 0.02, dk, 0, 0, 0, 0.008);
   vane.put(extrude(shape([[0.25, -0.08], [0.38, 0], [0.25, 0.08]]), 0.01, 0.004), dk, 0, 0, -0.005);
@@ -1548,6 +1633,7 @@ function conform(g, sink, groundAt = radiusAt) {
     const i = Math.floor(fx), k = Math.floor(fz), u = fx - i, w = fz - k;
     return (grid[i * nz + k] * (1 - u) + grid[(i + 1) * nz + k] * u) * (1 - w) + (grid[i * nz + k + 1] * (1 - u) + grid[(i + 1) * nz + k + 1] * u) * w;
   };
+  g.userData.lift = (x, z) => at(x, z) - sink;     // (the height it laid a point at: the roof-trim check reads it)
   for (const m of g.children) {
     m.geometry = (exact ? _tessFine : _tess).modify(m.geometry);
     const p = m.geometry.attributes.position;
@@ -1664,13 +1750,15 @@ export function bookLibrary() {
   // the reading room: brick body, stone plinth, a cornice, a slate hipped roof
   K.box(W + 0.12, 0.18, D + 0.12, paint(0xd8cab0), 0, 0.09, FZ - D / 2, 0.04);
   K.box(W, H, D, brick, 0, H / 2 + 0.1, FZ - D / 2, 0.06);
-  const cor = K.sub(0, H + 0.05, FZ - D + 0.02, Math.PI); cor.put(prism(CORNICE, W), trim, 0, 0, 0);
+  // the cornice runs round the back and both sides in one piece (three separate runs left the
+  // back corners open); at the front it stays flush, behind the bookcase's crown
+  corniceRing(K, trim, CORNICE, 0, H + 0.05, FZ - D / 2, W, D, { flush: ['+z'] });
   for (const sd of [-1, 1]) {
     const S = K.sub(sd * W / 2, 0.1, FZ - D / 2, sd * Math.PI / 2);
     for (const x of [-0.5, 0.5]) windowAt(S, { x, y: 0.75, w: 0.4, h: 1.2, arch: true, frame: trim, glass: upperGlass(2), cols: 2, rows: 3, hood: 'key' });
-    S.put(prism(CORNICE, D), trim, 0, H - 0.05, 0);
   }
-  K.put(hipRoof(W + 0.1, D + 0.1, 0.75, 1), paint(PAL.roofSlate), 0, H + 0.28, FZ - D / 2);
+  roofOnRing(K, paint(PAL.roofSlate), CORNICE, 0, H + 0.05, FZ - D / 2, W, D, 0.75, 1, 0.04, ['+z']);
+  K.g.userData.trimName = 'bookLibrary'; K.g.userData.trims = [{ x: 0, z: FZ - D / 2, w: W, d: D, y: H + 0.05, top: H + 0.29, out: 0.2, kind: 'hip', trim: 0xfffaf0, roof: PAL.roofSlate, skip: ['+z'] }];
   // the bookcase front: sides, plinth, two shelves, a crowned top with the name board
   const CW = W + 0.3, CD = 0.5, CZ = FZ + CD / 2 - 0.05, TOP = H + 0.35, SH = [0.22, 1.5];
   for (const s of [-1, 1]) K.box(0.16, TOP, CD, wood, s * (CW / 2 - 0.08), TOP / 2, CZ, 0.04);

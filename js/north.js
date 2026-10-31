@@ -19,7 +19,7 @@ import * as THREE from 'three';
 import { R, ll, arc, slerpDir, frame, reserve, flatten, addRiver, addLake, radiusAt, surfH, isWater,
   settle, yawToFace, alignToSurface, addFloor, buildRoad, deflect, smooth, ROADS, onRoad, standAt, zoneHit, LOTS, decoBlocked } from './world.js';
 import { PAL, paint, ink, mergeStatic } from './style.js';
-import { kit, lathe, signMat, upperGlass, DARK, placeOnPlanet, batchPlaced, hipRoof } from './buildings.js';
+import { kit, lathe, signMat, upperGlass, DARK, placeOnPlanet, batchPlaced, hipRoofFine } from './buildings.js';
 import { tree, pine, bush, lamp, bench, rbox } from './props.js';
 import { buildCar, fitToGround } from './player.js';
 import { person } from './human.js';
@@ -109,7 +109,8 @@ function countryClub() {
   K.box(W, H, D, cream, CX, 0.16 + H / 2, CZ, 0.05);
   for (let y = 0.4; y < H; y += 0.22) K.box(W + 0.02, 0.025, D + 0.02, trim, CX, 0.16 + y, CZ, 0.01);   // clapboard lines
   K.box(W + 0.2, 0.1, D + 0.2, trim, CX, 0.16 + H + 0.05, CZ, 0.03);
-  K.put(hipRoof(W + 0.5, D + 0.5, 0.95, 0.9), green, CX, 0.16 + H + 0.1, CZ);
+  K.put(hipRoofFine(W + 0.5, D + 0.5, 0.95, 0.9), green, CX, 0.16 + H + 0.105, CZ);   // (resting on the eave band, not in its top face)
+  K.g.userData.trimName = 'clubhouse'; K.g.userData.trims = [{ x: CX, z: CZ, w: W, d: D, y: 0.16 + H, top: 0.16 + H + 0.1, out: 0.1, kind: 'hip', trim: 0xfaf6ec, roof: 0x3e6b52, ovMax: 0.2 }];
   K.box(0.32, 0.6, 0.32, paint(PAL.terracotta), CX + 1.4, 0.16 + H + 0.6, CZ - 0.3, 0.03);   // chimney
   // front: double doors, windows with striped awnings
   const fz = CZ + D / 2 + 0.01;

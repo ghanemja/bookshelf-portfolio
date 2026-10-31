@@ -79,15 +79,6 @@ export const PEOPLE = [
 ];
 
 // ── props for the case ──
-// stood on the lawn, its top resting on the wing's parapet: it leans toward +z (the wall
-// it is turned to face), long enough to reach the balustrade rail
-function ladderProp(L = 4.3) {
-  const g = new THREE.Group(), lean = new THREE.Group(), alu = paint(0xc7ccd2);
-  for (const s of [-1, 1]) lean.add(new THREE.Mesh(rbox(0.07, L, 0.07, 0.03), alu).translateX(s * 0.24).translateY(L / 2));
-  for (let y = 0.25; y < L - 0.1; y += 0.34) lean.add(new THREE.Mesh(rbox(0.5, 0.05, 0.05, 0.02), alu).translateY(y));
-  lean.rotation.x = 0.22; g.add(lean);
-  return ink(g, 'fine');
-}
 // each rut a thin strip draped over the ground point by point once it's placed (dropRuts):
 // laid flat as one long box it sank into the slope behind the museum and only stubs showed
 function ruts() { const g = new THREE.Group(); g.userData.rutXs = [-0.9, -0.62, 0.62, 0.9]; return g; }
@@ -353,7 +344,13 @@ export function buildCase(scene, W) {
   const place = (obj, d, yaw = 0) => { settle(obj, d, 0.6, 0.03, yaw); mergeStatic(obj, [], { vc: true }); scene.add(obj); return obj; };
   const mF = W.museumFrame;
   // at the museum
-  { const d = mF(7.4, -7.6); const l = ladderProp(); place(l, d, yawToFace(d, mF(6.0, -7.6))); items.push({ kind: 'clue', id: 'ladder', dir: d, obj: l }); }
+  // the ladder is the museum's own, leaning on the east wing's balustrade with the rope beside it
+  // (a second one was stood here, upright and off the wall, on the WEST side — mF's x is the
+  // museum's −x); you look at it from in front of its feet, and the sparkle sits on its rails
+  { const lg = W.museum.group, L = W.museum.ladder; lg.updateMatrixWorld(true);
+    const d = lg.localToWorld(new THREE.Vector3(L.foot.x + 0.6, 0, L.foot.z)).normalize();
+    const mid = L.foot.clone().lerp(L.rest, 0.42); mid.x += 0.12;                     // just proud of the rails
+    items.push({ kind: 'clue', id: 'ladder', dir: d, glintAt: lg.localToWorld(mid) }); }
   { const d = mF(-2.2, 0.6), gd = mF(-2.2, 0.85);                                          // sparkle just over the easel's top (the frame fills 1.1–2.1 above the paving, the legs reach 2.4)
     items.push({ kind: 'clue', id: 'frames', dir: d, glintAt: gd.clone().multiplyScalar(groundAt(gd) + 2.25) }); }          // the easel's empty frame (museum +x is the town frame's -x: +2.2 was the sculpture)
   { const d = mF(0, -15.7); const r = ruts();   // from the foot of the loading ramp out to the verge

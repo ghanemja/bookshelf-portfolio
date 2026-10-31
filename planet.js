@@ -12,7 +12,7 @@ import { mergeVertices, mergeGeometries } from 'three/addons/utils/BufferGeometr
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import CITY_PLAN from './city_plan.js?v=5';
 import LAYOUT from './city_layout.js?v=5';
-import { buildMuseum } from './museum.js?v=8';
+import { buildMuseum } from './museum.js?v=13';
 const llv = (a) => ll(a[0], a[1]);   // manifest [lat,lon] → unit direction
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';

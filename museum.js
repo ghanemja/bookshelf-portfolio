@@ -22,6 +22,7 @@ export function buildMuseum({ lite = false, glowMats = [], artBase = ART, openDo
   const g = new THREE.Group();
   g.name = 'DowntownMuseum';
   const SEG = lite ? 24 : 48;
+  let ladder = null;
 
   // ── materials: smooth, a little satin; nothing flat-shaded ──
   const S = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0, flatShading: false, ...o });
@@ -471,13 +472,28 @@ export function buildMuseum({ lite = false, glowMats = [], artBase = ART, openDo
     add(rbox(WING_W, WING_H, DEPTH - 0.4, 0.08), STONE, wx, Y0 + WING_H / 2, ZC - 0.2);
     add(rbox(WING_W + 0.1, 0.38, DEPTH - 0.3, 0.05), STONE_D, wx, Y0 + 0.19, ZC - 0.2);
     add(rbox(WING_W + 0.3, 0.2, DEPTH - 0.1, 0.07), TRIM, wx, Y0 + WING_H + 0.1, ZC - 0.2);
-    // balustrade: top rail + dumpy balusters
-    const balY = Y0 + WING_H + 0.2;
-    add(rbox(0.1, 0.08, DEPTH - 0.4, 0.03), TRIM, wx + s * (WING_W / 2 + 0.05), balY + 0.42, ZC - 0.2);
-    add(rbox(WING_W + 0.2, 0.08, 0.1, 0.03), TRIM, wx, balY + 0.42, FRONT + 0.0);
+    // balustrade round the wing's three open sides (front, outer side, back), on the parapet
+    // ledge: a post (pedestal + cap) at every corner and both ends, and along the long side; the
+    // handrail runs post to post, and the balusters stand evenly between, each on the ledge and
+    // under the rail. (The rails used to overshoot the corner, stop short of the other run and
+    // hang past the ledge's ends; the front run stood 0.25 out past the ledge, its balusters
+    // in the air.)
+    const balY = Y0 + WING_H + 0.2, RAIL_Y = balY + 0.42, PW = 0.2, PH = 0.5;
+    const hx = (WING_W + 0.3) / 2, hz = (DEPTH - 0.1) / 2, lz = ZC - 0.2;   // the ledge slab
+    const xo = wx + s * (hx - 0.13), xi = s * (CW / 2 + PW / 2), zf = lz + hz - 0.13, zb = lz - hz + 0.13;
     const balGeo = lathe([[0.001, 0], [0.07, 0], [0.05, 0.08], [0.09, 0.2], [0.05, 0.32], [0.06, 0.38], [0.001, 0.38]], 8);
-    for (let k = 0; k < 12; k++) add(balGeo, TRIM, wx + s * (WING_W / 2 + 0.05), balY, BACK + 0.6 + k * 0.58);
-    for (let k = 0; k < 4; k++) add(balGeo, TRIM, wx - 0.9 + k * 0.6, balY, FRONT);
+    const postGeo = rbox(PW, PH - 0.05, PW, 0.03), capGeo = rbox(PW + 0.06, 0.06, PW + 0.06, 0.02);
+    const post = (x, z) => { add(postGeo, TRIM, x, balY + (PH - 0.05) / 2, z); add(capGeo, TRIM, x, balY + PH - 0.03, z); };
+    const run = (ax, az, bx, bz) => {                       // post a → post b (axis-aligned)
+      const L = Math.hypot(bx - ax, bz - az), along = bx !== ax, len = L - PW + 0.04;
+      add(along ? rbox(len, 0.08, 0.1, 0.03) : rbox(0.1, 0.08, len, 0.03), TRIM, (ax + bx) / 2, RAIL_Y, (az + bz) / 2);
+      const n = Math.max(1, Math.round((L - PW) / 0.5));
+      for (let k = 0; k < n; k++) { const t = (PW / 2 + (k + 0.5) * (L - PW) / n) / L; add(balGeo, TRIM, ax + (bx - ax) * t, balY, az + (bz - az) * t); }
+    };
+    const sideZ = [zf, zf + (zb - zf) / 3, zf + 2 * (zb - zf) / 3, zb];
+    for (const [x, z] of [[xi, zf], [xi, zb], ...sideZ.map(z => [xo, z])]) post(x, z);
+    run(xi, zf, xo, zf); run(xi, zb, xo, zb);
+    for (let k = 0; k < 3; k++) run(xo, sideZ[k], xo, sideZ[k + 1]);
     // arched gallery windows down the outer wall. The surround is cut to the arch (a square
     // plate stuck out past the curve at both top corners): straight jambs, then a half-round
     // head that meets the arch trim's outer edge (radius 0.43 at the springline, y 0.55)
@@ -668,10 +684,13 @@ export function buildMuseum({ lite = false, glowMats = [], artBase = ART, openDo
       pts.push(new THREE.Vector3(drumX, DRUM_Y + 0.1, drumZ), new THREE.Vector3(drumX + 0.05, roofAt(drumX) + 0.05, drumZ));
       const zEnd = LADDER_Z;
       for (let k = 1; k <= 4; k++) { const x = drumX + (CW / 2 - drumX) * k / 4, z = drumZ + (zEnd - drumZ) * k / 4; pts.push(new THREE.Vector3(x, roofAt(x), z)); }
-      const wingTop = Y0 + WING_H + 0.28, outer = WING_X + WING_W / 2 + 0.05;
+      // across the wing roof, over the balustrade's handrail (lying on it, just clear of the
+      // ladder's +z rail), and down the outside past the ledge, beside the ladder
+      const wingTop = Y0 + WING_H + 0.25, rail = WING_X + (WING_W + 0.3) / 2 - 0.13, railTop = Y0 + WING_H + 0.2 + 0.46, ledge = WING_X + (WING_W + 0.3) / 2;
       pts.push(new THREE.Vector3(CW / 2 + 0.25, wingTop + 0.25, zEnd), new THREE.Vector3(CW / 2 + 0.7, wingTop, zEnd),
-        new THREE.Vector3(outer - 0.3, wingTop, zEnd), new THREE.Vector3(outer, wingTop + 0.52, zEnd + 0.15),
-        new THREE.Vector3(outer + 0.2, wingTop + 0.2, zEnd + 0.3), new THREE.Vector3(outer + 0.26, wingTop - 0.9, zEnd + 0.4));   // hangs beside the ladder, clear of the ledge
+        new THREE.Vector3(rail - 0.45, wingTop, zEnd + 0.4), new THREE.Vector3(rail - 0.04, railTop + 0.05, zEnd + 0.5),
+        new THREE.Vector3(rail + 0.1, railTop - 0.02, zEnd + 0.5), new THREE.Vector3(ledge + 0.1, wingTop - 0.3, zEnd + 0.52),
+        new THREE.Vector3(ledge + 0.12, wingTop - 1.2, zEnd + 0.55));   // hangs beside the ladder, clear of the ledge
       const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
       const ROPE = S(0xc9a46a, { roughness: 0.95 });
       add(new THREE.TubeGeometry(curve, 160, 0.05, 7), ROPE);
@@ -820,15 +839,21 @@ export function buildMuseum({ lite = false, glowMats = [], artBase = ART, openDo
   // ── the ladder: someone propped it to the east wing roof ──
   {
     const lad = new THREE.Group();
-    // its feet on the lawn (~0.08), its top resting just outside the wing's cornice ledge
-    // (which sticks out to WING_X + WING_W/2 + 0.15) — it used to lean into the ledge
-    const LT = 0.2, ledge = WING_X + (WING_W + 0.3) / 2, topY = Y0 + WING_H + 0.3, footY = 0.08;
-    const LL = (topY - footY) / Math.cos(LT);
-    lad.position.set(ledge + 0.08 + LL * Math.sin(LT), footY, LADDER_Z);
+    // leaning like a real ladder: its rails rest ON the balustrade's handrail — touching its
+    // outer top edge — and run on 0.35 past it, the lean (0.3, ~1 in 3.3) steep enough to
+    // clear the ledge below, and the feet on the lawn out from the wall. (It stood off the
+    // ledge before, touching nothing.)
+    const LT = 0.3, RR = 0.035, footY = 0.08;
+    const ex = WING_X + (WING_W + 0.3) / 2 - 0.13 + 0.05, ey = Y0 + WING_H + 0.2 + 0.46;   // the handrail's outer top edge
+    const ax = ex + RR * Math.cos(LT), ay = ey + RR * Math.sin(LT);          // the rail's axis there, one radius out
+    const reach = (ay - footY) / Math.cos(LT), LL = reach + 0.35;
+    lad.position.set(ax + reach * Math.sin(LT), footY, LADDER_Z);
     lad.rotation.z = LT;
     g.add(lad);
+    ladder = { foot: lad.position.clone(), rest: new THREE.Vector3(ax, ay, LADDER_Z), lean: LT };   // (museum-local: the story's clue sparkles on it)
     const ALU = S(0xb8c0c8, { roughness: 0.35, metalness: 0.7 });
-    for (const s of [-1, 1]) add(new THREE.CylinderGeometry(0.035, 0.035, LL, 8), ALU, 0, LL / 2, s * 0.24, lad);
+    // (the rails run on 0.12 below the foot: the feet are sunk into the ground, never stood on top of it)
+    for (const s of [-1, 1]) add(new THREE.CylinderGeometry(0.035, 0.035, LL + 0.12, 8), ALU, 0, (LL - 0.12) / 2, s * 0.24, lad);
     for (let k = 0; k < Math.floor((LL - 0.35) / 0.33); k++) {
       const r = add(new THREE.CylinderGeometry(0.022, 0.022, 0.48, 6), ALU, 0, 0.25 + k * 0.33, 0, lad);
       r.rotation.x = Math.PI / 2;
@@ -895,5 +920,6 @@ export function buildMuseum({ lite = false, glowMats = [], artBase = ART, openDo
     gemY: DRUM_Y + 0.7 + DOME_R + 1.9,
     gemZ: DOME_Z,
     footCenterZ: -7.0, footRadius: 7.6,
+    ladder,
   };
 }
