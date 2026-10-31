@@ -426,7 +426,37 @@ export function buildTown(scene) {
   // Maple Plaza: the strip mall out past the boulevard, its lot opening onto it
   {
     const d = fC(...MALL.at), yaw = yawToFace(d, fC(MALL.at[0] - 10, MALL.at[1]));
-    const g = add(placeOnPlanet(stripMall(), d, yaw));
+    // the side roads curve round the lot's ends: find, in the mall's own frame, where their kerbs
+    // begin (|x| on side s at depth z) so its corners, verges and end pavements follow them.
+    // Every road near it, flattened onto the mall's ground plane (along the radius), as segments
+    const kerbU = (() => {
+      const probe = settle(new THREE.Group(), d, 0.25, 0.04, yaw); probe.updateMatrixWorld(true);
+      const inv = probe.matrixWorld.clone().invert(), c = new THREE.Vector3().applyMatrix4(inv), q = new THREE.Vector3();
+      const segs = [];
+      for (const rd of ROADS) {
+        let prev = null;
+        for (const p of rd.pts) {
+          if (arc(p, d) > 16) { prev = null; continue; }
+          q.copy(p).multiplyScalar(R).applyMatrix4(inv);
+          const t = -c.y / (q.y - c.y), cur = [c.x + (q.x - c.x) * t, c.z + (q.z - c.z) * t];
+          if (prev) segs.push([prev[0], prev[1], cur[0], cur[1], rd.half + 0.28]);
+          prev = cur;
+        }
+      }
+      const inKerb = (x, z) => segs.some(([ax, az, bx, bz, h]) => {
+        const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+        return Math.hypot(x - ax - dx * t, z - az - dz * t) < h;
+      });
+      return (s, z) => {
+        for (let u = 4.0; u < 9.5; u += 0.1) if (inKerb(s * u, z)) {
+          let lo = u - 0.1, hi = u;
+          for (let k = 0; k < 12; k++) { const m = (lo + hi) / 2; if (inKerb(s * m, z)) hi = m; else lo = m; }
+          return lo;
+        }
+        return null;
+      };
+    })();
+    const g = add(placeOnPlanet(stripMall({ kerbU }), d, yaw));
     out.mall = { dir: d, root: g };
     // the drive, built to the boulevard's real carriageway edge: for each x across it, walk out
     // from the lot (in the mall's frame) to where the road's surface begins

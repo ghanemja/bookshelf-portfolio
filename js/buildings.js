@@ -968,7 +968,7 @@ const MALL_UNITS = [
   { name: 'Holey Donuts', kind: 'donuts', col: 0xf6c6d0, sign: '#d0607a', w: 2.6, tall: true },
   { name: 'Rewind Video', kind: 'video', col: 0x8f7ae8, sign: '#5a48b0', w: 2.2 },
 ];
-export function stripMall() {
+export function stripMall(o = {}) {
   const K = kit();
   const units = MALL_UNITS;
   const W = units.reduce((a, u) => a + u.w, 0), D = 3.0, H = 2.1;
@@ -1019,23 +1019,89 @@ export function stripMall() {
     K.put(lathe([[0.001, 0], [0.08, 0], [0.08, 0.06], [0.045, 0.1], [0.045, H - 0.32], [0.08, H - 0.28], [0.08, H - 0.24], [0.001, H - 0.24]], 12), trim, px, 0, cz + 0.6);
   }
   K.box(W + tower * 2, 0.08, 1.6, paint(0xe2d6bd), 0, 0.04, 0.75, 0.02);
-  // parking lot: asphalt, painted bays, wheel stops, planted islands, lamps
-  const LD = 4.6, lotZ = 1.55;
-  // the asphalt, its two front corners cut back on the diagonal: the roads either side bend in
-  // there and their kerbs used to run over the lot's square corners
-  const lotHalf = (W + tower * 2 + 0.6) / 2, CUT = 1.0, lotEnd = lotZ + LD;
-  {
-    const sh = new THREE.Shape();
-    sh.moveTo(-lotHalf, lotZ); sh.lineTo(lotHalf, lotZ); sh.lineTo(lotHalf, lotEnd - CUT); sh.lineTo(lotHalf - CUT, lotEnd);
-    sh.lineTo(-lotHalf + CUT, lotEnd); sh.lineTo(-lotHalf, lotEnd - CUT); sh.closePath();
-    const geo = new THREE.ExtrudeGeometry(sh, { depth: 0.05, bevelEnabled: false });
-    geo.rotateX(Math.PI / 2); geo.translate(0, 0.05, 0);
-    K.put(geo, paint(0x8a8392, { hatch: 0 }), 0, 0, 0).userData.noInk = true;   // asphalt meets asphalt: no drawn edge
+  // parking lot: asphalt, painted bays, wheel stops, planted end islands, lamps — and its ends
+  // finished like a real strip-mall corner. Each side road curves round the lot (o.kerbU(s, z):
+  // where that road's kerb begins, |x| on side s at depth z, in this frame). Out from the road:
+  // its kerb, a grass verge of one even width (VG), then a pavement that follows the kerb line
+  // all the way — along the tower's end wall it runs out from the building line, along the lot
+  // it runs beside the lot's own kerb. The lot is square to the building (its sides on the
+  // building line, X0) and only bends in, parallel to the road, where the road closes in at its
+  // front corners (it used to be a rectangle with cut corners: ragged wedges of grass and bare
+  // ground between it, a loose slab of an island, the end of the walk and the road's kerb).
+  const LD = 4.6, lotZ = 1.55, lotEnd = lotZ + LD;
+  const X0 = W / 2 + tower, KB = 0.15, VG = 0.35, SW = 0.85, zB = -D / 2 - (D + 0.25) / 2, DRV = 1.95;
+  const kerbAt = (s, z) => o.kerbU?.(s, z) ?? X0 + VG + SW + 0.6;
+  const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k / 4; };
+  const zs = [];
+  for (let z = zB; z < lotEnd + KB - 1e-6; z += 0.2) zs.push(z);
+  for (const z of [lotZ - 1e-3, lotZ, lotEnd, lotEnd + KB]) { for (let i = zs.length - 1; i >= 0; i--) if (Math.abs(zs[i] - z) < 0.05) zs.splice(i, 1); zs.push(z); }
+  zs.sort((a, b) => a - b);
+  const SIDE = {};
+  for (const s of [-1, 1]) {
+    const k = zs.map(z => kerbAt(s, z));
+    const lot = k.map(kk => smin(X0, kk - VG - SW, 0.6));               // the lot's edge (inside face of its kerb)
+    SIDE[s] = { k, lot, out: k.map(kk => kk - VG) };                    // …and the pavement's outer edge
   }
+  const lerpAt = (arr, z) => {                                          // sample a per-z array
+    if (z <= zs[0]) return arr[0];
+    for (let i = 1; i < zs.length; i++) if (z <= zs[i]) { const t = (z - zs[i - 1]) / Math.max(1e-6, zs[i] - zs[i - 1]); return arr[i - 1] + (arr[i] - arr[i - 1]) * t; }
+    return arr[arr.length - 1];
+  };
+  const lotU = (s, z) => lerpAt(SIDE[s].lot, Math.min(lotEnd, Math.max(lotZ, z)));
+  const lotZs = zs.filter(z => z >= lotZ && z <= lotEnd);
+  // a flat slab from an outline [[x, z]…], y0 → y1, its top shaded flat like the ground
+  const slab = (poly, y0, y1, mat) => {
+    const sh = new THREE.Shape(poly.map(([x, z]) => new THREE.Vector2(x, -z)));
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: y1 - y0, bevelEnabled: false });
+    geo.rotateX(-Math.PI / 2); geo.translate(0, y0, 0);
+    const n = geo.attributes.normal; for (let i = 0; i < n.count; i++) if (n.getY(i) > 0.5) n.setXYZ(i, 0, 1, 0);
+    return K.put(geo, mat, 0, 0, 0);
+  };
+  const kerbM = paint(PAL.kerb), paveM = paint(0xe2d6bd), asph = paint(0x8a8392, { hatch: 0 });
+  // the asphalt (asphalt meets asphalt at the drive: no drawn edge)
+  slab([...lotZs.map(z => [lotU(1, z), z]), ...lotZs.slice().reverse().map(z => [-lotU(-1, z), z])], 0, 0.05, asph).userData.noInk = true;
   // (the drive out to the boulevard is mallDrive(), built to the road's real edge once it's placed)
+  const PAVE = {};
+  for (const s of [-1, 1]) {
+    // the lot's kerb: up its side and across its front to the drive's dropped kerb, offset
+    // outward with mitred corners
+    const kl = [...lotZs.map(z => [s * lotU(s, z), z]), [s * DRV, lotEnd]];
+    const segN = [];
+    for (let i = 0; i < kl.length - 1; i++) {
+      const dx = kl[i + 1][0] - kl[i][0], dz = kl[i + 1][1] - kl[i][1], l = Math.hypot(dx, dz) || 1;
+      segN.push(s > 0 ? [dz / l, -dx / l] : [-dz / l, dx / l]);
+    }
+    const outer = kl.map((p, i) => {
+      const a = segN[Math.max(0, i - 1)], b = segN[Math.min(segN.length - 1, i)];
+      let nx = a[0] + b[0], nz = a[1] + b[1]; const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
+      const m = KB / Math.max(0.5, nx * b[0] + nz * b[1]);
+      return [p[0] + nx * m, p[1] + nz * m];
+    });
+    slab([...kl, ...outer.reverse()], 0, 0.1, kerbM);
+    // the pavement: from the building line (beside the tower) or the lot's edge (under its kerb)
+    // out to the verge, from the back of the tower to the front of the lot's kerb. Where the
+    // road crowds the building it simply ends, square across, at a sensible width
+    const S = SIDE[s], inner = zs.map(z => z < lotZ ? X0 : lotU(s, z));
+    const ok = zs.map((z, i) => S.out[i] - inner[i] >= 0.35);
+    let a = zs.findIndex(z => z >= lotZ), b = a;
+    if (ok[a]) {
+      while (a > 0 && ok[a - 1]) a--;
+      while (b < zs.length - 1 && ok[b + 1]) b++;
+      const run = zs.slice(a, b + 1).map((z, j) => [z, inner[a + j], S.out[a + j]]);
+      const poly = [];
+      for (let j = 0; j < run.length; j++) {
+        const [z, u] = run[j];
+        if (j && run[j - 1][0] < lotZ && z >= lotZ) poly.push([s * run[j - 1][1], z]);   // the step from the tower's face to the lot's edge
+        poly.push([s * u, z]);
+      }
+      for (let j = run.length - 1; j >= 0; j--) poly.push([s * run[j][2], run[j][0]]);
+      slab(poly, 0, 0.08, paveM);
+      PAVE[s] = { z0: zs[a], z1: zs[b], inner: (z) => z < lotZ ? X0 : lotU(s, z), out: (z) => lerpAt(S.out, z) };
+    }
+  }
   // one row of car-sized bays along the shops (nose in, a wheel stop at the kerb end); the
   // front row is gone, so the drive from the boulevard opens straight into the aisle
-  const line = paint(0xf6eedb, { hatch: 0 }), span = W + tower * 2 - 0.6;
+  const line = paint(0xf6eedb, { hatch: 0 });
   const NB = 5, bayX0 = -4.4, bayW = 8.8 / NB, bayZ0 = lotZ + 0.15, bayD = 3.0;
   const bays = [];
   for (let k = 0; k <= NB; k++) K.box(0.05, 0.012, bayD, line, bayX0 + k * bayW, 0.055, bayZ0 + bayD / 2, 0.004).userData.noInk = true;
@@ -1044,19 +1110,34 @@ export function stripMall() {
     K.box(0.6, 0.08, 0.1, paint(0xd8cab0), bx, 0.09, bayZ0 + 0.2, 0.02);
     bays.push({ x: bx, z: bayZ0 + bayD / 2, stopZ: bayZ0 + 0.2 });
   }
+  // the end islands: a kerbed bed the depth of the bays, from just past the last bay's line out
+  // to the lot's kerb (from the walk's edge to the aisle), a shrub, a little tree and a lamp
+  const IU = -bayX0 + 0.08, IZ0 = lotZ, IZ1 = bayZ0 + bayD, bed = paint(PAL.grassDeep);
+  const isZs = [IZ0, ...lotZs.filter(z => z > IZ0 && z < IZ1), IZ1];
   for (const s of [-1, 1]) {
-    const ix = s * (span / 2 - 0.2);
-    K.box(0.9, 0.12, 1.5, paint(0xd8cab0), ix, 0.06, lotZ + LD / 2, 0.04);
-    K.put(_puff.clone().scale(0.38, 0.32, 0.38), paint(PAL.leaf), ix, 0.5, lotZ + LD / 2);
-    K.put(lathe([[0.001, 0], [0.06, 0], [0.04, 0.35], [0.001, 0.36]], 8), paint(PAL.bark), ix, 0.1, lotZ + LD / 2);
-    lampPost(K, ix + s * 0.0, lotZ + LD / 2 - 0.6, 2.4);
+    slab([...isZs.map(z => [s * IU, z]), ...isZs.slice().reverse().map(z => [s * lotU(s, z), z])], 0, 0.1, kerbM);
+    const bz = isZs.filter(z => z > IZ0 + 0.1 && z < IZ1 - KB);
+    const bedZs = [IZ0 + 0.1, ...bz, IZ1 - KB];
+    slab([...bedZs.map(z => [s * (IU + KB), z]), ...bedZs.slice().reverse().map(z => [s * (lotU(s, z) - 0.02), z])], 0.09, 0.115, bed).userData.noInk = true;
+    const iu = (IU + lotU(s, (IZ0 + IZ1) / 2)) / 2, zc = (IZ0 + IZ1) / 2 - 0.2;
+    K.put(_puff.clone().scale(0.34, 0.3, 0.34), paint(PAL.leaf), s * iu, 0.42, zc - 0.5);
+    K.put(lathe([[0.001, 0], [0.06, 0], [0.04, 0.35], [0.001, 0.36]], 8), paint(PAL.bark), s * iu, 0.1, zc + 0.35);
+    K.put(_puff.clone().scale(0.38, 0.32, 0.38), paint(PAL.leaf), s * iu, 0.6, zc + 0.35);
+    lampPost(K, s * iu, IZ1 - 0.4, 2.4);
   }
   // (the pylon sign is mallPylon(), stood up on its own on the verge by the drive: laid onto
   // the ground vertex by vertex with the rest of the mall, a tall post leant and sheared)
   bench(K, -W * 0.18, 0.5, 0, PAL.bark, 0.08); bench(K, W * 0.3, 0.5, 0, PAL.bark, 0.08);
-  const half = W / 2 + tower;
-  K.g.userData.floor = (x, z) => (z > -0.05 && z < 1.55 && Math.abs(x) < half) ? 0.08
-    : (z >= 1.55 && z < lotEnd && Math.abs(x) < lotHalf && Math.abs(x) + z < lotHalf + lotEnd - CUT) ? 0.05 : null;
+  const half = W / 2 + tower, lotHalf = X0;
+  K.g.userData.floor = (x, z) => {
+    const s = x < 0 ? -1 : 1, u = Math.abs(x);
+    if (z > -0.05 && z < lotZ && u < half) return 0.08;                              // the covered walk
+    if (z >= lotZ && z < lotEnd && u < lotU(s, z)) return u > IU && z < IZ1 ? 0.11 : 0.05;   // the lot (an island)
+    if (z >= lotZ && z < lotEnd + KB && u >= DRV && u < lotU(s, z) + KB) return 0.1;     // its kerb
+    const P = PAVE[s];
+    if (P && z >= P.z0 && z <= P.z1 && u >= P.inner(z) && u <= P.out(z)) return 0.08; // the end pavement
+    return null;
+  };
   // for the plaza's life (js/plaza.js): the shop doors, the bays, the aisle
   let ux = -W / 2;
   K.g.userData.mall = { bays, aisleZ: lotZ + LD - 0.75, walkZ: 1.05, lotEnd, lotHalf, pylonAt: [-3.4, lotEnd + 0.85],
