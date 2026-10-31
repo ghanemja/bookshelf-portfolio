@@ -12,7 +12,7 @@ import { buildMuseum } from '../museum.js?v=12';
 import { planHarbour, buildHarbour } from './harbour.js';
 import { MAIN_STREET, buildShop, stripMall, mallDrive, mallPylon, station, townBlock, capeFarSide, placeOnPlanet, batchPlaced, bookLibrary, projectShop, isProjectShop, STATION_TRACK, parkGarden, shopLot, SHOP_LOT } from './buildings.js';
 import { parkedTrain } from './train.js';
-import { museumGrounds, shopApproach, APPROACH_STOP, makersRow, ROW_X, ROW, ROW_MOUTH_LAP } from './grounds.js';
+import { museumGrounds, shopApproach, APPROACH_STOP, APPROACH_Z1, MOUTH_LAP, makersRow, ROW_X, ROW, ROW_MOUTH_LAP } from './grounds.js';
 import { growPlants } from './plants.js';
 import { railLoop, buildRailway, onRail } from './rail.js';
 import { planNorth, buildNorth } from './north.js';
@@ -84,12 +84,13 @@ function resolveRow() {
   return ROWP;
 }
 
-// the row's car park as it is placed (makersRow, below): hub, yaw, and exact conversions between
-// a world direction and the row's own (x, z) — the lot is laid on the ground along its OWN up
-// (placeOnPlanet's conform), so frame()'s tangent-plane units and a radius-R point run through
-// the inverse matrix are both a few % off at the lot's edge (that put the spur's end ~0.4 out)
-function rowPlace() {
-  const RW = resolveRow(), hub = RW.L(0, 0), yaw = yawToFace(hub, RW.L(0, 40)), probe = new THREE.Object3D();
+// a ground piece's frame as placeOnPlanet sets it down at `hub` facing `yaw`, with exact
+// conversions between a world direction and its own (x, z) — the piece is laid on the ground
+// along its OWN up (placeOnPlanet's conform), so frame()'s tangent-plane units and a radius-R
+// point run through the inverse matrix are both a few % off at its edge (that put a spur's end
+// ~0.4 out). Used to run a spur road exactly onto a paved edge (Makers' Row, the shops' forecourts)
+function placeFrame(hub, yaw) {
+  const probe = new THREE.Object3D();
   settle(probe, hub, 0, 0, yaw); probe.updateMatrixWorld(true);
   const inv = probe.matrixWorld.clone().invert();
   const toLocal = (dir) => dir.clone().normalize().multiplyScalar(radiusAt(dir)).applyMatrix4(inv);
@@ -100,6 +101,14 @@ function rowPlace() {
   };
   return { hub, yaw, probe, inv, toLocal, toDir };
 }
+// the row's car park as it is placed (makersRow, below)
+function rowPlace() {
+  const RW = resolveRow(), hub = RW.L(0, 0);
+  return placeFrame(hub, yawToFace(hub, RW.L(0, 40)));
+}
+// a project shop's cobbled forecourt (shopApproach, below), where it has one: not in the row, no car park
+const hasForecourt = (p) => isProjectShop(p.style) && !ROW_KEYS.includes(p.key) && !p.lot;
+const shopPlace = (p) => placeFrame(PDIR[p.key], yawToFace(PDIR[p.key], TOWN_C));
 
 // ── the museum's sculpture garden (landscaping) sits on its OWN level terrace: behind the museum
 // the ground rises off the museum's flat, and laid onto that slope the pool tilted and floated.
@@ -244,19 +253,33 @@ export function buildTown(scene) {
   for (const L of lines) buildRoad(scene, L.pts, { half: L.half, dashed: L.half > 0.9 });
 
   // spurs: boulevard → each site / project, ending in front of it
-  const spur = (target, stopShort, key) => {
+  // (via: a point it passes on its way in — a forecourt's spur comes in square to the paving's
+  // edge from there, so its square end lies along that edge: no wedge of grass at one corner)
+  const spur = (target, stopShort, key, via = null) => {
     let best = out.boulevard[0];
     for (const p of out.boulevard) if (arc(p, target) < arc(best, target)) best = p;
     const total = arc(best, target);
     if (total < stopShort + 1.5) return null;
     const pts = [];
-    const n = Math.max(6, Math.round(total / 1.5));
-    for (let k = 0; k <= n; k++) pts.push(slerpDir(best, target, (k / n) * (1 - stopShort / total)));
+    let lock = Infinity;                           // points from here on (the curve round via and the lead-in) stay put
+    if (via && arc(best, via) > 4 && arc(best, via) < total) {
+      // in to A, round the corner at via (a quadratic curve A → B, via its control point), then
+      // straight from B onto the target
+      const dIn = arc(best, via), dOut = arc(via, target), A = slerpDir(best, via, 1 - 2.5 / dIn), B = slerpDir(via, target, 1.5 / dOut);
+      const n = Math.max(3, Math.round((dIn - 2.5) / 1.5)), m = Math.max(3, Math.round((dOut - 1.5) / 0.5));
+      for (let k = 0; k <= n; k++) pts.push(slerpDir(best, A, k / n));
+      lock = pts.length;
+      for (let k = 1; k <= 6; k++) { const t = k / 6; pts.push(A.clone().multiplyScalar((1 - t) ** 2).addScaledVector(via, 2 * t * (1 - t)).addScaledVector(B, t * t).normalize()); }
+      for (let k = 1; k <= m; k++) pts.push(slerpDir(B, target, k / m));
+    } else {
+      const n = Math.max(6, Math.round(total / 1.5));
+      for (let k = 0; k <= n; k++) pts.push(slerpDir(best, target, (k / n) * (1 - stopShort / total)));
+    }
     const mine = z => z.key === key || z.key === key.replace('lm:', 'lot:');     // its own shop and car park
-    deflect(pts, { keep: i => i === 0 || i === pts.length - 1, except: mine, clear: 1.8 });
+    deflect(pts, { keep: i => i === 0 || i >= lock || i === pts.length - 1, except: mine, clear: 1.8 });
     // smoothing rounds corners back INTO reserved ground: push the smoothed line out again
     const sm = smooth(pts, 2);
-    deflect(sm, { keep: i => i === 0 || i === sm.length - 1, except: mine, clear: 1.8 });
+    deflect(sm, { keep: i => i === 0 || i >= lock || i === sm.length - 1, except: mine, clear: 1.8 });
     const built = buildRoad(scene, sm, { half: 0.85, dashed: false });
     out.spurs.push({ key, pts: built });
     return built;
@@ -265,11 +288,15 @@ export function buildTown(scene) {
   // every spur is laid NOW, with the rest of the roads, so the onRoad() checks of
   // everything built after (blocks, lamps, the verge trees and bushes) see them —
   // laid later, a spur ran straight over the verge planting it crossed
-  // (landscaping: each shop's spur stops short of its cobbled forecourt — see shopApproach)
+  // (landscaping: a shop's spur runs onto its cobbled forecourt's front edge — see shopApproach)
   const spurEnds = {}, groundsKeep = [];       // groundsKeep: ground the landscaping has taken (not solid)
   for (const p of PLAN.projects) {
     if (ROW_KEYS.includes(p.key)) continue;               // the row's shops share one spur, below
-    const pts = spur(PDIR[p.key], p.style === 'library' ? 4.6 : isProjectShop(p.style) ? APPROACH_STOP : 3.7, 'lm:' + p.key);
+    // a shop with a cobbled forecourt: its spur runs right onto the forecourt's front edge, centred,
+    // MOUTH_LAP under it (it stopped APPROACH_STOP out, and a cobble lane patched the gap)
+    const F = hasForecourt(p) && shopPlace(p);
+    const pts = F ? spur(F.toDir(0, APPROACH_Z1 - MOUTH_LAP), 0, 'lm:' + p.key, F.toDir(0, APPROACH_Z1 + 3.2))
+      : spur(PDIR[p.key], p.style === 'library' ? 4.6 : isProjectShop(p.style) ? APPROACH_STOP : 3.7, 'lm:' + p.key);
     if (pts) spurEnds[p.key] = pts[pts.length - 1].clone();
   }
   // Makers' Row: the spur runs right up to the car park's front edge (ROW.aisle[1]) and just
@@ -530,11 +557,10 @@ export function buildTown(scene) {
         lm.lot = { side: s, root: g };
       }
       out.landmarks.push(lm);
-      // ── landscaping (grounds.js): a cobbled forecourt and lane out to where the spur now
-      // stops, edging stones, planters, a lamp, a bench, and planting round the shop ──
+      // ── landscaping (grounds.js): a cobbled forecourt the spur runs onto,
+      // edging stones, planters, a lamp, a bench, and planting round the shop ──
       if (!inRow && !lm.lot) {                          // (a shop with its own car park beside it has that instead)
-        base.updateMatrixWorld(true);
-        const inv = base.matrixWorld.clone().invert(), L = (q) => q.clone().multiplyScalar(R).applyMatrix4(inv);
+        const L = shopPlace(p).toLocal;                  // (exact: the mouth is built to the spur's end)
         let end = spurEnds[p.key] ? L(spurEnds[p.key]) : null;
         if (!end) {                                     // no spur of its own: run the lane to the nearest road
           let bd = 9;

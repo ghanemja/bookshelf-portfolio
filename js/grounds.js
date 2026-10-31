@@ -299,13 +299,46 @@ export function museumGrounds({ ok = () => true, pool: poolAt = null } = {}) {
   return K.g;
 }
 
+// ── where a spur road meets a paved edge (a project shop's forecourt, Makers' Row's car park).
+// The spur (town.js) runs right up to the paving's front edge, centred on it, and MOUTH_LAP in
+// under it: the entrance is the road itself (exact frame conversions: town.js placeFrame). The
+// edging stops either side of the carriageway + its kerb bands, with a stone set along the edge
+// at each kerb's end to turn the road's kerbs into it ──
+export const MOUTH_LAP = 0.08;     // a spur ends this far in under the paving's front edge (no gap, no seam)
+export const SPUR_HALF = 0.85;     // a spur's carriageway half-width (town.js spur(): buildRoad half)
+const MOUTH_HALF = SPUR_HALF + 0.28 + 0.08;   // carriageway + kerb band (world.js buildRoad) + half a stone (set crosswise)
+// the road's end (ex, ez) at the outline (front points: z > zMin) → { mouth } when it reaches the
+// edge; else (fallback: the spur couldn't reach) a lane out to it, drawn by laneStrip(pts) → { lane }
+function roadMouth(outline, ex, ez, zMin, laneStrip, [back, mid]) {
+  if (ex == null) return { mouth: null, lane: null };
+  let best = outline[0];
+  for (const p of outline) if (p[1] > zMin && Math.hypot(p[0] - ex, p[1] - ez) < Math.hypot(best[0] - ex, best[1] - ez)) best = p;
+  const L = Math.hypot(ex - best[0], ez - best[1]);
+  if (L < MOUTH_LAP + 0.4) return { mouth: { x: ex, z: best[1] }, lane: null };
+  const dx = (ex - best[0]) / L, dz = (ez - best[1]) / L;
+  laneStrip([[best[0] - dx * back, best[1] - dz * back], [best[0] + dx * L * mid, best[1] + dz * L * mid], [ex + dx * 0.5, ez + dz * 0.5]]);
+  return { mouth: null, lane: { ax: best[0], az: best[1], ex, ez } };
+}
+// edging stones round the outline's front (z >= zMin), not across the road's mouth or the lane
+function edging(K, M, outline, zMin, mouth, lane, laneGap) {
+  for (let i = 0; i < outline.length; i += 2) {
+    const [x, z] = outline[i], [nx, nz] = outline[(i + 1) % outline.length];
+    if (z < zMin) continue;
+    if (lane && Math.hypot(x - lane.ax, z - lane.az) < laneGap) continue;
+    if (mouth && Math.hypot(x - mouth.x, z - mouth.z) < MOUTH_HALF + 0.3) continue;
+    K.put(rbox(0.28, 0.12, 0.16, 0.04, 1), M.stoneD, x, 0.03, z, [0, Math.atan2(nx - x, nz - z), 0]);
+  }
+  if (mouth) for (const s of [-1, 1]) K.put(rbox(0.28, 0.12, 0.16, 0.04, 1), M.stoneD, mouth.x + s * MOUTH_HALF, 0.03, mouth.z, [0, Math.PI / 2, 0]);
+}
+
 // ── a project shop's cobbled approach (shop frame: the shop spans x ±2.8, z ±2.3, its door
-// and stoop at +z). A cobbled forecourt across the front, a cobbled lane from it out to
-// where the spur road now stops (ex, ez — or none), edging stones, planters, a lamp and a
+// and stoop at +z). A cobbled forecourt across the front, its spur road running onto the
+// middle of its front edge (ex, ez — or none; see roadMouth), edging stones, planters, a lamp and a
 // bench, and planting round the shop. ok(x, z, r) says a spot is free in the world (no
 // road, water or anything solid); `shop` is the shop's raw groups, so nothing lands on
 // its own props outside ──
-export const APPROACH_STOP = 6.2;          // the spur stops this far from the shop's centre
+export const APPROACH_STOP = 6.2;          // (old: the spur stopped this far from the shop's centre — still the stop for a shop with its own car park)
+export const APPROACH_Z1 = 5.1;            // the forecourt's front edge (shop z): its spur runs onto it here, at x 0
 export function shopApproach({ ex = null, ez = null, ok = () => true, shop = [], seed = 1 } = {}) {
   const K = kit(), M = mats(), R = rng(7919 * seed + 11);
   // the shop's own outside props, as occupied half-metre cells
@@ -334,27 +367,20 @@ export function shopApproach({ ex = null, ez = null, ok = () => true, shop = [],
   const take = (x, z, r) => placed.push([x, z, r]);
 
   // the forecourt: a cobbled apron across the shopfront, rounded at its outer corners
-  const FX = 3.45, Z0 = 2.3, Z1 = 5.1, CR = 1.5;
+  const FX = 3.45, Z0 = 2.3, Z1 = APPROACH_Z1, CR = 1.5;
   const sh = new THREE.Shape();                    // drawn in (x, -z): lay() turns it flat
   sh.moveTo(-FX, -Z0); sh.lineTo(FX, -Z0); sh.lineTo(FX, -(Z1 - CR)); sh.quadraticCurveTo(FX, -Z1, FX - CR, -Z1);
   sh.lineTo(-FX + CR, -Z1); sh.quadraticCurveTo(-FX, -Z1, -FX, -(Z1 - CR)); sh.closePath();
   const outline = sh.getSpacedPoints(80).map(p => [p.x, -p.y]);
   lay(K, new THREE.ShapeGeometry(sh, 12), M.cobble, 0, 0.01, 0, 1.1);
-  // the lane: from the forecourt's edge nearest the road's end, out to just under it
-  let lane = null;
-  if (ex != null) {
-    let best = outline[0];
-    for (const p of outline) if (p[1] > Z0 + 0.4 && Math.hypot(p[0] - ex, p[1] - ez) < Math.hypot(best[0] - ex, best[1] - ez)) best = p;
-    const L = Math.hypot(ex - best[0], ez - best[1]);
-    if (L > 0.5) {
-      const dx = (ex - best[0]) / L, dz = (ez - best[1]) / L;
-      const a = [best[0] - dx * 0.8, best[1] - dz * 0.8], e = [ex + dx * 0.5, ez + dz * 0.5];
-      const pts = [a, [best[0] + dx * L * 0.35, best[1] + dz * L * 0.35], e];
-      strip(K, pts, 1.05, M.edge, 0.002, 1.1);
-      strip(K, pts, 0.98, M.cobble, 0.01, 1.1);
-      lane = { ax: best[0], az: best[1], ex, ez };
-    }
-  }
+  // the mouth: the spur (town.js) now runs right onto the forecourt's front edge, centred, and
+  // MOUTH_LAP in under it — the road itself is the entrance. It used to stop ~1 short on the
+  // grass with a cobble lane patched across the gap (wider than the road, off its line, z-fighting
+  // the forecourt). The lane is only a fallback now, for a spur that couldn't reach
+  const { mouth, lane } = roadMouth(outline, ex, ez, Z0 + 0.4, (pts) => {
+    strip(K, pts, 1.05, M.edge, 0.002, 1.1);
+    strip(K, pts, 0.98, M.cobble, 0.01, 1.1);
+  }, [0.8, 0.35]);
   // paving test (forecourt or lane), for keeping plants off it
   function inPaving(x, z, r) {
     if (Math.abs(x) < FX + r && z > Z0 - r && z < Z1 + r) return true;
@@ -364,17 +390,12 @@ export function shopApproach({ ex = null, ez = null, ok = () => true, shop = [],
     }
     return false;
   }
-  // edging stones round the forecourt's outer edge (not along the shopfront, not across the lane)
-  for (let i = 0; i < outline.length; i += 2) {
-    const [x, z] = outline[i], [nx, nz] = outline[(i + 1) % outline.length];
-    if (z < Z0 + 0.15) continue;
-    if (lane && Math.hypot(x - lane.ax, z - lane.az) < 1.15) continue;
-    K.put(rbox(0.28, 0.12, 0.16, 0.04, 1), M.stoneD, x, 0.03, z, [0, Math.atan2(nx - x, nz - z), 0]);
-  }
+  // edging stones round the forecourt's outer edge (not along the shopfront, not across the road's mouth or the lane)
+  edging(K, M, outline, Z0 + 0.15, mouth, lane, 1.15);
   // planters at the forecourt's back corners, a lamp and a bench on it
   const planter = (x, z) => { trough(K, x, z, R, { front: [0, 1] }); take(x, z, 0.4); };
   for (const s of [-1, 1]) for (const [x, z] of [[s * 3.05, 2.85], [s * 2.95, 4.35]]) if (clear(x, z, 0.4, { onPlaza: true })) { planter(x, z); break; }
-  const laneSide = lane ? Math.sign(lane.ax || 1) : 1;
+  const laneSide = lane ? Math.sign(lane.ax || 1) : mouth ? -1 : 1;     // (a mouth: the lamp and bench keep the sides they stood on)
   for (const [x, z] of [[laneSide * -2.3, 4.75], [laneSide * 2.3, 4.75], [laneSide * -1.8, 4.75]]) if (clear(x, z, 0.12, { onPlaza: true })) { bollard(K, x, z, 1.15); take(x, z, 0.12); break; }
   for (const [x, z] of [[laneSide * 1.75, 4.5], [laneSide * -1.75, 4.5]]) if (clear(x, z, 0.5, { onPlaza: true })) { gardenBench(K, x, z, Math.PI); take(x, z, 0.5); break; }
   // planting round the shop: trees at the sides and back, bushes and a bed or two
@@ -402,8 +423,7 @@ export function shopApproach({ ex = null, ez = null, ok = () => true, shop = [],
 // front; a lane out to where the spur stops (ex, ez). userData.row.bays tells plaza.js
 // where to park cars ──
 export const ROW_X = 6.0;          // Behavior Search's ramp and drop rig stand 1.7 out from its walls: room for them in the gap
-export const ROW_MOUTH_LAP = 0.08;   // the row's spur ends this far in under the car park's front edge (no gap, no seam)
-export const ROW_ROAD_HALF = 0.85;   // that spur's carriageway half-width (town.js spur(): buildRoad half)
+export const ROW_MOUTH_LAP = MOUTH_LAP, ROW_ROAD_HALF = SPUR_HALF;   // (the row's, as the shops')
 export const ROW = { half: 9.4, apron: [2.3, 4.25], bays: [4.25, 7.55], aisle: [7.55, 10.7] };
 export function makersRow({ ex = null, ez = null, ok = () => true, seed = 3 } = {}) {
   const K = kit(), M = mats(), R = rng(seed * 104729);
@@ -442,29 +462,11 @@ export function makersRow({ ex = null, ez = null, ok = () => true, seed = 3 } = 
   // the entrance is the road itself: no separate cobble tongue (it was wider than the road, off
   // its line, and z-fought the slab). The edging stops either side of the carriageway + its kerb
   // bands, and a stone set along the edge at each kerb's end turns the road's kerbs into it.
-  let mouth = null, lane = null;
-  if (ex != null) {
-    let best = outline[0];
-    for (const p of outline) if (p[1] > Z0 + 1 && Math.hypot(p[0] - ex, p[1] - ez) < Math.hypot(best[0] - ex, best[1] - ez)) best = p;
-    const L = Math.hypot(ex - best[0], ez - best[1]);
-    if (L < ROW_MOUTH_LAP + 0.4) mouth = { x: ex, z: best[1] };
-    else {                                       // (fallback: the spur couldn't reach — a lane out to it, as before)
-      const dx = (ex - best[0]) / L, dz = (ez - best[1]) / L;
-      const pts = [[best[0] - dx * 0.8, best[1] - dz * 0.8], [best[0] + dx * L * 0.4, best[1] + dz * L * 0.4], [ex + dx * 0.5, ez + dz * 0.5]];
-      strip(K, pts, 1.42, M.edge, 0.002, 1.1);
-      strip(K, pts, 1.35, M.cobble, 0.01, 1.1);
-      lane = { ax: best[0], az: best[1] };
-    }
-  }
-  const MH = ROW_ROAD_HALF + 0.28 + 0.08;        // the road's carriageway + kerb band (world.js buildRoad), + half a stone (set crosswise, as round the lot)
-  for (let i = 0; i < outline.length; i += 2) {
-    const [x, z] = outline[i], [nx, nz] = outline[(i + 1) % outline.length];
-    if (z < Z0 + 0.15) continue;
-    if (lane && Math.hypot(x - lane.ax, z - lane.az) < 1.5) continue;
-    if (mouth && Math.hypot(x - mouth.x, z - mouth.z) < MH + 0.3) continue;
-    K.put(rbox(0.28, 0.12, 0.16, 0.04, 1), M.stoneD, x, 0.03, z, [0, Math.atan2(nx - x, nz - z), 0]);
-  }
-  if (mouth) for (const s of [-1, 1]) K.put(rbox(0.28, 0.12, 0.16, 0.04, 1), M.stoneD, mouth.x + s * MH, 0.03, mouth.z, [0, Math.PI / 2, 0]);
+  const { mouth, lane } = roadMouth(outline, ex, ez, Z0 + 1, (pts) => {
+    strip(K, pts, 1.42, M.edge, 0.002, 1.1);
+    strip(K, pts, 1.35, M.cobble, 0.01, 1.1);
+  }, [0.8, 0.4]);
+  edging(K, M, outline, Z0 + 0.15, mouth, lane, 1.5);
   // the apron: lamps between the shops and at its ends, planters, a bench in the gap
   for (const x of [-H + 0.35, H - 0.35]) bollard(K, x, Z0 + 0.5, 1.2);
   for (const x of [-1.6, 1.6]) {
