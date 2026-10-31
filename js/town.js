@@ -204,6 +204,26 @@ export function buildTown(scene) {
       close();
     }
   }
+  // a street whose run stopped one sample short of the street it meets (that sample fell on
+  // reserved ground) ends a hair outside it: the gap between the two surfaces showed the kerb
+  // under them as a thin strip poking into the road (by the library). Carry each such end on
+  // into the other street, to its middle line
+  for (const L of lines) for (const e of [0, 1]) {
+    const pts = L.pts, end = e ? pts[pts.length - 1] : pts[0], prev = e ? pts[pts.length - 2] : pts[1], step = arc(prev, end);
+    let best = null, bd = 1e9;
+    for (let s = 0.1; s <= 1.6; s += 0.05) {
+      const q = slerpDir(prev, end, 1 + s / step);
+      for (const M of lines) {
+        if (M === L) continue;
+        for (const m of M.pts) { const a = arc(q, m); if (a < M.half && a < bd) { bd = a; best = q; } }
+      }
+    }
+    if (!best) continue;
+    let inAlready = false;                                   // (it already ends inside one: leave it)
+    for (const M of lines) if (M !== L && M.pts.some(m => arc(end, m) < M.half - 0.05)) inAlready = true;
+    if (inAlready) continue;
+    if (e) pts.push(best); else pts.unshift(best);
+  }
   for (const L of lines) buildRoad(scene, L.pts, { half: L.half, dashed: L.half > 0.9 });
 
   // spurs: boulevard → each site / project, ending in front of it

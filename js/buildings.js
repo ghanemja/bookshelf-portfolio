@@ -678,8 +678,28 @@ export function library(o) {
   emblem(K.sub(0, eY + 0.66, 0.0), 'book');
   // door and windows behind the columns
   const F = K.sub(0, P, bodyZ);
-  windowAt(F, { y: 0, w: 0.5, h: 1.25, arch: true, frame: trim, glass: upperGlass(3), cols: 2, rows: 3, hood: 'key' });
-  F.box(0.44, 0.85, 0.04, paint(0x3f5872), 0, 0.43, 0.04, 0.012);
+  // the entrance (it was a flat slab stuck on the lower half of an arched window): an arched
+  // doorway — a dark reveal, a stone surround with a keystone, a fanlight in the arch, and
+  // double panelled doors with brass knobs set back in it
+  {
+    const DW = 0.56, R = DW / 2, SP = 0.98, door = paint(0x3f5872), doorL = paint(0x4f6a8a), brass = paint(PAL.gold, { hatch: 0 });
+    const arch = new THREE.Shape(); arch.moveTo(-R, 0); arch.lineTo(R, 0); arch.lineTo(R, SP); arch.absarc(0, SP, R, 0, Math.PI, false); arch.lineTo(-R, 0);
+    F.put(extrude(arch, 0.03, 0.005), DARK(), 0, 0, 0.0);                                         // the dark reveal
+    for (const sx of [-1, 1]) F.box(0.08, SP, 0.08, trim, sx * (R + 0.04), SP / 2, 0.045, 0.015);  // jambs
+    F.put(new THREE.TorusGeometry(R + 0.04, 0.045, 8, 24, Math.PI), trim, 0, SP, 0.045);          // the arch
+    F.box(0.1, 0.14, 0.1, trim, 0, SP + R + 0.05, 0.05, 0.02);                                    // keystone
+    const fan = new THREE.Shape(); fan.moveTo(R - 0.02, 0); fan.absarc(0, 0, R - 0.02, 0, Math.PI, false); fan.lineTo(R - 0.02, 0);
+    F.put(extrude(fan, 0.02, 0.005), upperGlass(3), 0, SP, 0.03);                                 // fanlight
+    for (let k = 1; k < 4; k++) { const a = k / 4 * Math.PI; F.box(0.02, R - 0.04, 0.015, trim, Math.cos(a) * (R / 2 - 0.01), SP + Math.sin(a) * (R / 2 - 0.01), 0.055, 0.005, [0, 0, a - Math.PI / 2]); }
+    F.box(DW, 0.045, 0.05, trim, 0, SP, 0.05, 0.01);                                              // transom
+    for (const sx of [-1, 1]) {
+      const cx = sx * DW / 4;
+      F.box(DW / 2 - 0.015, SP - 0.03, 0.04, door, cx, (SP - 0.03) / 2, 0.035, 0.01);             // a leaf
+      for (const y of [0.26, 0.68]) F.box(DW / 2 - 0.1, 0.3, 0.02, doorL, cx, y, 0.06, 0.008);    // its raised panels
+      F.put(new THREE.SphereGeometry(0.022, 10, 7), brass, sx * 0.045, 0.5, 0.07);                // knob
+    }
+    F.box(DW, 0.06, 0.012, brass, 0, 0.04, 0.058, 0.004);                                        // kick plate
+  }
   for (const s of [-1, 1]) windowAt(F, { x: s * 0.62, y: 0.35, w: 0.32, h: 1.0, arch: true, frame: trim, glass: upperGlass(s + 2), cols: 2, rows: 3, hood: 'key' });
   for (const sd of [-1, 1]) {
     const S = K.sub(sd * (w / 2 - 0.1), P, bodyZ - (d - 0.65) / 2, sd * Math.PI / 2);
