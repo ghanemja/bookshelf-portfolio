@@ -31,7 +31,8 @@ const extraFlats = [];                                          // {d, r, h} —
 // plane: a tangent point (unit dir). Then the ground is levelled to a true flat PLANE
 // touching the planet there, not a curved shell: on a radius-40 planet a 14-unit
 // building's edges would otherwise sit ~0.6 above the ground (floating, looking slanted).
-export function flatten(d, r, h = LAND, { plane = null, blend = null } = {}) { extraFlats.push({ d: d.clone(), r, h, plane: plane?.clone(), blend }); }
+// lawn: paint the levelled ground (and its easing) grass however high it stands — see inLawn()
+export function flatten(d, r, h = LAND, { plane = null, blend = null, lawn = false } = {}) { extraFlats.push({ d: d.clone(), r, h, plane: plane?.clone(), blend, lawn }); }
 
 // rivers and lakes carved like the sea (after everything else): isWater sees them, and the sea
 // sheet (one sphere at sea level) shows through wherever the ground dips under it.
@@ -213,6 +214,22 @@ export function smooth(pts, passes = 3, closed = false) {
 
 // ── roads: every carriageway's centre-line samples, so nothing builds on one ──
 export const ROADS = [];          // {pts, half}
+// every lamp in the world, once the town is built (collectLamps): { dir, kind } — kind 'street'
+// (props lamp()), 'post' (a building's lampPost) or 'low' (the grounds' bollard lamps). Lamps
+// leave a marker (userData.lampMark) that bake() keeps as userData.lamps [x, z, kind]; the dev
+// check (?lamps=1) reads this to keep every lamp off the carriageways and clear of doors
+export const LAMPS = [];
+export function collectLamps(roots) {
+  const v = new THREE.Vector3();
+  for (const r of roots) {
+    r.updateMatrixWorld(true);
+    r.traverse(o => {
+      if (o.userData.lampMark) LAMPS.push({ dir: o.getWorldPosition(v).clone().normalize(), kind: o.userData.lampMark });
+      for (const [x, z, kind] of o.userData.lamps || []) LAMPS.push({ dir: o.localToWorld(v.set(x, 0, z)).clone().normalize(), kind });
+    });
+  }
+  return LAMPS;
+}
 // paved ground a car may drive off the road onto (car parks and their drives): (dir) => bool.
 // Inside one, the car's keep-to-the-road assist lets go (player.js keepOnRoad)
 export const LOTS = [];
@@ -556,9 +573,26 @@ export function groundColour(v, h, c, fresh = h < SEA + 0.02 && inFreshWater(v))
   }
   if (h < SEA - 0.05) return c.copy(GC(PAL.waterDeep));
   if (h < SEA + 0.22) return c.copy(GC(PAL.sand));
-  if (h > 2.6) return c.copy(GC(PAL.snow));
-  if (h > 1.4) return c.copy(GC(PAL.rock)).lerp(GC(PAL.earth), wash > 0 ? 0.3 : 0);
+  if (h > 1.4 && !inLawn(v, wash)) {
+    if (h > 2.6) return c.copy(GC(PAL.snow));
+    return c.copy(GC(PAL.rock)).lerp(GC(PAL.earth), wash > 0 ? 0.3 : 0);
+  }
   return c.copy(GC(wash > 0.45 ? PAL.meadow : wash < -0.5 ? PAL.grassDeep : PAL.grass));
+}
+// A levelled site that asked for a lawn (flatten { lawn: true }) is painted grass however high
+// it stands. The bands above go by height alone (over 1.4 is rock/earth, over 2.6 snow), and a
+// site levelled to a true PLANE on a hilltop sits high: Makers' Row's plane touches the planet at
+// ~1.2 and rises off the sphere toward its rim (~2.9 at r 11), so its whole yard and easing ring
+// came out bare beige "earth" round the car park. Opt-in, so no other site changes. The lawn
+// reaches into the easing ring by a wash-wobbled amount, so where it meets the natural hillside's
+// colour the edge is soft and irregular, not a drawn circle.
+function inLawn(v, wash) {
+  for (const f of extraFlats) {
+    if (!f.lawn) continue;
+    const blend = f.blend ?? (f.plane ? 9 : 5);
+    if (arc(v, f.d) < f.r + blend * (0.72 + 0.14 * wash)) return true;
+  }
+  return false;
 }
 export let groundMaterial = null;
 export function buildPlanet(scene) {
