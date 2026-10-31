@@ -12,11 +12,14 @@ import { kit } from './buildings.js';
 const rng = (s) => () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
 
 // ── hand-painted ground textures (tiled in metres) ──
+// the cobbles' one scale: a COBBLE_TILE-metre tile of COBBLE_COURSES courses (setts 0.2 m deep),
+// so every cobbled slab and lane lines up wherever two meet
+export const COBBLE_TILE = 2.4, COBBLE_COURSES = 12;
 function groundTex(size, draw) {
   const cv = document.createElement('canvas'); cv.width = cv.height = size;
   draw(cv.getContext('2d'), size, rng(size * 13 + 7));
   const t = new THREE.CanvasTexture(cv);
-  t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+  t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
   return t;
 }
 let _M = null;
@@ -41,20 +44,60 @@ function mats() {
       }
     }
   });
-  // cobbles: rows of rounded setts, each shaded a little differently, with a highlight
-  const cobbleTex = groundTex(256, (c, n, R) => {
-    c.fillStyle = '#6f6656'; c.fillRect(0, 0, n, n);
-    const rows = 8, h = n / rows;
-    for (let r = 0; r < rows; r++) {
-      let x = (r % 2) * -h * 0.5;
-      while (x < n + h) {
-        const w = h * (0.8 + R() * 0.45), tone = Math.floor(170 + R() * 50);
-        c.fillStyle = `rgb(${tone + 12},${tone + 2},${tone - 18})`;
-        c.beginPath(); c.roundRect(x + 2.5, r * h + 2.5, w - 5, h - 5, h * 0.35); c.fill();
-        c.fillStyle = 'rgba(255,250,235,0.35)';
-        c.beginPath(); c.ellipse(x + w * 0.4, r * h + h * 0.35, w * 0.22, h * 0.14, 0, 0, 7); c.fill();
-        x += w;
+  // cobbles: hand-laid setts in offset courses — varied lengths, softly irregular rounded
+  // shapes, gently varied warm stone tints, narrow soft mortar joints (not near-black), a
+  // light pencil edge on some. Low contrast so it stays calm from far off; seamless, and
+  // laid at one scale everywhere (COBBLE_TILE metres a tile, uvs in the patch's own frame)
+  const cobbleTex = groundTex(512, (c, n, R) => {
+    c.fillStyle = '#ae9f88'; c.fillRect(0, 0, n, n);                 // the mortar
+    const rows = COBBLE_COURSES, h = n / rows, J = 2.4;               // course height, half a joint (px)
+    const tints = [[36, 20, 73], [32, 15, 71], [39, 22, 75], [28, 14, 72], [34, 10, 70], [40, 17, 72], [30, 18, 74]];
+    const stone = (x, y, w, hh) => {
+      // a rounded, slightly wonky rectangle: each corner nudged, each its own radius
+      const q = [[x + J, y + J], [x + w - J, y + J], [x + w - J, y + hh - J], [x + J, y + hh - J]].map(([a, b]) => [a + (R() - 0.5) * 3.2, b + (R() - 0.5) * 2.4]);
+      const rr = q.map(() => hh * (0.2 + R() * 0.18));
+      const outline = (ox) => {
+        c.beginPath();
+        for (let k = 0; k < 4; k++) {
+          const p0 = q[(k + 3) % 4], p1 = q[k], p2 = q[(k + 1) % 4];
+          const d0 = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]), d2 = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+          const r = Math.min(rr[k], d0 / 2, d2 / 2);
+          const ax = p1[0] + (p0[0] - p1[0]) * r / d0, ay = p1[1] + (p0[1] - p1[1]) * r / d0;
+          if (k === 0) c.moveTo(ax + ox, ay); else c.lineTo(ax + ox, ay);
+          c.quadraticCurveTo(p1[0] + ox, p1[1], p1[0] + (p2[0] - p1[0]) * r / d2 + ox, p1[1] + (p2[1] - p1[1]) * r / d2);
+        }
+        c.closePath();
+      };
+      const [hu, sa, li] = tints[Math.floor(R() * tints.length)], dl = (R() - 0.5) * 4;
+      const shade = R(), wash = R(), pencil = R(), side = Math.floor(R() * 4);
+      const specks = Array.from({ length: 5 }, () => [x + J + R() * (w - 2 * J), y + J + R() * (hh - 2 * J), 0.6 + R() * 1.1, R() > 0.5]);
+      for (const ox of [-n, 0, n]) {                                  // wrapped copies: seamless across the tile's edge
+        if (x + w + ox < 0 || x + ox > n) continue;
+        outline(ox);
+        c.fillStyle = `hsl(${hu},${sa}%,${li + dl}%)`; c.fill();
+        c.save(); c.clip();
+        // soft form: a darker lower edge, a pale wash toward the upper left (gouache, not a dot)
+        c.lineWidth = hh * 0.22; c.strokeStyle = `rgba(110,88,66,${0.10 + shade * 0.08})`;
+        c.translate(hh * 0.07, hh * 0.09); outline(ox); c.stroke(); c.setTransform(1, 0, 0, 1, 0, 0);
+        c.fillStyle = `rgba(255,248,232,${0.06 + wash * 0.08})`;
+        c.beginPath(); c.ellipse(x + ox + w * 0.42, y + hh * 0.4, w * 0.36, hh * 0.26, 0, 0, 7); c.fill();
+        for (const [sx, sy, sr, lt] of specks) { c.fillStyle = lt ? 'rgba(255,250,236,0.22)' : 'rgba(96,78,62,0.16)'; c.beginPath(); c.arc(sx + ox, sy, sr, 0, 7); c.fill(); }
+        c.restore();
+        if (pencil > 0.45) {                                          // a light pencil edge along a side or two
+          c.save(); outline(ox); c.clip();
+          c.strokeStyle = 'rgba(86,66,58,0.30)'; c.lineWidth = 2.2;
+          const a = q[side], b = q[(side + 1) % 4], e = q[(side + 2) % 4];
+          c.beginPath(); c.moveTo(a[0] + ox, a[1]); c.lineTo(b[0] + ox, b[1]); if (pencil > 0.8) c.lineTo(e[0] + ox, e[1]);
+          c.stroke(); c.restore();
+        }
       }
+    };
+    for (let r = 0; r < rows; r++) {
+      // this course's lengths, scaled to fill the tile exactly, from a random offset
+      const ws = []; let sum = 0;
+      while (sum < n - h * 0.9) { const w = h * (1.15 + R() * 0.85); ws.push(w); sum += w; }
+      const k = n / sum; let x = R() * n;
+      for (const w of ws) { stone(x % n, r * h, w * k, h); x += w * k; }
     }
   });
   // mulch: dark bark chips
@@ -84,14 +127,20 @@ function mats() {
 }
 
 // a flat ribbon down a smoothed polyline [[x, z], ...] at height y, its texture tiled in metres
-function strip(K, pts, half, mat, y, tile = 1, closed = false) {
+// (`planar`: uvs straight from x, z — as lay() maps them — so a cobbled lane running into a
+// cobbled slab shows the very same stones where they overlap: one surface, no seam, no fight)
+function strip(K, pts, half, mat, y, tile = 1, closed = false, planar = false) {
   const curve = new THREE.CatmullRomCurve3(pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), closed, 'centripetal');
   const L = curve.getLength(), n = Math.max(2, Math.ceil(L / 0.3));
   const pos = [], uv = [], idx = [];
   for (let i = 0; i <= n; i++) {
     const t = closed ? (i % n) / n : i / n, p = curve.getPointAt(t), tg = curve.getTangentAt(t);
     const sx = -tg.z, sz = tg.x;                                   // across the path, in xz
-    for (const s of [-1, 1]) { pos.push(p.x + sx * half * s, y, p.z + sz * half * s); uv.push((s * half) / tile, (i / n) * L / tile); }
+    for (const s of [-1, 1]) {
+      const X = p.x + sx * half * s, Z = p.z + sz * half * s;
+      pos.push(X, y, Z);
+      if (planar) uv.push(X / tile, Z / tile); else uv.push((s * half) / tile, (i / n) * L / tile);
+    }
     if (i < n) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
   }
   const g = new THREE.BufferGeometry();
@@ -114,6 +163,68 @@ function lay(K, geo, mat, x, y, z, tile = 1) {
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   const m = K.put(geo, mat, x, y, z); m.userData.noInk = true;
   return m;
+}
+// ── cobbles, shared by every cobbled place (shop forecourts, Makers' Row, any later one) ──
+// a cobbled slab: a flat shape (drawn in (x, -z), as for lay()) at the one cobble scale
+export function cobbleSlab(K, shape, curveSegs = 12) {
+  return lay(K, new THREE.ShapeGeometry(shape, curveSegs), mats().cobble, 0, 0.01, 0, COBBLE_TILE);
+}
+// a cobbled lane down a polyline, mapped like the slabs so where it runs into one they match
+export function cobbleLane(K, pts, half) {
+  return strip(K, pts, half, mats().cobble, 0.01, COBBLE_TILE, false, true);
+}
+// a kerb of long dressed stones along a dense polyline [[x, z], ...] (a slab's outline, a
+// lane's side): low, bevelled, laid end to end with a hairline joint, each stone as long as
+// the line stays straight under it (shorter round the curves). skip(x, z) leaves gaps (the
+// shopfront, a road's mouth). All one material (the grounds' pale stone), inked like the rest.
+export function kerbRun(K, pts, { skip = () => false, closed = false, seed = 5 } = {}) {
+  const M = mats(), R = rng(seed * 7717 + 3);
+  const W = 0.2, H = 0.1, Y = 0.025, GAP = 0.035, DEV = 0.018;
+  const P = closed ? pts.concat([pts[0]]) : pts;
+  const runs = []; let cur = [];
+  for (const p of P) { if (skip(p[0], p[1])) { if (cur.length > 1) runs.push(cur); cur = []; } else cur.push(p); }
+  if (cur.length > 1) runs.push(cur);
+  if (closed && runs.length > 1 && !skip(...pts[0])) {             // a loop cut by gaps: join its two ends
+    const last = runs.pop(); runs[0] = last.concat(runs[0].slice(1));
+  }
+  const stone = (a, b, end0, end1) => {
+    const dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz);
+    if (L < 0.12) return;
+    const g0 = end0 ? 0 : GAP / 2, g1 = end1 ? 0 : GAP / 2, len = L - g0 - g1;
+    const ux = dx / L, uz = dz / L, c = (g0 + len / 2);
+    K.box(len, H, W, M.stone, a[0] + ux * c, Y, a[1] + uz * c, 0.03, [0, Math.atan2(-dz, dx), 0]);
+  };
+  for (const run of runs) {
+    // resample evenly, then grow each stone along the run while it stays straight
+    const q = [run[0]];
+    for (let i = 1; i < run.length; i++) {
+      const [x0, z0] = run[i - 1], [x1, z1] = run[i], d = Math.hypot(x1 - x0, z1 - z0), k = Math.max(1, Math.ceil(d / 0.05));
+      for (let j = 1; j <= k; j++) q.push([x0 + (x1 - x0) * j / k, z0 + (z1 - z0) * j / k]);
+    }
+    let i = 0;
+    while (i < q.length - 1) {
+      const want = 0.55 + R() * 0.35;
+      let j = i + 1, len = 0;
+      for (; j < q.length; j++) {
+        len += Math.hypot(q[j][0] - q[j - 1][0], q[j][1] - q[j - 1][1]);
+        const ax = q[i][0], az = q[i][1], bx = q[j][0], bz = q[j][1], L = Math.hypot(bx - ax, bz - az) || 1;
+        let dev = 0;
+        for (let m = i + 1; m < j; m++) dev = Math.max(dev, Math.abs((q[m][0] - ax) * (bz - az) - (q[m][1] - az) * (bx - ax)) / L);
+        if (dev > DEV) { j--; break; }
+        if (len >= want) break;
+      }
+      j = Math.min(Math.max(j, i + 1), q.length - 1);
+      // don't leave a stub at the run's end: take it into this stone if it's short
+      let rest = 0; for (let m = j + 1; m < q.length; m++) rest += Math.hypot(q[m][0] - q[m - 1][0], q[m][1] - q[m - 1][1]);
+      if (rest > 0 && rest < 0.25) {
+        const ax = q[i][0], az = q[i][1], bx = q[q.length - 1][0], bz = q[q.length - 1][1], L = Math.hypot(bx - ax, bz - az) || 1;
+        let dev = 0; for (let m = i + 1; m < q.length - 1; m++) dev = Math.max(dev, Math.abs((q[m][0] - ax) * (bz - az) - (q[m][1] - az) * (bx - ax)) / L);
+        if (dev < DEV * 1.5) j = q.length - 1;
+      }
+      stone(q[i], q[j], i === 0, j === q.length - 1);
+      i = j;
+    }
+  }
 }
 // a low lamp on a post, knee to waist high (the grounds' lamps, not the street's)
 function bollard(K, x, z, h = 0.9) {
@@ -347,9 +458,11 @@ export function shopApproach({ ex = null, ez = null, ok = () => true, shop = [],
   sh.moveTo(-FX, -Z0); sh.lineTo(FX, -Z0); sh.lineTo(FX, -(Z1 - CR)); sh.quadraticCurveTo(FX, -Z1, FX - CR, -Z1);
   sh.lineTo(-FX + CR, -Z1); sh.quadraticCurveTo(-FX, -Z1, -FX, -(Z1 - CR)); sh.closePath();
   const outline = sh.getSpacedPoints(80).map(p => [p.x, -p.y]);
-  lay(K, new THREE.ShapeGeometry(sh, 12), M.cobble, 0, 0.01, 0, 1.1);
-  // the lane: from the forecourt's edge nearest the road's end, out to just under it
+  cobbleSlab(K, sh, 12);
+  // the lane: from the forecourt's edge nearest the road's end, out to just under it (mapped
+  // like the forecourt, so where it laps onto it the stones are the same ones: no seam)
   let lane = null;
+  const LH = 0.98;
   if (ex != null) {
     let best = outline[0];
     for (const p of outline) if (p[1] > Z0 + 0.4 && Math.hypot(p[0] - ex, p[1] - ez) < Math.hypot(best[0] - ex, best[1] - ez)) best = p;
@@ -358,11 +471,21 @@ export function shopApproach({ ex = null, ez = null, ok = () => true, shop = [],
       const dx = (ex - best[0]) / L, dz = (ez - best[1]) / L;
       const a = [best[0] - dx * 0.8, best[1] - dz * 0.8], e = [ex + dx * 0.5, ez + dz * 0.5];
       const pts = [a, [best[0] + dx * L * 0.35, best[1] + dz * L * 0.35], e];
-      strip(K, pts, 1.05, M.edge, 0.002, 1.1);
-      strip(K, pts, 0.98, M.cobble, 0.01, 1.1);
-      lane = { ax: best[0], az: best[1], ex, ez };
+      cobbleLane(K, pts, LH);
+      lane = { ax: best[0], az: best[1], ex, ez, dx, dz };
+      // a kerb down each side, from where it leaves the forecourt to where the road begins
+      for (const s of [-1, 1]) {
+        const side = [];
+        for (let t = 0; t <= L + 0.8; t += 0.1) side.push([a[0] + dx * t - dz * (LH + 0.02) * s, a[1] + dz * t + dx * (LH + 0.02) * s]);
+        kerbRun(K, side, { seed: seed * 3 + s, skip: (x, z) => (Math.abs(x) < FX + 0.1 && z < Z1 + 0.1) || (x - ex) * dx + (z - ez) * dz > -0.05 });
+      }
     }
   }
+  const nearLane = (x, z, r) => {
+    if (!lane) return false;
+    const qx = lane.ex - lane.ax, qz = lane.ez - lane.az, t = Math.max(0, Math.min(1, ((x - lane.ax) * qx + (z - lane.az) * qz) / (qx * qx + qz * qz)));
+    return Math.hypot(x - lane.ax - qx * t, z - lane.az - qz * t) < r;
+  };
   // paving test (forecourt or lane), for keeping plants off it
   function inPaving(x, z, r) {
     if (Math.abs(x) < FX + r && z > Z0 - r && z < Z1 + r) return true;
@@ -372,13 +495,9 @@ export function shopApproach({ ex = null, ez = null, ok = () => true, shop = [],
     }
     return false;
   }
-  // edging stones round the forecourt's outer edge (not along the shopfront, not across the lane)
-  for (let i = 0; i < outline.length; i += 2) {
-    const [x, z] = outline[i], [nx, nz] = outline[(i + 1) % outline.length];
-    if (z < Z0 + 0.15) continue;
-    if (lane && Math.hypot(x - lane.ax, z - lane.az) < 1.15) continue;
-    K.put(rbox(0.28, 0.12, 0.16, 0.04, 1), M.stoneD, x, 0.03, z, [0, Math.atan2(nx - x, nz - z), 0]);
-  }
+  // a kerb of long dressed stones round the forecourt's outer edge (not along the shopfront,
+  // not across the lane's mouth)
+  kerbRun(K, outline, { closed: true, seed, skip: (x, z) => z < Z0 + 0.15 || nearLane(x, z, LH + 0.08) });
   // planters at the forecourt's back corners, a lamp and a bench on it
   const planter = (x, z) => { trough(K, x, z, R, { front: [0, 1] }); take(x, z, 0.4); };
   for (const s of [-1, 1]) for (const [x, z] of [[s * 3.05, 2.85], [s * 2.95, 4.35]]) if (clear(x, z, 0.4, { onPlaza: true })) { planter(x, z); break; }
@@ -439,19 +558,14 @@ export const ROW = {
 export function makersRow({ ex = null, ez = null, ok = () => true, seed = 3, bs = 1 } = {}) {
   const K = kit(), M = mats(), R = rng(seed * 104729);
   const H = ROW.half, Z0 = ROW.z0, Z1 = ROW.z1, CR = 1.0, [P0, P1] = ROW.pave, PH = ROW.paveHalf;
-  const kerbStone = (x, z, a) => K.put(rbox(0.28, 0.12, 0.16, 0.04, 1), M.stoneD, x, 0.03, z, [0, a, 0]);
-  const kerbRun = (x0, z0, x1, z1) => {              // edging stones set end to end along a straight run
-    const L = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(L / 0.3)), a = Math.atan2(x1 - x0, z1 - z0);
-    for (let i = 0; i < n; i++) { const t = (i + 0.5) / n; kerbStone(x0 + (x1 - x0) * t, z0 + (z1 - z0) * t, a); }
-  };
+  const kerb = (x0, z0, x1, z1, sd = 1) => kerbRun(K, [[x0, z0], [x1, z1]], { seed: seed * 11 + sd });   // a straight run of the shared kerb
 
   // ── the court: one cobbled slab, its road-side corners rounded ──
-  // (the cobble material/texture is untouched here: its look is reworked separately)
   const sh = new THREE.Shape();                    // drawn in (x, -z): lay() turns it flat
   sh.moveTo(-H, -Z0); sh.lineTo(H, -Z0); sh.lineTo(H, -(Z1 - CR)); sh.quadraticCurveTo(H, -Z1, H - CR, -Z1);
   sh.lineTo(-H + CR, -Z1); sh.quadraticCurveTo(-H, -Z1, -H, -(Z1 - CR)); sh.closePath();
   const outline = sh.getSpacedPoints(96).map(p => [p.x, -p.y]);
-  lay(K, new THREE.ShapeGeometry(sh, 12), M.cobble, 0, 0.01, 0, 1.1);
+  cobbleSlab(K, sh, 12);
 
   // ── the pavement: flagstones along both shopfronts, widening back into the pocket between the
   // shops (one shape, so no two pavings overlap and fight). It meets the court at the kerb line ──
@@ -481,15 +595,14 @@ export function makersRow({ ex = null, ez = null, ok = () => true, seed = 3, bs 
 
   // ── kerbs and edging ──
   // one kerb line the whole width between the pavement and the court/lawns
-  kerbRun(-PH, Z0, PH, Z0);
+  kerb(-PH - 0.1, Z0, PH + 0.1, Z0, 1);
   // the pavement's outer ends, and the pocket's back edge
-  for (const s of [-1, 1]) kerbRun(s * PH, P0, s * PH, Z0);
-  kerbRun(-GAP, PB, GAP, PB);
+  for (const s of [-1, 1]) kerb(s * PH, P0, s * PH, Z0 - 0.1, 2 + s);
+  kerb(-GAP, PB, GAP, PB, 4);
   // round the court's sides and front, stopping either side of the road's mouth. The spur
   // (town.js) runs right up to the front edge and ROW_MOUTH_LAP under it, so the entrance is the
   // road itself; the edging stops either side of the carriageway + its kerb bands, and a stone
-  // set along the edge at each kerb's end turns the road's kerbs into it (unchanged from the
-  // road→cobble join fix)
+  // return, set along the road, turns the road's kerbs into it
   let mouth = null, lane = null;
   if (ex != null) {
     let best = outline[0];
@@ -499,20 +612,21 @@ export function makersRow({ ex = null, ez = null, ok = () => true, seed = 3, bs 
     else {                                       // (fallback: the spur couldn't reach — a lane out to it, as before)
       const dx = (ex - best[0]) / L, dz = (ez - best[1]) / L;
       const pts = [[best[0] - dx * 0.8, best[1] - dz * 0.8], [best[0] + dx * L * 0.4, best[1] + dz * L * 0.4], [ex + dx * 0.5, ez + dz * 0.5]];
-      strip(K, pts, 1.42, M.edge, 0.002, 1.1);
-      strip(K, pts, 1.35, M.cobble, 0.01, 1.1);
+      cobbleLane(K, pts, 1.35);
       lane = { ax: best[0], az: best[1] };
+      for (const s of [-1, 1]) {
+        const side = [];
+        for (let t = -0.8; t <= L; t += 0.1) side.push([best[0] + dx * t - dz * 1.37 * s, best[1] + dz * t + dx * 1.37 * s]);
+        kerbRun(K, side, { seed: seed * 5 + s, skip: (x, z) => (Math.abs(x) < H + 0.1 && z < Z1 + 0.1) || (x - ex) * dx + (z - ez) * dz > -0.05 });
+      }
     }
   }
-  const MH = ROW_ROAD_HALF + 0.28 + 0.08;        // the road's carriageway + kerb band (world.js buildRoad), + half a stone (set crosswise, as round the lot)
-  for (let i = 0; i < outline.length; i += 2) {
-    const [x, z] = outline[i], [nx, nz] = outline[(i + 1) % outline.length];
-    if (z < Z0 + 0.2) continue;                     // (the kerb line above does the court's back edge)
-    if (lane && Math.hypot(x - lane.ax, z - lane.az) < 1.5) continue;
-    if (mouth && Math.hypot(x - mouth.x, z - mouth.z) < MH + 0.3) continue;
-    kerbStone(x, z, Math.atan2(nx - x, nz - z));
-  }
-  if (mouth) for (const s of [-1, 1]) kerbStone(mouth.x + s * MH, mouth.z, Math.PI / 2);
+  const MK = ROW_ROAD_HALF + 0.28;               // the road's carriageway + kerb band (world.js buildRoad)
+  const MH = MK + 0.08;                          // (+ half a return stone: where the hedge starts from)
+  kerbRun(K, outline, { closed: true, seed, skip: (x, z) => z < Z0 + 0.2   // (the kerb line above does the court's back edge)
+    || (lane && Math.hypot(x - lane.ax, z - lane.az) < 1.45)
+    || (mouth && z > Z1 - 0.6 && Math.abs(x - mouth.x) < MK + 0.2) });
+  if (mouth) for (const s of [-1, 1]) K.box(0.2, 0.1, 0.42, M.stone, mouth.x + s * (MK + 0.1), 0.025, mouth.z + 0.02, 0.03);
 
   // ── hedges: low clipped box closing the court's sides (behind the wheel stops) and its front
   // either side of the mouth, each solid (feet every half metre) ──
