@@ -962,14 +962,15 @@ export function townBlock(o = {}) {
 }
 
 // ── Maple Plaza: a one-storey strip mall on its own parking lot ─────────────
+const MALL_UNITS = [
+  { name: 'Suds Laundry', kind: 'laundry', col: 0x93abc0, sign: '#3f5872', w: 2.2 },
+  { name: 'Slice of Heaven', kind: 'pizza', col: 0xe8604c, sign: '#b84a36', w: 2.2 },
+  { name: 'Holey Donuts', kind: 'donuts', col: 0xf6c6d0, sign: '#d0607a', w: 2.6, tall: true },
+  { name: 'Rewind Video', kind: 'video', col: 0x8f7ae8, sign: '#5a48b0', w: 2.2 },
+];
 export function stripMall() {
   const K = kit();
-  const units = [
-    { name: 'Suds Laundry', kind: 'laundry', col: 0x93abc0, sign: '#3f5872', w: 2.2 },
-    { name: 'Slice of Heaven', kind: 'pizza', col: 0xe8604c, sign: '#b84a36', w: 2.2 },
-    { name: 'Holey Donuts', kind: 'donuts', col: 0xf6c6d0, sign: '#d0607a', w: 2.6, tall: true },
-    { name: 'Rewind Video', kind: 'video', col: 0x8f7ae8, sign: '#5a48b0', w: 2.2 },
-  ];
+  const units = MALL_UNITS;
   const W = units.reduce((a, u) => a + u.w, 0), D = 3.0, H = 2.1;
   const wall = paint(0xf1e4c8), trim = paint(0xfffaf0), dk = DARK(), metal = paint(0x6f6a78);
   const tower = 0.8;
@@ -1050,23 +1051,32 @@ export function stripMall() {
     K.put(lathe([[0.001, 0], [0.06, 0], [0.04, 0.35], [0.001, 0.36]], 8), paint(PAL.bark), ix, 0.1, lotZ + LD / 2);
     lampPost(K, ix + s * 0.0, lotZ + LD / 2 - 0.6, 2.4);
   }
-  // the pylon sign by the road: MAPLE PLAZA over the tenant boards
-  const py = K.sub(-(span / 2 - 0.1), 0, lotZ + LD + 0.3);
-  for (const sx of [-0.32, 0.32]) py.box(0.14, 2.6, 0.14, paint(0xd58b63), sx, 1.3, 0, 0.03);
-  py.box(1.1, 0.5, 0.22, paint(0x3e6b52), 0, 2.55, 0, 0.05);
-  py.flat(0.95, 0.38, signMat('Maple Plaza', { bg: '#3e6b52', fg: '#f6eedb' }), 0, 2.55, 0.112);
-  units.forEach((u, i) => { py.box(0.9, 0.2, 0.1, paint(0xf6eedb), 0, 2.08 - i * 0.24, 0, 0.02); py.flat(0.82, 0.16, signMat(u.name, { bg: '#f6eedb', fg: u.sign, border: false, w: 384, h: 72 }), 0, 2.08 - i * 0.24, 0.052); });
-  const leaf = new THREE.Shape(); leaf.moveTo(0, -0.2); leaf.quadraticCurveTo(0.25, 0.0, 0.0, 0.25); leaf.quadraticCurveTo(-0.25, 0.0, 0, -0.2);
-  py.put(extrude(leaf, 0.05, 0.015), paint(0xe8604c), 0, 3.05, -0.03);
+  // (the pylon sign is mallPylon(), stood up on its own on the verge by the drive: laid onto
+  // the ground vertex by vertex with the rest of the mall, a tall post leant and sheared)
   bench(K, -W * 0.18, 0.5, 0, PAL.bark, 0.08); bench(K, W * 0.3, 0.5, 0, PAL.bark, 0.08);
   const half = W / 2 + tower;
   K.g.userData.floor = (x, z) => (z > -0.05 && z < 1.55 && Math.abs(x) < half) ? 0.08
     : (z >= 1.55 && z < lotEnd && Math.abs(x) < lotHalf && Math.abs(x) + z < lotHalf + lotEnd - CUT) ? 0.05 : null;
   // for the plaza's life (js/plaza.js): the shop doors, the bays, the aisle
   let ux = -W / 2;
-  K.g.userData.mall = { bays, aisleZ: lotZ + LD - 0.75, walkZ: 1.05, lotEnd, lotHalf,
+  K.g.userData.mall = { bays, aisleZ: lotZ + LD - 0.75, walkZ: 1.05, lotEnd, lotHalf, pylonAt: [-3.4, lotEnd + 0.85],
     doors: units.map(u => { const d = { name: u.name, x: ux + u.w / 2 + u.w * 0.25, z: 0.12 }; ux += u.w; return d; }) };
   return K.g;
+}
+
+// Maple Plaza's pylon sign: MAPLE PLAZA over the tenant boards, a leaf on top. Its own little
+// object, origin at the foot between its posts, facing +z: town.js stands it upright on the
+// verge beside the drive (placeOnPlanet with upright: true), clear of the kerbs.
+export function mallPylon() {
+  const py = kit();
+  for (const sx of [-0.32, 0.32]) { py.box(0.14, 2.6, 0.14, paint(0xd58b63), sx, 1.3, 0, 0.03); py.foot(sx, 0, 0.12); }
+  py.foot(0, 0, 0.12);
+  py.box(1.1, 0.5, 0.22, paint(0x3e6b52), 0, 2.55, 0, 0.05);
+  py.flat(0.95, 0.38, signMat('Maple Plaza', { bg: '#3e6b52', fg: '#f6eedb' }), 0, 2.55, 0.112);
+  MALL_UNITS.forEach((u, i) => { py.box(0.9, 0.2, 0.1, paint(0xf6eedb), 0, 2.08 - i * 0.24, 0, 0.02); py.flat(0.82, 0.16, signMat(u.name, { bg: '#f6eedb', fg: u.sign, border: false, w: 384, h: 72 }), 0, 2.08 - i * 0.24, 0.052); });
+  const leaf = new THREE.Shape(); leaf.moveTo(0, -0.2); leaf.quadraticCurveTo(0.25, 0.0, 0.0, 0.25); leaf.quadraticCurveTo(-0.25, 0.0, 0, -0.2);
+  py.put(extrude(leaf, 0.05, 0.015), paint(0xe8604c), 0, 3.05, -0.03);
+  return py.g;
 }
 
 // Maple Plaza's drive: from the lot's front edge (z = lotEnd, in the mall's frame) out to the
@@ -1528,13 +1538,15 @@ function conform(g, sink, groundAt = radiusAt) {
 // batched with its neighbours) inked; returns the placed group
 // (drawn: lay it onto the planet mesh as drawn rather than the exact terrain — landscaping, so
 // paving and planting never hover where the ground curves between the mesh's vertices)
-export function placeOnPlanet(raw, d, yaw, { weight = 'mid', sink = 0.04, inked = true, drawn = false } = {}) {
+export function placeOnPlanet(raw, d, yaw, { weight = 'mid', sink = 0.04, inked = true, drawn = false, upright = false } = {}) {
   // its plants (trees, bushes, planters) are checked where they'll stand: none on a road or rail
   settle(raw, d, 0.25, sink, yaw); placeOnPlanet.pruned = (placeOnPlanet.pruned || 0) + pruneDeco(raw);
   const g = bake(raw);
-  settle(g, d, 0.25, sink, yaw);
-  conform(g, sink, drawn ? drawnGroundAt : radiusAt);
-  g.userData.conform = sink;                   // floors on it read heights above the terrain
+  // (upright: a small tall thing — a sign, a post — stands plumb on the lowest ground under its
+  // feet instead; laid on vertex by vertex, its top would lean with the slope and the curve)
+  settle(g, d, upright ? 0.45 : 0.25, sink, yaw);
+  if (!upright) conform(g, sink, drawn ? drawnGroundAt : radiusAt);
+  if (!upright) g.userData.conform = sink;     // floors on it read heights above the terrain
   // (its hulls merge into one draw — unless parts of it are shown/hidden on their own: the
   // train's roofs lift off while you're inside)
   return inked ? ink(g, weight, { merge: !g.userData.roofMats }) : g;
