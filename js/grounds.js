@@ -402,6 +402,8 @@ export function shopApproach({ ex = null, ez = null, ok = () => true, shop = [],
 // front; a lane out to where the spur stops (ex, ez). userData.row.bays tells plaza.js
 // where to park cars ──
 export const ROW_X = 6.0;          // Behavior Search's ramp and drop rig stand 1.7 out from its walls: room for them in the gap
+export const ROW_MOUTH_LAP = 0.08;   // the row's spur ends this far in under the car park's front edge (no gap, no seam)
+export const ROW_ROAD_HALF = 0.85;   // that spur's carriageway half-width (town.js spur(): buildRoad half)
 export const ROW = { half: 9.4, apron: [2.3, 4.25], bays: [4.25, 7.55], aisle: [7.55, 10.7] };
 export function makersRow({ ex = null, ez = null, ok = () => true, seed = 3 } = {}) {
   const K = kit(), M = mats(), R = rng(seed * 104729);
@@ -435,13 +437,18 @@ export function makersRow({ ex = null, ez = null, ok = () => true, seed = 3 } = 
     K.foot(bx, bz, 0.66);
   }
   bollard(K, GX, GZ, 1.25);                                        // a lamp at the cross's heart
-  // kerb stones round the lot's outer edge (not along the shopfronts, not across the lane)
-  let lane = null;
+  // kerb stones round the lot's outer edge (not along the shopfronts, not across the road's mouth)
+  // The spur (town.js) now runs right up to the lot's front edge and ROW_MOUTH_LAP under it, so
+  // the entrance is the road itself: no separate cobble tongue (it was wider than the road, off
+  // its line, and z-fought the slab). The edging stops either side of the carriageway + its kerb
+  // bands, and a stone set along the edge at each kerb's end turns the road's kerbs into it.
+  let mouth = null, lane = null;
   if (ex != null) {
     let best = outline[0];
     for (const p of outline) if (p[1] > Z0 + 1 && Math.hypot(p[0] - ex, p[1] - ez) < Math.hypot(best[0] - ex, best[1] - ez)) best = p;
     const L = Math.hypot(ex - best[0], ez - best[1]);
-    if (L > 0.5) {
+    if (L < ROW_MOUTH_LAP + 0.4) mouth = { x: ex, z: best[1] };
+    else {                                       // (fallback: the spur couldn't reach — a lane out to it, as before)
       const dx = (ex - best[0]) / L, dz = (ez - best[1]) / L;
       const pts = [[best[0] - dx * 0.8, best[1] - dz * 0.8], [best[0] + dx * L * 0.4, best[1] + dz * L * 0.4], [ex + dx * 0.5, ez + dz * 0.5]];
       strip(K, pts, 1.42, M.edge, 0.002, 1.1);
@@ -449,12 +456,15 @@ export function makersRow({ ex = null, ez = null, ok = () => true, seed = 3 } = 
       lane = { ax: best[0], az: best[1] };
     }
   }
+  const MH = ROW_ROAD_HALF + 0.28 + 0.08;        // the road's carriageway + kerb band (world.js buildRoad), + half a stone (set crosswise, as round the lot)
   for (let i = 0; i < outline.length; i += 2) {
     const [x, z] = outline[i], [nx, nz] = outline[(i + 1) % outline.length];
     if (z < Z0 + 0.15) continue;
     if (lane && Math.hypot(x - lane.ax, z - lane.az) < 1.5) continue;
+    if (mouth && Math.hypot(x - mouth.x, z - mouth.z) < MH + 0.3) continue;
     K.put(rbox(0.28, 0.12, 0.16, 0.04, 1), M.stoneD, x, 0.03, z, [0, Math.atan2(nx - x, nz - z), 0]);
   }
+  if (mouth) for (const s of [-1, 1]) K.put(rbox(0.28, 0.12, 0.16, 0.04, 1), M.stoneD, mouth.x + s * MH, 0.03, mouth.z, [0, Math.PI / 2, 0]);
   // the apron: lamps between the shops and at its ends, planters, a bench in the gap
   for (const x of [-H + 0.35, H - 0.35]) bollard(K, x, Z0 + 0.5, 1.2);
   for (const x of [-1.6, 1.6]) {

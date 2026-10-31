@@ -12,7 +12,7 @@ import { buildMuseum } from '../museum.js?v=12';
 import { planHarbour, buildHarbour } from './harbour.js';
 import { MAIN_STREET, buildShop, stripMall, mallDrive, mallPylon, station, townBlock, capeFarSide, placeOnPlanet, batchPlaced, bookLibrary, projectShop, isProjectShop, STATION_TRACK, parkGarden, shopLot, SHOP_LOT } from './buildings.js';
 import { parkedTrain } from './train.js';
-import { museumGrounds, shopApproach, APPROACH_STOP, makersRow, ROW_X } from './grounds.js';
+import { museumGrounds, shopApproach, APPROACH_STOP, makersRow, ROW_X, ROW, ROW_MOUTH_LAP } from './grounds.js';
 import { growPlants } from './plants.js';
 import { railLoop, buildRailway, onRail } from './rail.js';
 import { planNorth, buildNorth } from './north.js';
@@ -82,6 +82,23 @@ function resolveRow() {
   ROWP = { hub: best.hub, L, x: { 'borrowed-eyes': eyesX, behaviors: -eyesX } };
   PDIR['borrowed-eyes'] = L(eyesX, 0); PDIR.behaviors = L(-eyesX, 0);
   return ROWP;
+}
+
+// the row's car park as it is placed (makersRow, below): hub, yaw, and exact conversions between
+// a world direction and the row's own (x, z) — the lot is laid on the ground along its OWN up
+// (placeOnPlanet's conform), so frame()'s tangent-plane units and a radius-R point run through
+// the inverse matrix are both a few % off at the lot's edge (that put the spur's end ~0.4 out)
+function rowPlace() {
+  const RW = resolveRow(), hub = RW.L(0, 0), yaw = yawToFace(hub, RW.L(0, 40)), probe = new THREE.Object3D();
+  settle(probe, hub, 0, 0, yaw); probe.updateMatrixWorld(true);
+  const inv = probe.matrixWorld.clone().invert();
+  const toLocal = (dir) => dir.clone().normalize().multiplyScalar(radiusAt(dir)).applyMatrix4(inv);
+  const toDir = (x, z) => {                        // the ground straight below local (x, z), as a direction
+    const v = new THREE.Vector3(x, 0, z);
+    for (let it = 0; it < 3; it++) { const w = probe.localToWorld(v.clone()).normalize(); v.y = toLocal(w).y; }
+    return probe.localToWorld(v).normalize();
+  };
+  return { hub, yaw, probe, inv, toLocal, toDir };
 }
 
 // ── the museum's sculpture garden (landscaping) sits on its OWN level terrace: behind the museum
@@ -255,7 +272,10 @@ export function buildTown(scene) {
     const pts = spur(PDIR[p.key], p.style === 'library' ? 4.6 : isProjectShop(p.style) ? APPROACH_STOP : 3.7, 'lm:' + p.key);
     if (pts) spurEnds[p.key] = pts[pts.length - 1].clone();
   }
-  { const RW = resolveRow(), pts = spur(RW.L(0, 6.0), 6.1, 'lm:row');   // ends just past the car park's aisle
+  // Makers' Row: the spur runs right up to the car park's front edge (ROW.aisle[1]) and just
+  // under it, centred on the lot — an entrance, not a road stopping 1.2 short with a wider,
+  // offset cobble tongue patched across the gap (makersRow() builds the mouth to this end)
+  { const pts = spur(rowPlace().toDir(0, ROW.aisle[1] - ROW_MOUTH_LAP), 0, 'lm:row');
     if (pts) spurEnds.row = pts[pts.length - 1].clone(); }
   for (const [k, s] of Object.entries(PLAN.sites))
     // (the harbour's road runs on onto the quay's paving: it stopped half a metre short, on the grass)
@@ -509,11 +529,9 @@ export function buildTown(scene) {
   // ── landscaping (grounds.js): Makers' Row's shared cobbled car park, garden square, apron,
   // planting; plaza.js parks cars in its bays ──
   {
-    const RW = resolveRow(), hub = RW.L(0, 0), yaw = yawToFace(hub, RW.L(0, 40));
-    const solids = out.colliders.slice(), probe = new THREE.Object3D();
-    settle(probe, hub, 0, 0, yaw); probe.updateMatrixWorld(true);
-    const inv = probe.matrixWorld.clone().invert(), W = (x, z) => probe.localToWorld(new THREE.Vector3(x, 0, z)).normalize();
-    const e = spurEnds.row ? spurEnds.row.clone().multiplyScalar(R).applyMatrix4(inv) : null;
+    const { hub, yaw, probe, toLocal } = rowPlace(), solids = out.colliders.slice();
+    const W = (x, z) => probe.localToWorld(new THREE.Vector3(x, 0, z)).normalize();
+    const e = spurEnds.row ? toLocal(spurEnds.row) : null;          // (exact: the mouth is built to it)
     const ok = (x, z, r) => { const w = W(x, z); return !isWater(w, 0.2) && !onRoad(w, r + 0.35) && !solids.some(c => arc(w, c.dir) < c.r + r); };
     const g = add(placeOnPlanet(makersRow({ ex: e?.x ?? null, ez: e?.z ?? null, ok }), hub, yaw, { weight: 'fine', sink: 0, drawn: true }));
     feet(g);
