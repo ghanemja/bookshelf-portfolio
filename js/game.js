@@ -149,8 +149,14 @@ export function createGame({ scene, camera, town, player, atmosphere, renderer }
     navigator.vibrate?.([60, 80, 60]); audio.buzz(2);
     phone.open('messages');
     phone.setTyping(true);
-    setTimeout(() => { phone.setTyping(false); phone.push('Editor', 'You\'re at the museum? Good. All 45 paintings went overnight. The police have nothing.'); phone.setTyping(true); }, 900);
+    G.phoneUp = true;
+    // (put the phone away before you've answered and the case simply begins: the texts
+    // still land, as unread, but nothing is left waiting on a reply you can't see —
+    // that left the game stuck between the phone and play, walking with no E prompts)
+    const opening = () => G.state === 'phone';
+    setTimeout(() => { phone.setTyping(false); phone.push('Editor', 'You\'re at the museum? Good. All 45 paintings went overnight. The police have nothing.'); if (opening()) phone.setTyping(true); }, 900);
     setTimeout(() => { phone.setTyping(false); phone.push('Editor', 'You know those canvases better than anyone. Find out who — and where they\'re going.');
+      if (!opening()) return;
       // three ways to answer; the editor answers back, then you're off
       const BACK = ['Good. Start with Director Vivi — she\'s on the museum steps.',
         'That\'s why I called you. Vivi\'s on the steps — start there.',
@@ -159,11 +165,13 @@ export function createGame({ scene, camera, town, player, atmosphere, renderer }
         if (!phone.state.open) { beginPlay(); return; }
         phone.setTyping(true);
         setTimeout(() => { phone.setTyping(false); phone.push('Editor', BACK[i] ?? BACK[0]); }, 1000);
-        setTimeout(() => { phone.close(); beginPlay(); }, 3400);         // time to read the answer
+        setTimeout(() => { if (G.state === 'phone') phone.close(); beginPlay(); }, 3400);         // time to read the answer
       }); }, 2400);
   }
   function beginPlay() {
+    if (G.state !== 'phone') return;               // once only (the reply and the put-away can both get here)
     G.state = 'play';
+    if (!phone.state.open) { phone.setReply(null); phone.setTyping(false); }   // put away unanswered: no reply left hanging
     audio.setScene('day');
     // start the game looking at the museum, whatever happened over the intro and the texts
     Object.assign(player.st, { camYaw: 0, camPitch: 0, recenter: 0 });
@@ -203,8 +211,8 @@ export function createGame({ scene, camera, town, player, atmosphere, renderer }
       }
       const dj = arc(here, jeepDir);
       if (dj < 2.6 && (!nearest || dj < best)) { best = dj; nearest = { kind: 'jeep' }; }
-      const db = arc(here, boatDir);
-      if (db < 2.4 && (!nearest || db < best)) { best = db; nearest = { kind: 'boat' }; }
+      const db = arc(here, boatDir);                  // (it lies ~1.9 off the pier's middle: 2.4 only caught her right at its beam)
+      if (db < 3.1 && (!nearest || db < best)) { best = db; nearest = { kind: 'boat' }; }
       if (G.act === 3 && cape.console && arc(here, cape.consoleDir) < 1.9) nearest = { kind: 'console' };
       for (const lm of town.landmarks) { if (lm.decor) continue; const d = arc(here, lm.dir); if (d < 3.6 && d < best) { best = d; nearest = { kind: 'project', lm }; } }
       for (const dr of doors) { const d = arc(here, dr.dir); if (d < dr.r && d < best) { best = d; nearest = { kind: 'door', dr }; } }
@@ -984,6 +992,7 @@ export function createGame({ scene, camera, town, player, atmosphere, renderer }
     tickCape(dt, t);
     phone.tick(dt);
     if (G.state === 'play') bumps.update(dt);
+    if (G.state === 'phone' && G.phoneUp && !phone.state.open) beginPlay();   // the opening phone put away unanswered
     if (G.state === 'epilogue') { tickEpilogue(dt); return true; }
     if (G.state === 'cold') {
       const e = performance.now() / 1000 - G.t0;
