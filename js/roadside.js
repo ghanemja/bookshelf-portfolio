@@ -99,15 +99,23 @@ export function dressRoads(scene, { add, solid, spurs, boulevard, townC, ringR, 
     }
     if (G.children.length) { add(mergeStatic(G)); }
   }
-  // ── a lamp at the corner of every road that leaves the boulevard ──
+  // ── a lamp at the corner of every road that leaves the boulevard: on the verge 0.45 out from the
+  // spur's carriageway edge (it stood 0.6 out, on the grass), clear of the boulevard's edge too ──
+  const kerbGap = (d) => { let m = 1e9; for (const rd of ROADS) for (const q of rd.pts) { const e = arc(d, q) - rd.half; if (e < m) m = e; } return m; };
   for (const sp of spurs) {
     const P = sp.pts; if (!P || P.length < 4) continue;
     const a = P[0], b = P[3], tang = b.clone().sub(a).normalize(), lat = new THREE.Vector3().crossVectors(a, tang).normalize();
-    for (const s of [1, -1]) {
-      const v = a.clone().multiplyScalar(R).addScaledVector(tang, 2.4).addScaledVector(lat, s * 1.45).normalize();
-      if (zoneHit(v, 0.3) || onRoad(v, 0.3) || isWater(v) || onRail(v, 0.6)) continue;
-      add(settle(lamp(), v, 0.2, 0.02)); solid(v, 0.15); out.lamps++;
-      break;                                                  // one corner is enough
+    const half = ROADS.find(r => r.pts === P)?.half ?? 0.85;
+    let done = false;
+    for (const along of [2.4, 2.9, 3.4]) {
+      for (const s of [1, -1]) {
+        const v = a.clone().multiplyScalar(R).addScaledVector(tang, along).addScaledVector(lat, s * (half + 0.45)).normalize();
+        const g = kerbGap(v);
+        if (g < 0.37 || zoneHit(v, 0.3) || isWater(v) || onRail(v, 0.6) || colliders.some(c => !c.soft && arc(v, c.dir) < c.r + 0.3)) continue;
+        add(settle(lamp(), v, 0.2, 0.02)); solid(v, 0.15); out.lamps++;
+        done = true; break;                                     // one corner is enough
+      }
+      if (done) break;
     }
   }
   // ── the Summit Overlook: a turning circle at the road's end, and something to look at ──

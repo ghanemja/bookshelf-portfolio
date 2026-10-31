@@ -113,7 +113,7 @@ function bollard(K, x, z, h = 0.9) {
   K.put(lathe([[0.001, 0], [0.09, 0], [0.09, 0.05], [0.05, 0.1], [0.04, h - 0.08], [0.07, h - 0.04], [0.001, h]], 10), M.dark, x, 0, z);
   K.put(lathe([[0.001, 0], [0.07, 0.01], [0.09, 0.1], [0.06, 0.2], [0.001, 0.22]], 12), M.glow, x, h, z);
   K.put(lathe([[0.001, 0], [0.11, 0], [0.03, 0.07], [0.001, 0.1]], 12), M.dark, x, h + 0.2, z);
-  K.foot(x, z, 0.1);
+  K.foot(x, z, 0.1).userData.lampMark = 'low';
 }
 function gardenBench(K, x, z, ry) {
   const M = mats(), s = K.sub(x, 0, z, ry);
