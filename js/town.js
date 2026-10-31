@@ -160,7 +160,14 @@ export function planTown() {
   }
   // Makers' Row: its shops and car park on one true plane (at the ground's own height there), so
   // nothing on it floats or tilts
-  { const c = RW.L(0, 4.2); reserve(c, 10.6, 'lm:row'); flatten(c, 11.4, Math.max(0.45, surfH(c)), { plane: c, blend: 8 }); }
+  // (sized to the redesigned court, grounds.js ROW.site: it used to reserve r 10.6 and level r 11.4
+  // easing over 8 round a car park twice the size. The plane must still take both shops and
+  // Behavior Search's outer ramp, so it centres a little nearer the shops. lawn: the site stands
+  // on a hilltop, and the plane rising off the sphere put the whole yard in the ground's rock/earth
+  // colour band — it is painted grass instead, see world.js inLawn)
+  { const S = ROW.site, c = RW.L(0, S.cz), cl = RW.L(0, S.levelZ);
+    reserve(c, S.reserve, 'lm:row');
+    flatten(cl, S.level, Math.max(0.45, surfH(cl)), { plane: cl, blend: S.blend, lawn: true }); }
   reserve(llv(PLAN.park.at), PLAN.park.r, 'park'); flatten(llv(PLAN.park.at), PLAN.park.r + 1, undefined, { blend: 6 });
   planMuseumGarden();                                     // last: it keeps clear of everything reserved above
 }
@@ -272,10 +279,10 @@ export function buildTown(scene) {
     const pts = spur(PDIR[p.key], p.style === 'library' ? 4.6 : isProjectShop(p.style) ? APPROACH_STOP : 3.7, 'lm:' + p.key);
     if (pts) spurEnds[p.key] = pts[pts.length - 1].clone();
   }
-  // Makers' Row: the spur runs right up to the car park's front edge (ROW.aisle[1]) and just
+  // Makers' Row: the spur runs right up to the parking court's front edge (ROW.z1) and just
   // under it, centred on the lot — an entrance, not a road stopping 1.2 short with a wider,
   // offset cobble tongue patched across the gap (makersRow() builds the mouth to this end)
-  { const pts = spur(rowPlace().toDir(0, ROW.aisle[1] - ROW_MOUTH_LAP), 0, 'lm:row');
+  { const pts = spur(rowPlace().toDir(0, ROW.z1 - ROW_MOUTH_LAP), 0, 'lm:row');
     if (pts) spurEnds.row = pts[pts.length - 1].clone(); }
   for (const [k, s] of Object.entries(PLAN.sites))
     // (the harbour's road runs on onto the quay's paving: it stopped half a metre short, on the grass)
@@ -582,14 +589,16 @@ export function buildTown(scene) {
     solid(d, 2.1);
     out.landmarks.push({ ...p, dir: d, root: g });
   }
-  // ── landscaping (grounds.js): Makers' Row's shared cobbled car park, garden square, apron,
-  // planting; plaza.js parks cars in its bays ──
+  // ── landscaping (grounds.js): Makers' Row's shared parking court — six bays off a central
+  // aisle on the spur's axis, a pavement past both doors, the pocket between the shops, lawns,
+  // beds, hedges and kerbs; plaza.js parks cars in its bays ──
   {
     const { hub, yaw, probe, toLocal } = rowPlace(), solids = out.colliders.slice();
     const W = (x, z) => probe.localToWorld(new THREE.Vector3(x, 0, z)).normalize();
     const e = spurEnds.row ? toLocal(spurEnds.row) : null;          // (exact: the mouth is built to it)
     const ok = (x, z, r) => { const w = W(x, z); return !isWater(w, 0.2) && !onRoad(w, r + 0.35) && !solids.some(c => arc(w, c.dir) < c.r + r); };
-    const g = add(placeOnPlanet(makersRow({ ex: e?.x ?? null, ez: e?.z ?? null, ok }), hub, yaw, { weight: 'fine', sink: 0, drawn: true }));
+    const bs = Math.sign(toLocal(PDIR.behaviors).x) || 1;           // which side Behavior Search (and its drop rig) stands on
+    const g = add(placeOnPlanet(makersRow({ ex: e?.x ?? null, ez: e?.z ?? null, ok, bs }), hub, yaw, { weight: 'fine', sink: 0, drawn: true }));
     feet(g);
     growPlants(scene, g, { seed: (out.grounds?.length || 0) + 1 });   // its planting, on the ground as drawn, in the breeze
     (out.grounds ||= []).push(g);
