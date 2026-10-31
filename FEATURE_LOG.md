@@ -315,3 +315,4 @@ check · ⏳ in progress · 📦 asset staged, not wired · ❌ deferred.
 - ⏳ **Distance LOD: simpler models far away to cut triangles and memory — without breaking anything or looking worse** (2026-10-31). In progress on `wip-lod`.
 - ⏳ **Portfolio shops: press E at the door to go inside (YarnFlow, QR Compass, etc.) — right now it's hard to see in when you get there** (2026-10-31). In progress on `wip-doors`.
 - ⏳ **Lantern Park: see-through fountain water with coins on the bottom, the newspaper reader seated on the bench (not floating), cobblestone paths, better flowers** (2026-10-31). In progress on `wip-park`.
+- ⏳ **The cobblestone at Makers' Row looks ugly: patches overlap and fight, the stones look weirdly placed, the edging logs look odd** (2026-10-31). In progress on `wip-cobble`.
