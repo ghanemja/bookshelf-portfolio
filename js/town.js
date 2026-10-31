@@ -10,7 +10,7 @@ import { PAL, paint, ink, blobShadow } from './style.js';
 import { house, tree, pine, bush, lamp, bench, rnd, pick, rbox, lathe } from './props.js';
 import { buildMuseum } from '../museum.js?v=12';
 import { planHarbour, buildHarbour } from './harbour.js';
-import { MAIN_STREET, buildShop, stripMall, mallDrive, station, townBlock, capeFarSide, placeOnPlanet, batchPlaced, bookLibrary, projectShop, isProjectShop, STATION_TRACK, parkGarden, shopLot, SHOP_LOT } from './buildings.js';
+import { MAIN_STREET, buildShop, stripMall, mallDrive, mallPylon, station, townBlock, capeFarSide, placeOnPlanet, batchPlaced, bookLibrary, projectShop, isProjectShop, STATION_TRACK, parkGarden, shopLot, SHOP_LOT } from './buildings.js';
 import { parkedTrain } from './train.js';
 import { museumGrounds, shopApproach, APPROACH_STOP, makersRow, ROW_X } from './grounds.js';
 import { growPlants } from './plants.js';
@@ -399,7 +399,26 @@ export function buildTown(scene) {
         for (let k = 0; k < 18; k++) { const m = (lo + hi) / 2; if (past(x, m)) hi = m; else lo = m; }
         return hi;
       };
-      add(placeOnPlanet(mallDrive(edgeZ, lotEnd), d, yaw, { inked: false })); }
+      add(placeOnPlanet(mallDrive(edgeZ, lotEnd), d, yaw, { inked: false }));
+      // the pylon sign: on the grass between the lot, the drive and the boulevard, facing the
+      // road — stood up plumb on its own (not laid onto the ground with the mall), and moved
+      // to the nearest spot where its panel clears every kerb and the drive's dropped kerbs
+      const [px0, pz0] = g.userData.mall.pylonAt, SW = 0.6;   // half the panel, and a touch
+      const dEnd = edgeZ(0), driveHalf = (z) => 1.8 + 0.75 * Math.min(1, Math.max(0, (z - lotEnd) / (dEnd - lotEnd))) ** 2.5 + 0.15;
+      const W = (x, z) => g.localToWorld(new THREE.Vector3(x, 0, z)).normalize();
+      const clear = (x, z) => z - 0.2 > lotEnd + 0.1 && Math.abs(x) - SW > driveHalf(z + 0.2) + 0.3
+        && [-SW, 0, SW].every(dx => !onRoad(W(x + dx, z), 0.28 + 0.3))
+        && !out.colliders.some(c => !c.soft && arc(W(x, z), c.dir) < c.r + SW);
+      let best = null, bd = 1e9;
+      for (let i = -20; i <= 20; i++) for (let k = -12; k <= 12; k++) {
+        const x = px0 + i * 0.1, z = pz0 + k * 0.1, dd = Math.hypot(x - px0, z - pz0);
+        if (dd < bd && clear(x, z)) { bd = dd; best = [x, z]; }
+      }
+      if (best) {
+        const pd = W(...best), face = W(best[0], best[1] + 5);
+        const py = add(placeOnPlanet(mallPylon(), pd, yawToFace(pd, face), { upright: true }));
+        feet(py); out.mall.pylon = py; out.mall.pylonAt = best;
+      } }
     addFloor(g, g.userData.floor); feet(g);
     for (let k = -2; k <= 2; k++) solid(fC(MALL.at[0] + 1.5, MALL.at[1] + k * 2.3), 1.3);
     for (const k of [-1, 1]) solid(fC(MALL.at[0] + 1.5, MALL.at[1] + k * 5.1), 0.8);
