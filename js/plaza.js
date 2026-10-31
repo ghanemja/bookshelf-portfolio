@@ -46,21 +46,25 @@ function bag(col) {
   return ink(g, 'fine');
 }
 
-// Makers' Row's car park (grounds.js makersRow): three of its four bays taken, nose-in, the lot
-// paved so the car may drive off the spur into it
+// Makers' Row's parking court (grounds.js makersRow): six bays off a central aisle, three a side,
+// nose-in toward the hedges; three taken (a free bay each side, and one by the mouth, for the
+// player's car). The court and its mouth are paved, so the car may drive off the spur into it
+// and manoeuvre freely (not the pavement or the lawns beside it)
 function parkRow(scene, town) {
   const row = town.row; if (!row) return;
   const root = row.root; root.updateWorldMatrix(true, false);
   const L = (x, z) => root.localToWorld(new THREE.Vector3(x, 0, z)).normalize();
   { const inv = root.matrixWorld.clone().invert(), p = new THREE.Vector3(), r = root.position.length();
-    LOTS.push((d) => { p.copy(d).multiplyScalar(r).applyMatrix4(inv); return p.z > row.z0 + 1.6 && p.z < row.z1 + 1.2 && Math.abs(p.x) < row.half; }); }
-  [[0, 0xd8573f], [1, 0x6f9fc0], [3, 0xf3eee4]].forEach(([bi, col]) => {
+    LOTS.push((d) => { p.copy(d).multiplyScalar(r).applyMatrix4(inv);
+      return (p.z > row.z0 - 0.2 && p.z < row.z1 && Math.abs(p.x) < row.half) || (p.z >= row.z1 - 0.1 && p.z < row.z1 + 1.2 && Math.abs(p.x) < row.aisle + 0.3); }); }
+  // bays: [0..2] on −x, [3..5] on +x, each from the pavement end out toward the mouth
+  [[0, 0xd8573f], [2, 0x6f9fc0], [4, 0xf3eee4]].forEach(([bi, col]) => {
     const b = row.bays[bi]; if (!b) return;
     const frame = new THREE.Group(), body = buildCar({ body: col });
     frame.add(body); frame.userData.noGround = true;
-    const cz = b.stopZ + 0.12 + 1.42, d = L(b.x, cz);              // nose toward the shops, just short of the wheel stop
+    const d = L(b.x, b.z);                                          // nose (b.fx, b.fz): toward the bay's wheel stop
     frame.position.copy(d).multiplyScalar(standAt(d));
-    alignToSurface(frame, d, yawToFace(d, L(b.x, cz - 3)));
+    alignToSurface(frame, d, yawToFace(d, L(b.x + b.fx * 3, b.z + b.fz * 3)));
     scene.add(frame);
     fitToGround(body, frame);
     frame.updateWorldMatrix(true, false);
